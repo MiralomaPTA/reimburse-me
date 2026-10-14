@@ -1,0 +1,78 @@
+import { config } from "@/server/config";
+import { formatDateTime } from "@/lib/dates";
+import { formatMoney } from "@/lib/money";
+import { CHECK_DELIVERY_LABEL, totals, type RequestInput } from "@/lib/request-schema";
+
+export function signInEmail(link: string): { subject: string; text: string } {
+  return {
+    subject: "Your Miraloma PTA reimbursement sign-in link",
+    text: [
+      "Use this link to sign in to the Miraloma PTA reimbursement portal:",
+      "",
+      link,
+      "",
+      `It works for ${config.magicLinkMinutes} minutes and only on the device where you open it.`,
+      "If you didn't ask for this, you can ignore this email.",
+    ].join("\n"),
+  };
+}
+
+export interface SubmissionEmailInput {
+  requestId: string;
+  request: RequestInput;
+  requesterEmail: string;
+  submittedAt: Date;
+  sha256: string;
+  version: number;
+}
+
+function summary(input: SubmissionEmailInput): string[] {
+  const { request, requestId, requesterEmail, submittedAt, sha256 } = input;
+  const t = totals(request);
+  const lines = [
+    `Request: ${requestId}${input.version > 1 ? ` (version ${input.version})` : ""}`,
+    `From: ${request.payeeName} <${requesterEmail}>, ${request.ptaPosition}`,
+    `Submitted: ${formatDateTime(submittedAt)}`,
+    `Purpose: ${request.purpose}`,
+    `Check: ${CHECK_DELIVERY_LABEL[request.checkDelivery]}`,
+    ...(request.checkDelivery === "mail" ? [`Mail to: ${request.address}, ${request.cityZip}`] : []),
+    `Phone: ${request.phone}`,
+    "",
+    "Line items:",
+    ...request.items.map((item, i) => `  ${i + 1}. ${item.description} - ${formatMoney(item.amountCents)} (${item.receipts.length} receipt${item.receipts.length === 1 ? "" : "s"})`),
+    "",
+    `Total expense: ${formatMoney(t.totalCents)}`,
+  ];
+  if (t.donationCents > 0) lines.push(`Donated to PTA: ${formatMoney(t.donationCents)}`);
+  lines.push(`Reimbursement claimed: ${formatMoney(t.reimbursementCents)}`, "", `Signed PDF attached. SHA-256: ${sha256}`);
+  return lines;
+}
+
+export function apSubmissionEmail(input: SubmissionEmailInput): { subject: string; text: string } {
+  const t = totals(input.request);
+  return {
+    subject: `Reimbursement request ${input.requestId} - ${input.request.payeeName} - ${formatMoney(t.reimbursementCents)}`,
+    text: [
+      `A reimbursement request was submitted through the portal.`,
+      "",
+      ...summary(input),
+      "",
+      `Open the portal: ${config.appUrl}/requests/${input.requestId}`,
+    ].join("\n"),
+  };
+}
+
+export function requesterCopyEmail(input: SubmissionEmailInput): { subject: string; text: string } {
+  const t = totals(input.request);
+  return {
+    subject: `Your PTA reimbursement request ${input.requestId} (${formatMoney(t.reimbursementCents)})`,
+    text: [
+      `Thanks, ${input.request.payeeName}. Your request was sent to the PTA's accounts payable team (${config.apEmail}).`,
+      "They will review it and either pay it by check or send it back with a note.",
+      "",
+      ...summary(input),
+      "",
+      `See your requests: ${config.appUrl}/requests`,
+    ].join("\n"),
+  };
+}

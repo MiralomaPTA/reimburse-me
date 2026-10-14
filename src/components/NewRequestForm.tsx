@@ -1,0 +1,549 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { formatMoney, parseMoney } from "@/lib/money";
+import { DESCRIPTION_MAX, type RequestInput } from "@/lib/request-schema";
+import { uploadReceipt } from "@/lib/upload-client";
+import { ReceiptUpload, type ReceiptState } from "@/components/ReceiptUpload";
+import { SignaturePad, type SignaturePadHandle } from "@/components/SignaturePad";
+
+interface ItemState {
+  key: string;
+  description: string;
+  amount: string;
+  receipts: ReceiptState[];
+}
+
+interface FormState {
+  payeeName: string;
+  ptaPosition: string;
+  phone: string;
+  checkDelivery: "mail" | "mailbox";
+  address: string;
+  cityZip: string;
+  purpose: string;
+  items: ItemState[];
+  donation: string;
+}
+
+const DRAFT_KEY = "rm:draft:v1";
+const CONSENT_LABEL = "I agree to sign this reimbursement request electronically and certify the expenses and receipts are accurate.";
+
+const newKey = () => Math.random().toString(36).slice(2, 10);
+const newItem = (): ItemState => ({ key: newKey(), description: "", amount: "", receipts: [] });
+const emptyForm = (): FormState => ({
+  payeeName: "",
+  ptaPosition: "",
+  phone: "",
+  checkDelivery: "mailbox",
+  address: "",
+  cityZip: "",
+  purpose: "",
+  items: [newItem()],
+  donation: "",
+});
+
+function loadDraft(): FormState | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const draft = JSON.parse(raw) as FormState;
+    // Only finished uploads survive a reload; anything mid-flight is dropped.
+    draft.items = draft.items.map((item) => ({ ...item, receipts: item.receipts.filter((r) => r.status === "done" && r.fileId) }));
+    if (draft.items.length === 0) draft.items = [newItem()];
+    return draft;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(form: FormState) {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+  } catch {
+    /* storage unavailable: drafts just don't persist */
+  }
+}
+
+function clearDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Converts form state to the API payload, collecting user-facing problems. */
+function toRequestInput(form: FormState): { input: RequestInput | null; problems: string[] } {
+  const problems: string[] = [];
+  const items: RequestInput["items"] = [];
+  form.items.forEach((item, i) => {
+    const n = i + 1;
+    const amountCents = parseMoney(item.amount);
+    if (!item.description.trim()) problems.push(`Line ${n}: describe the purchase.`);
+    if (item.description.trim().length > DESCRIPTION_MAX) problems.push(`Line ${n}: keep the description under ${DESCRIPTION_MAX} characters.`);
+    if (amountCents === null || amountCents <= 0) problems.push(`Line ${n}: enter the amount, like 12.50.`);
+    const uploading = item.receipts.some((r) => r.status === "uploading");
+    const done = item.receipts.filter((r) => r.status === "done" && r.fileId && r.mimeType);
+    if (uploading) problems.push(`Line ${n}: wait for the receipt to finish uploading.`);
+    else if (done.length === 0) problems.push(`Line ${n}: add a photo or PDF of the receipt.`);
+    items.push({
+      description: item.description.trim(),
+      amountCents: amountCents ?? 0,
+      receipts: done.map((r) => ({ fileId: r.fileId!, name: r.name, mimeType: r.mimeType! })),
+    });
+  });
+  const donationCents = form.donation.trim() ? parseMoney(form.donation) : 0;
+  if (donationCents === null) problems.push("Enter the donation as an amount, like 5.00, or leave it blank.");
+  if (!form.payeeName.trim()) problems.push("Enter your name.");
+  if (!form.ptaPosition.trim()) problems.push("Enter your PTA position, e.g. Teacher, Room 12.");
+  if (form.phone.replace(/\D/g, "").length < 7) problems.push("Enter a phone number.");
+  if (!form.purpose.trim()) problems.push("Say what the expenditure was for.");
+  if (form.checkDelivery === "mail" && (!form.address.trim() || !form.cityZip.trim())) problems.push("Enter the address to mail the check to.");
+  if (problems.length) return { input: null, problems };
+  return {
+    input: {
+      payeeName: form.payeeName.trim(),
+      ptaPosition: form.ptaPosition.trim(),
+      phone: form.phone.trim(),
+      checkDelivery: form.checkDelivery,
+      address: form.address.trim(),
+      cityZip: form.cityZip.trim(),
+      purpose: form.purpose.trim(),
+      items,
+      donationCents: donationCents ?? 0,
+    },
+    problems,
+  };
+}
+
+type Step = "form" | "preview" | "done";
+
+interface Issue {
+  path?: (string | number)[];
+  message: string;
+}
+
+function issueText(issues: Issue[]): string[] {
+  return issues.map((issue) => {
+    const path = issue.path ?? [];
+    if (path[0] === "items" && typeof path[1] === "number") return `Line ${path[1] + 1}: ${issue.message}`;
+    return issue.message;
+  });
+}
+
+const noop = () => () => {};
+
+/** Renders the form only on the client, so the saved draft can seed its initial state without a hydration mismatch. */
+export function NewRequestForm({ email }: { email: string }) {
+  const mounted = useSyncExternalStore(noop, () => true, () => false);
+  if (!mounted) return <p className="text-neutral-500">Loading…</p>;
+  return <RequestForm email={email} initialForm={loadDraft() ?? emptyForm()} />;
+}
+
+function RequestForm({ email, initialForm }: { email: string; initialForm: FormState }) {
+  const [form, setForm] = useState<FormState>(initialForm);
+  const [step, setStep] = useState<Step>("form");
+  const [problems, setProblems] = useState<string[]>([]);
+  const [busy, setBusy] = useState<null | "preview" | "submit">(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [requestInput, setRequestInput] = useState<RequestInput | null>(null);
+  const [consent, setConsent] = useState(false);
+  const [signMode, setSignMode] = useState<"typed" | "drawn">("typed");
+  const [typedName, setTypedName] = useState("");
+  const [result, setResult] = useState<{ requestId: string; emailed: boolean } | null>(null);
+  const padRef = useRef<SignaturePadHandle>(null);
+
+  useEffect(() => {
+    if (step !== "done") saveDraft(form);
+  }, [form, step]);
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  const update = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value })), []);
+
+  const updateItem = useCallback((key: string, patch: Partial<ItemState>) => {
+    setForm((f) => ({ ...f, items: f.items.map((item) => (item.key === key ? { ...item, ...patch } : item)) }));
+  }, []);
+
+  const updateReceipt = useCallback((itemKey: string, receiptKey: string, patch: Partial<ReceiptState>) => {
+    setForm((f) => ({
+      ...f,
+      items: f.items.map((item) =>
+        item.key === itemKey ? { ...item, receipts: item.receipts.map((r) => (r.key === receiptKey ? { ...r, ...patch } : r)) } : item,
+      ),
+    }));
+  }, []);
+
+  const addFiles = useCallback(
+    (itemKey: string, files: File[]) => {
+      for (const file of files) {
+        const receiptKey = newKey();
+        setForm((f) => ({
+          ...f,
+          items: f.items.map((item) =>
+            item.key === itemKey
+              ? { ...item, receipts: [...item.receipts, { key: receiptKey, name: file.name, size: file.size, status: "uploading", progress: 0 }] }
+              : item,
+          ),
+        }));
+        uploadReceipt(file, (fraction) => updateReceipt(itemKey, receiptKey, { progress: fraction }))
+          .then((uploaded) =>
+            updateReceipt(itemKey, receiptKey, { status: "done", progress: 1, fileId: uploaded.fileId, name: uploaded.name, mimeType: uploaded.mimeType, size: uploaded.size }),
+          )
+          .catch((error: unknown) =>
+            updateReceipt(itemKey, receiptKey, { status: "error", error: error instanceof Error ? error.message : "Upload failed" }),
+          );
+      }
+    },
+    [updateReceipt],
+  );
+
+  const removeReceipt = useCallback((itemKey: string, receiptKey: string) => {
+    setForm((f) => ({
+      ...f,
+      items: f.items.map((item) => (item.key === itemKey ? { ...item, receipts: item.receipts.filter((r) => r.key !== receiptKey) } : item)),
+    }));
+  }, []);
+
+  const totals = useMemo(() => {
+    const total = form.items.reduce((sum, item) => sum + (parseMoney(item.amount) ?? 0), 0);
+    const donation = parseMoney(form.donation) ?? 0;
+    return { total, donation, claimed: Math.max(0, total - donation) };
+  }, [form.items, form.donation]);
+
+  async function preview() {
+    const { input, problems: found } = toRequestInput(form);
+    setProblems(found);
+    if (!input) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setBusy("preview");
+    try {
+      const response = await fetch("/api/requests/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setProblems(body.issues ? issueText(body.issues) : [body.error ?? "Could not build the preview."]);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      const blob = await response.blob();
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(URL.createObjectURL(blob));
+      setRequestInput(input);
+      setTypedName((name) => name || input.payeeName);
+      setStep("preview");
+      window.scrollTo({ top: 0 });
+    } catch {
+      setProblems(["Could not build the preview. Check your connection and try again."]);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function submit() {
+    if (!requestInput) return;
+    const signature =
+      signMode === "typed" ? { type: "typed" as const, name: typedName.trim() } : { type: "drawn" as const, pngDataUrl: padRef.current?.toDataUrl() ?? "" };
+    const found: string[] = [];
+    if (!consent) found.push("Tick the box to sign electronically.");
+    if (signature.type === "typed" && signature.name.length < 2) found.push("Type your full name as your signature.");
+    if (signature.type === "drawn" && !signature.pngDataUrl) found.push("Draw your signature, or switch to typing your name.");
+    setProblems(found);
+    if (found.length) return;
+
+    setBusy("submit");
+    try {
+      const response = await fetch("/api/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request: requestInput, signature, consent: true }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setProblems(body.issues ? issueText(body.issues) : [body.error ?? "Could not submit."]);
+        return;
+      }
+      clearDraft();
+      setResult({ requestId: body.requestId, emailed: body.emailed });
+      setStep("done");
+      window.scrollTo({ top: 0 });
+    } catch {
+      setProblems(["Could not submit. Check your connection and try again."]);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function startAnother() {
+    setForm(emptyForm());
+    setRequestInput(null);
+    setConsent(false);
+    setTypedName("");
+    setResult(null);
+    setProblems([]);
+    setStep("form");
+  }
+
+  if (step === "done" && result) {
+    return (
+      <div className="mx-auto max-w-lg space-y-4">
+        <h1 className="text-2xl font-semibold">Sent to the PTA</h1>
+        <p className="text-neutral-700">
+          Your request <strong>{result.requestId}</strong> is signed and on its way to the accounts payable team.
+          {result.emailed ? ` A copy went to ${email}.` : ""}
+        </p>
+        {!result.emailed && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            The request was recorded, but the email to the AP team didn&apos;t go through. Please let ap@miralomasf.com know your
+            request number so they can pick it up from the log.
+          </p>
+        )}
+        <div className="flex flex-wrap gap-3">
+          <Link href={`/requests/${result.requestId}`} className="btn-primary">
+            View request
+          </Link>
+          <button type="button" className="btn-secondary" onClick={startAnother}>
+            Start another
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const problemBox = problems.length > 0 && (
+    <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+      <ul className="list-disc space-y-1 pl-5">
+        {problems.map((p) => (
+          <li key={p}>{p}</li>
+        ))}
+      </ul>
+    </div>
+  );
+
+  if (step === "preview" && previewUrl && requestInput) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold">Check and sign</h1>
+          <p className="text-neutral-600">This is the packet the PTA will receive. If anything is wrong, go back and fix it.</p>
+        </div>
+        {problemBox}
+        <div className="card p-2">
+          <iframe src={previewUrl} title="Preview of your reimbursement packet" className="h-[70vh] w-full rounded" />
+          <div className="flex items-center justify-between px-2 pt-2 text-sm">
+            <a href={previewUrl} target="_blank" rel="noopener" className="underline">
+              Open preview in a new tab
+            </a>
+            <span className="text-neutral-500">Reimbursement claimed: {formatMoney(totals.claimed)}</span>
+          </div>
+        </div>
+
+        <div className="card space-y-4">
+          <h2 className="text-lg font-semibold">Sign</h2>
+          <div className="flex gap-2">
+            <button type="button" className={signMode === "typed" ? "btn-primary" : "btn-secondary"} onClick={() => setSignMode("typed")}>
+              Type my name
+            </button>
+            <button type="button" className={signMode === "drawn" ? "btn-primary" : "btn-secondary"} onClick={() => setSignMode("drawn")}>
+              Draw
+            </button>
+          </div>
+          {signMode === "typed" ? (
+            <div>
+              <label htmlFor="typedName" className="label">
+                Full name
+              </label>
+              <input id="typedName" className="field italic" value={typedName} onChange={(e) => setTypedName(e.target.value)} autoComplete="name" />
+            </div>
+          ) : (
+            <SignaturePad ref={padRef} />
+          )}
+          <label className="flex items-start gap-3 text-sm">
+            <input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+            <span>{CONSENT_LABEL}</span>
+          </label>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" className="btn-primary" onClick={submit} disabled={busy === "submit"}>
+              {busy === "submit" ? "Submitting…" : "Sign and submit"}
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => setStep("form")} disabled={busy === "submit"}>
+              Back to edit
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      className="space-y-6"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void preview();
+      }}
+    >
+      <div>
+        <h1 className="text-2xl font-semibold">New reimbursement request</h1>
+        <p className="text-neutral-600">One line per receipt. Photograph each receipt as you go.</p>
+      </div>
+      {problemBox}
+
+      <section className="card space-y-4">
+        <h2 className="text-lg font-semibold">About you</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="payeeName" className="label">
+              Name
+            </label>
+            <input id="payeeName" className="field" autoComplete="name" value={form.payeeName} onChange={(e) => update("payeeName", e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="ptaPosition" className="label">
+              PTA position
+            </label>
+            <input id="ptaPosition" className="field" placeholder="Teacher, Room 12" value={form.ptaPosition} onChange={(e) => update("ptaPosition", e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="phone" className="label">
+              Phone
+            </label>
+            <input id="phone" className="field" type="tel" autoComplete="tel" inputMode="tel" value={form.phone} onChange={(e) => update("phone", e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Email</label>
+            <input className="field bg-neutral-100" value={email} readOnly />
+          </div>
+        </div>
+        <fieldset>
+          <legend className="label">How should you get the check?</legend>
+          <div className="flex flex-wrap gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="radio" name="checkDelivery" checked={form.checkDelivery === "mailbox"} onChange={() => update("checkDelivery", "mailbox")} />
+              Leave it in my staff mailbox
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="radio" name="checkDelivery" checked={form.checkDelivery === "mail"} onChange={() => update("checkDelivery", "mail")} />
+              Mail it to me
+            </label>
+          </div>
+        </fieldset>
+        {form.checkDelivery === "mail" && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="address" className="label">
+                Street address
+              </label>
+              <input id="address" className="field" autoComplete="street-address" value={form.address} onChange={(e) => update("address", e.target.value)} />
+            </div>
+            <div>
+              <label htmlFor="cityZip" className="label">
+                City and ZIP
+              </label>
+              <input id="cityZip" className="field" placeholder="San Francisco, CA 94127" value={form.cityZip} onChange={(e) => update("cityZip", e.target.value)} />
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="card space-y-4">
+        <h2 className="text-lg font-semibold">What was it for?</h2>
+        <div>
+          <label htmlFor="purpose" className="label">
+            Expenditure was for
+          </label>
+          <input id="purpose" className="field" placeholder="2nd grade art supplies" maxLength={60} value={form.purpose} onChange={(e) => update("purpose", e.target.value)} />
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold">Receipts</h2>
+        {form.items.map((item, index) => (
+          <div key={item.key} className="card space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-medium">Line {index + 1}</h3>
+              {form.items.length > 1 && (
+                <button type="button" className="text-sm text-neutral-500 hover:text-red-700" onClick={() => update("items", form.items.filter((i) => i.key !== item.key))}>
+                  Remove line
+                </button>
+              )}
+            </div>
+            <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
+              <div>
+                <label htmlFor={`desc-${item.key}`} className="label">
+                  Description <span className="font-normal text-neutral-500">({item.description.length}/{DESCRIPTION_MAX})</span>
+                </label>
+                <input
+                  id={`desc-${item.key}`}
+                  className="field"
+                  placeholder="Target, markers and paper"
+                  maxLength={DESCRIPTION_MAX}
+                  value={item.description}
+                  onChange={(e) => updateItem(item.key, { description: e.target.value })}
+                />
+              </div>
+              <div>
+                <label htmlFor={`amt-${item.key}`} className="label">
+                  Amount
+                </label>
+                <div className="relative">
+                  <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-neutral-500">$</span>
+                  <input
+                    id={`amt-${item.key}`}
+                    className="field pl-7"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={item.amount}
+                    onChange={(e) => updateItem(item.key, { amount: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="label">Receipt</div>
+              <ReceiptUpload receipts={item.receipts} onFiles={(files) => addFiles(item.key, files)} onRemove={(key) => removeReceipt(item.key, key)} />
+              <p className="mt-2 text-xs text-neutral-500">
+                Tip: cover or crop card numbers and home addresses before you upload. A long receipt can be several photos.
+              </p>
+            </div>
+          </div>
+        ))}
+        <button type="button" className="btn-secondary" onClick={() => update("items", [...form.items, newItem()])}>
+          + Add another receipt
+        </button>
+      </section>
+
+      <section className="card space-y-4">
+        <h2 className="text-lg font-semibold">Totals</h2>
+        <dl className="grid grid-cols-2 gap-y-2 text-sm">
+          <dt className="text-neutral-600">Total expense</dt>
+          <dd className="text-right font-medium">{formatMoney(totals.total)}</dd>
+          <dt className="text-neutral-600">
+            <label htmlFor="donation">Not claimed, donate to PTA (optional)</label>
+          </dt>
+          <dd className="text-right">
+            <input id="donation" className="field w-32 text-right" inputMode="decimal" placeholder="0.00" value={form.donation} onChange={(e) => update("donation", e.target.value)} />
+          </dd>
+          <dt className="font-medium">Reimbursement claimed</dt>
+          <dd className="text-right text-lg font-semibold">{formatMoney(totals.claimed)}</dd>
+        </dl>
+      </section>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" className="btn-primary" disabled={busy === "preview"}>
+          {busy === "preview" ? "Building preview…" : "Preview and sign"}
+        </button>
+        <span className="text-sm text-neutral-500">Your draft is saved on this device.</span>
+      </div>
+    </form>
+  );
+}

@@ -1,0 +1,79 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { config } from "@/server/config";
+import type { FileStore, StoredFileMeta } from "@/server/adapters/types";
+
+/**
+ * Development stand-in for Google Drive. Files live under .data/files as
+ * `<id>` (bytes) and `<id>.json` (metadata). "Direct upload" is simulated by
+ * a PUT to /api/local-upload/<id>, which is only mounted when ADAPTERS=local.
+ */
+
+interface LocalMeta extends StoredFileMeta {
+  folderPath: string[];
+  pending: boolean;
+}
+
+function filesDir() {
+  return path.join(process.cwd(), config.localDataDir, "files");
+}
+
+async function readMeta(id: string): Promise<LocalMeta | null> {
+  try {
+    return JSON.parse(await fs.readFile(path.join(filesDir(), `${id}.json`), "utf8")) as LocalMeta;
+  } catch {
+    return null;
+  }
+}
+
+async function writeMeta(meta: LocalMeta) {
+  await fs.mkdir(filesDir(), { recursive: true });
+  await fs.writeFile(path.join(filesDir(), `${meta.id}.json`), JSON.stringify(meta, null, 2));
+}
+
+function safeId(id: string) {
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) throw new Error("Invalid file id");
+  return id;
+}
+
+export const localFileStore: FileStore = {
+  async createUploadSession({ name, mimeType, size, uploader, origin }) {
+    const id = crypto.randomUUID().replace(/-/g, "");
+    await writeMeta({ id, name, mimeType, size, uploader, folderPath: ["pending"], pending: true });
+    return { uploadUrl: `${origin}/api/local-upload/${id}` };
+  },
+
+  async getFileMeta(id) {
+    const meta = await readMeta(safeId(id));
+    if (!meta || meta.pending) return null;
+    return { id: meta.id, name: meta.name, mimeType: meta.mimeType, size: meta.size, uploader: meta.uploader };
+  },
+
+  async getFileBytes(id) {
+    return new Uint8Array(await fs.readFile(path.join(filesDir(), safeId(id))));
+  },
+
+  async putFile({ name, mimeType, bytes, folderPath }) {
+    const id = crypto.randomUUID().replace(/-/g, "");
+    await fs.mkdir(filesDir(), { recursive: true });
+    await fs.writeFile(path.join(filesDir(), id), bytes);
+    await writeMeta({ id, name, mimeType, size: bytes.byteLength, uploader: "app", folderPath, pending: false });
+    return { id };
+  },
+
+  async moveFile(id, folderPath) {
+    const meta = await readMeta(safeId(id));
+    if (!meta) throw new Error(`Unknown file ${id}`);
+    await writeMeta({ ...meta, folderPath });
+  },
+};
+
+/** Called by the local upload route once the browser has PUT the bytes. */
+export async function completeLocalUpload(id: string, bytes: Uint8Array): Promise<StoredFileMeta> {
+  const meta = await readMeta(safeId(id));
+  if (!meta || !meta.pending) throw new Error("No pending upload with that id");
+  await fs.writeFile(path.join(filesDir(), id), bytes);
+  const done = { ...meta, size: bytes.byteLength, pending: false };
+  await writeMeta(done);
+  return { id, name: done.name, mimeType: done.mimeType, size: done.size, uploader: done.uploader };
+}
