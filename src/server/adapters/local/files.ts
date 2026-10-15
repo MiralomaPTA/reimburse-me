@@ -37,10 +37,12 @@ function safeId(id: string) {
 }
 
 export const localFileStore: FileStore = {
-  async createUploadSession({ name, mimeType, size, uploader, origin }) {
+  async createUploadSession({ name, mimeType, size, uploader }) {
     const id = crypto.randomUUID().replace(/-/g, "");
     await writeMeta({ id, name, mimeType, size, uploader, folderPath: ["pending"], pending: true });
-    return { uploadUrl: `${origin}/api/local-upload/${id}` };
+    // Relative, so the browser PUTs to whatever origin it loaded the app from
+    // (localhost, 127.0.0.1, a LAN address from a phone) with no CORS involved.
+    return { uploadUrl: `/api/local-upload/${id}` };
   },
 
   async getFileMeta(id) {

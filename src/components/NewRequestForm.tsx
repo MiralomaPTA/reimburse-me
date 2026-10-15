@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { formatMoney, parseMoney } from "@/lib/money";
 import { DESCRIPTION_MAX, type RequestInput } from "@/lib/request-schema";
 import { uploadReceipt } from "@/lib/upload-client";
+import type { Profile } from "@/server/requests/profile";
+import { MailtoLink } from "@/components/MailtoLink";
 import { ReceiptUpload, type ReceiptState } from "@/components/ReceiptUpload";
 import { SignaturePad, type SignaturePadHandle } from "@/components/SignaturePad";
 
@@ -32,13 +34,13 @@ const CONSENT_LABEL = "I agree to sign this reimbursement request electronically
 
 const newKey = () => Math.random().toString(36).slice(2, 10);
 const newItem = (): ItemState => ({ key: newKey(), description: "", amount: "", receipts: [] });
-const emptyForm = (): FormState => ({
-  payeeName: "",
-  ptaPosition: "",
-  phone: "",
-  checkDelivery: "mailbox",
-  address: "",
-  cityZip: "",
+const emptyForm = (profile: Profile | null): FormState => ({
+  payeeName: profile?.payeeName ?? "",
+  ptaPosition: profile?.ptaPosition ?? "",
+  phone: profile?.phone ?? "",
+  checkDelivery: profile?.checkDelivery ?? "mailbox",
+  address: profile?.address ?? "",
+  cityZip: profile?.cityZip ?? "",
   purpose: "",
   items: [newItem()],
   donation: "",
@@ -135,15 +137,31 @@ function issueText(issues: Issue[]): string[] {
 
 const noop = () => () => {};
 
-/** Renders the form only on the client, so the saved draft can seed its initial state without a hydration mismatch. */
-export function NewRequestForm({ email }: { email: string }) {
+/**
+ * Renders the form only on the client, so the saved draft can seed its initial
+ * state without a hydration mismatch. A draft in progress wins; otherwise the
+ * "about you" fields start from the requester's last request.
+ */
+export function NewRequestForm({ email, apEmail, profile }: { email: string; apEmail: string; profile: Profile | null }) {
   const mounted = useSyncExternalStore(noop, () => true, () => false);
   if (!mounted) return <p className="text-neutral-500">Loading…</p>;
-  return <RequestForm email={email} initialForm={loadDraft() ?? emptyForm()} />;
+  const draft = loadDraft();
+  return <RequestForm email={email} apEmail={apEmail} profile={profile} initialForm={draft ?? emptyForm(profile)} prefilled={!draft && profile !== null} />;
 }
 
-function RequestForm({ email, initialForm }: { email: string; initialForm: FormState }) {
+interface RequestFormProps {
+  email: string;
+  apEmail: string;
+  profile: Profile | null;
+  initialForm: FormState;
+  /** True when the "about you" fields came from the last request rather than a draft. */
+  prefilled: boolean;
+}
+
+function RequestForm({ email, apEmail, profile, initialForm, prefilled }: RequestFormProps) {
   const [form, setForm] = useState<FormState>(initialForm);
+  // After a submission, "Start another" prefills from what was just sent.
+  const latestProfile = useRef<Profile | null>(profile);
   const [step, setStep] = useState<Step>("form");
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState<null | "preview" | "submit">(null);
@@ -273,6 +291,14 @@ function RequestForm({ email, initialForm }: { email: string; initialForm: FormS
         return;
       }
       clearDraft();
+      latestProfile.current = {
+        payeeName: requestInput.payeeName,
+        ptaPosition: requestInput.ptaPosition,
+        phone: requestInput.phone,
+        checkDelivery: requestInput.checkDelivery,
+        address: requestInput.address,
+        cityZip: requestInput.cityZip,
+      };
       setResult({ requestId: body.requestId, emailed: body.emailed });
       setStep("done");
       window.scrollTo({ top: 0 });
@@ -284,7 +310,7 @@ function RequestForm({ email, initialForm }: { email: string; initialForm: FormS
   }
 
   function startAnother() {
-    setForm(emptyForm());
+    setForm(emptyForm(latestProfile.current));
     setRequestInput(null);
     setConsent(false);
     setTypedName("");
@@ -303,7 +329,7 @@ function RequestForm({ email, initialForm }: { email: string; initialForm: FormS
         </p>
         {!result.emailed && (
           <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-            The request was recorded, but the email to the AP team didn&apos;t go through. Please let ap@miralomasf.com know your
+            The request was recorded, but the email to the AP team didn&apos;t go through. Please let <MailtoLink email={apEmail} /> know your
             request number so they can pick it up from the log.
           </p>
         )}
@@ -400,6 +426,7 @@ function RequestForm({ email, initialForm }: { email: string; initialForm: FormS
 
       <section className="card space-y-4">
         <h2 className="text-lg font-semibold">About you</h2>
+        {prefilled && <p className="text-sm text-neutral-500">Filled in from your last request. Change anything that&apos;s different this time.</p>}
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label htmlFor="payeeName" className="label">

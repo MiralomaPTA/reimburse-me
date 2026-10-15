@@ -19,12 +19,15 @@ export async function POST(request: Request) {
 
   const { files } = await getAdapters();
   const safeName = parsed.data.name.replace(/[^\w.() -]+/g, "_").slice(0, 120);
-  const session_ = await files.createUploadSession({
+  // The browser will PUT from the origin it sent this request from, which is
+  // what a CORS-checked upload (Drive) must be opened for. APP_URL is only a fallback.
+  const origin = request.headers.get("origin") ?? config.appUrl;
+  const upload = await files.createUploadSession({
     name: safeName,
     mimeType: parsed.data.mimeType,
     size: parsed.data.size,
     uploader: session.email,
-    origin: config.appUrl,
+    origin,
   });
-  return Response.json(session_);
+  return Response.json(upload);
 }

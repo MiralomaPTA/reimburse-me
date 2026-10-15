@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
+import { seeOther } from "@/server/http";
 import { createSessionToken, verifyMagicToken } from "@/server/auth/tokens";
 import { SESSION_COOKIE, sessionCookieOptions } from "@/server/auth/session";
-import { config } from "@/server/config";
 
 /**
  * The sign-in page POSTs the token here (a click, not a GET), so link
@@ -12,10 +12,12 @@ export async function POST(request: Request) {
   const token = String(form.get("token") ?? "");
   const next = String(form.get("next") ?? "");
   const email = await verifyMagicToken(token);
-  if (!email) return Response.redirect(new URL("/?expired=1", config.appUrl), 303);
+  // Relative Location headers: the browser resolves them against whatever host
+  // and port it is actually using, so no APP_URL or Host reasoning is needed.
+  if (!email) return seeOther("/?expired=1");
 
   const session = await createSessionToken({ email, method: "email-link", signedInAt: new Date().toISOString() });
   (await cookies()).set(SESSION_COOKIE, session, sessionCookieOptions);
   const target = next.startsWith("/") && !next.startsWith("//") ? next : "/requests/new";
-  return Response.redirect(new URL(target, config.appUrl), 303);
+  return seeOther(target);
 }

@@ -21,7 +21,8 @@ export interface UploadSession {
 export interface FileStore {
   /**
    * Start an upload the browser completes directly (no file bytes pass through the app).
-   * `origin` is the app's origin, needed for CORS on the direct upload.
+   * `origin` is the browser's origin (from the request's Origin header), needed for
+   * CORS on a direct upload to Drive. The returned URL may be relative.
    */
   createUploadSession(opts: {
     name: string;
@@ -127,8 +128,48 @@ export interface Mailer {
   send(message: MailMessage): Promise<void>;
 }
 
+export type UserRole = "requester" | "ap" | "admin";
+export type UserStatus = "pending" | "approved" | "denied";
+
+/**
+ * One row in the Users tab: the allow-list for sign-in and, through `role`,
+ * the AP list. Admins may edit the tab directly (paste staff emails as
+ * approved, set role to ap or admin).
+ */
+export interface UserRecord {
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  requested_at: string;
+  approved_at: string;
+  approved_by: string;
+  /** When a sign-in link was last emailed; backs a durable per-address cooldown. */
+  last_link_at: string;
+  note: string;
+}
+
+export const USER_COLUMNS: (keyof UserRecord)[] = [
+  "email",
+  "role",
+  "status",
+  "requested_at",
+  "approved_at",
+  "approved_by",
+  "last_link_at",
+  "note",
+];
+
+export interface UserDirectory {
+  get(email: string): Promise<UserRecord | null>;
+  /** Insert or replace the row for `record.email` (case-insensitive). */
+  upsert(record: UserRecord): Promise<void>;
+  /** Pending rows requested at or after `sinceIso`; bounds approval-request spam. */
+  countPendingSince(sinceIso: string): Promise<number>;
+}
+
 export interface Adapters {
   files: FileStore;
   log: RequestLog;
+  users: UserDirectory;
   mailer: Mailer;
 }

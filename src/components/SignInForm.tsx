@@ -21,7 +21,7 @@ export function SignInForm({ next }: { next?: string }) {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "Something went wrong");
-      router.push(`/auth/sent?email=${encodeURIComponent(email)}`);
+      router.push(`${body.status === "pending" ? "/auth/pending" : "/auth/sent"}?email=${encodeURIComponent(email)}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
       setBusy(false);

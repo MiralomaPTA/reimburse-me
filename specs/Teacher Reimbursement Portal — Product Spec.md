@@ -25,19 +25,25 @@ A web form on miralomasf.com where a teacher uploads receipts, fills in a few de
 - Issuing payment. Teachers stay on paper checks; the portal only records the check number and date.
 - Replacing the PTA's bookkeeping software or budget tracking.
 - Purchase pre-approval or purchase orders.
-- Gatekeeping who can submit. Anyone with an email address can sign in; the PTA still only reimburses staff and approved volunteers, and AP checks that at review.
+- Checking who a requester is beyond the one-time approval of their email address. The PTA still only reimburses staff and approved volunteers, and AP confirms that at review.
 
 ## Users and roles
 
 | Role | Who | What they do in the portal |
 | --- | --- | --- |
-| Requester | Anyone with an email address; in practice teachers, staff and approved volunteers | Submit requests, sign, see status of their own requests |
-| AP team | Everyone on ap@miralomasf.com, including the treasurer | Receive every signed packet, review, assign the budget category, return with a note, mark paid with check number |
-| Admin | PTA tech volunteer | Maintain the AP list (a tab in the request-log Sheet) |
+| Requester | Teachers, staff and approved volunteers, each approved once by email address | Submit requests, sign, see status of their own requests |
+| AP team | Everyone on ap@miralomasf.com, including the treasurer | Approve new requester addresses, receive every signed packet, review, assign the budget category, return with a note, mark paid with check number |
+| Admin | PTA tech volunteer | Maintain the Users tab of the request-log Sheet: pre-approve staff addresses, set roles, fix mistakes |
 
 Only the requester signs; no second signature is collected in the portal. The form's *Signature of VP/Chairman for Program/Event* line and the *For PTA treasurer use* block stay blank for AP to handle outside the portal.
 
-Sign-in uses one-time links emailed to whatever address the requester enters: no passwords, no Google account and no allow-list. Links expire after 15 minutes, and the link endpoint is rate-limited so it can't be used to spam an address. AP team members sign in the same way; an email on the AP list unlocks the dashboard.
+Sign-in uses one-time links emailed to the requester: no passwords and no Google account. Links expire after 15 minutes. Who may sign in is the *Users* tab of the request-log Sheet:
+
+- An approved address gets a sign-in link, at most one a minute.
+- An unknown address gets nothing. It is added to the tab as pending, and one email goes to the approver address (ap@miralomasf.com by default) with an approve/deny link that works for 7 days. Approving flips the row and emails the teacher a sign-in link right away; denying is silent. Repeat requests from a pending or denied address send nothing.
+- The admin can paste staff addresses into the tab as approved ahead of time, so most teachers never wait.
+
+Because nothing is ever emailed to an unknown address, the form can't be used to spam strangers; the worst case is a bounded trickle of approval requests to ap@, capped at 20 new pending addresses a day. The tab's *role* column (requester, ap, admin) is also the AP list that unlocks the dashboard in Phase 2.
 
 ## User flow
 
@@ -70,7 +76,7 @@ Fields map one-to-one to the PTA's *Payment Authorization / Request for Reimburs
 | Signature, Date | requester_signature, requester_signature_date | Built-in signature step | Date filled automatically |
 | Budget category | treasurer_category | Not collected | AP assigns the budget line at review and records it in the Sheet; the form's Category box is in the treasurer block and stays blank |
 
-Nothing is remembered between requests in the MVP; a saved profile is Phase 3.
+Name, PTA position, phone, check delivery and address start filled in from the requester's most recent request, so a repeat request only needs the purpose and the receipts. There is no separate profile store; the request log is the source.
 
 ### 2. Receipt upload
 
@@ -166,7 +172,7 @@ The app holds no data of its own: receipts and signed PDFs go to a Workspace Dri
 1. **Phase 0 — Setup.** pta.president@miralomasf.com creates a Google Cloud project under the miralomasf.com organization, enables the Drive, Sheets and Gmail APIs, creates the service account and authorizes its domain-wide delegation. Under fs@miralomasf.com: create the Drive folder and the request-log Sheet with an AP-list tab, create the Vercel project, and point the hostname at it. Create the PTA GitHub organization.
 2. **Phase 1 — MVP.** Sign in, form matching the PTA form, receipt upload with camera, PDF packet, built-in signature, email to ap@miralomasf.com, row in the Sheet. Pilot with 3–5 teachers on the live app.
 3. **Phase 2 — AP workflow.** Return with a note, mark paid with check number, paid/returned emails to teachers, weekly digest.
-4. **Phase 3 — Nice to have.** Receipt OCR to prefill line items; saved profile so name, position and address fill automatically.
+4. **Phase 3 — Nice to have.** Receipt OCR to prefill line items.
 
 Success measures: share of requests submitted online, requests returned for missing info, and days from submission to payment.
 
@@ -183,12 +189,12 @@ Success measures: share of requests submitted online, requests returned for miss
 | Line items | One line item per receipt |
 | Partial receipts | Allowed; the claimed amount may be less than the receipt total |
 | Phone number | Required |
-| Remembered details | None in the MVP; saved profile is Phase 3 |
+| Remembered details | Name, position, phone, check delivery and address prefill from the requester's last request; no separate profile store |
 | Receipt age | No cutoff |
 | Storage / backup | Google Workspace folder |
 | Budget | Zero added cost |
 | Volume | About 50 requests a month |
-| Sign-in | One-time email links; no allow-list, any email address can request one |
+| Sign-in | One-time email links; addresses are approved once via an approval email to ap@, recorded in the Users tab of the Sheet |
 | Hosting | Vercel free (Hobby) tier, in an account under fs@miralomasf.com |
 | Code | PTA-owned GitHub organization |
 | Workspace | Google Workspace for Nonprofits; pta.president@miralomasf.com is super admin; fs@miralomasf.com sends email and owns the Drive folder and Sheet; the app acts as fs@ through a service account with domain-wide delegation |
@@ -207,7 +213,7 @@ Each has a proposed default. The build follows the default unless it is changed 
 | Topic | Proposed default |
 | --- | --- |
 | Hostname | reimburse.miralomasf.com. Who can add the DNS record? |
-| Admin screens | None in the MVP; the AP list is a tab in the Sheet |
+| Admin screens | None in the MVP; the Users tab in the Sheet is the AP list and the allow-list |
 | VP/Chairman signature line | Left blank by the portal. Does AP collect it on paper afterward, or skip it? |
 | Approved step | Optional; AP can go from Submitted straight to Paid. No email to the teacher on Approved |
 | Resubmission after Return | Keeps the request ID, produces a new PDF version, sends a fresh email to AP; the earlier signed PDF stays in Drive |
@@ -222,8 +228,8 @@ Each has a proposed default. The build follows the default unless it is changed 
 ## Changes since v0.1
 
 - Form: the Revised July 2022 fillable PDF replaces the 03/2009 reference. Added the renamed template, the field mapping, the VP/Chairman line, and the box-width limits.
-- Sign-in: the staff allow-list is dropped; any email address can request a link. Non-goals and roles reworded to match.
-- Form content: budget category is assigned by AP; one line item per receipt; partial receipts allowed; phone required; nothing remembered in the MVP.
+- Sign-in: a fixed staff allow-list is replaced by a Users tab with one-time approval by email. Unknown addresses are never emailed; the approver is. Non-goals and roles reworded to match.
+- Form content: budget category is assigned by AP; one line item per receipt; partial receipts allowed; phone required; requester details prefill from the last request.
 - Architecture: Workspace for Nonprofits with pta.president@ as super admin; service account with domain-wide delegation; uploads straight to Drive; HEIC converted in the browser; PTA-owned GitHub and Vercel under fs@; no pilot environment.
 - Review: AP may edit the Sheet directly, with status changes through the dashboard.
 - Added the Open questions section with proposed defaults.

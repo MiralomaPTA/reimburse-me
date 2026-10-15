@@ -37,9 +37,10 @@ Copy `.env.example` to `.env.local`. Everything has a development default except
 | `ADAPTERS` | `local` or `google` |
 | `SESSION_SECRET` | Signs sign-in links and session cookies |
 | `AP_EMAIL`, `FROM_EMAIL`, `FROM_NAME` | Where packets go and who they come from |
+| `APPROVER_EMAIL` | Who approves new requester addresses (defaults to `AP_EMAIL`) |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` | Service account credentials |
 | `GOOGLE_IMPERSONATE_EMAIL` | Workspace user to act as (fs@) |
-| `GOOGLE_DRIVE_ROOT_FOLDER_ID`, `GOOGLE_SHEET_ID`, `GOOGLE_SHEET_NAME` | Where data lives |
+| `GOOGLE_DRIVE_ROOT_FOLDER_ID`, `GOOGLE_SHEET_ID`, `GOOGLE_SHEET_NAME`, `GOOGLE_USERS_SHEET_NAME` | Where data lives |
 
 ## Phase 0: Google Workspace setup
 
@@ -49,7 +50,7 @@ One-time, done by the super admin (pta.president@miralomasf.com) and fs@miraloma
 2. **Service account.** IAM & Admin → Service Accounts → Create. No roles needed. Open it → Keys → Add key → JSON. Keep the file; it holds `client_email` and `private_key`. Note the numeric **Unique ID** (client ID).
 3. **Domain-wide delegation.** In [admin.google.com](https://admin.google.com) → Security → Access and data control → API controls → Manage domain-wide delegation → Add new. Client ID: the service account's unique ID. Scopes, comma-separated:
    `https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/gmail.send`
-4. **Drive and Sheet, as fs@.** Create a folder "PTA reimbursements" in fs@'s My Drive and note its ID (the last part of the folder URL). Create a Google Sheet "PTA reimbursement log" with a tab named `Requests`; the app writes the header row on first use. Share both with the AP team.
+4. **Drive and Sheet, as fs@.** Create a folder "PTA reimbursements" in fs@'s My Drive and note its ID (the last part of the folder URL). Create a Google Sheet "PTA reimbursement log" with tabs named `Requests` and `Users`; the app writes each header row on first use. Share both with the AP team. To spare teachers the approval wait, paste staff addresses into `Users` with `status` = `approved` (and `role` = `ap` for AP team members).
 5. **Vercel.** Create the Vercel account under fs@miralomasf.com, import the GitHub repo, set the environment variables above with `ADAPTERS=google`, and add the custom domain.
 
 The app never stores the key on disk; it reads `GOOGLE_PRIVATE_KEY` from the environment. In Vercel, paste the key with its `\n` line breaks intact.
@@ -60,8 +61,12 @@ The app never stores the key on disk; it reads `GOOGLE_PRIVATE_KEY` from the env
 src/app/                 pages and route handlers
   page.tsx               sign-in (email a one-time link)
   auth/callback          link lands here; a click completes sign-in (so email scanners can't use it up)
+  auth/pending           shown to a first-time address while the PTA approves it
+  auth/approve           the approver's page from the approval email: Approve / Deny
   requests/new           the form: details, one line per receipt, preview, sign
   requests/[id]          status and the signed PDF
+  api/auth/request-link  approved address: sends a link; unknown address: asks the approver
+  api/auth/approve       applies the approver's decision
   api/uploads            opens a direct upload for one receipt
   api/requests/preview   builds the unsigned packet
   api/requests           signs, stores, logs and emails
@@ -80,12 +85,12 @@ Receipts never pass through the app server: the server opens an upload session (
 These follow the proposed defaults in the spec's *Open questions* and are easy to change:
 
 - Request IDs are sequential per PTA fiscal year, e.g. `FY27-042`.
-- The form draft lives in the browser's local storage until it is signed.
+- The form draft lives in the browser's local storage until it is signed. With no draft, the "about you" fields prefill from the requester's most recent request in the log.
 - Signatures are typed or drawn fresh each time and never stored.
 - "Locked" means: SHA-256 of the signed file recorded in the log and in the emails; the app never rewrites a packet.
 - Sessions last 30 days; sign-in links last 15 minutes.
-- The sign-in link endpoint is rate-limited in memory per instance (5 per address and 20 per IP every 15 minutes).
+- Who can sign in is the `Users` tab: approved addresses get links (one a minute, tracked on the row); unknown addresses are never emailed, the approver is, once, and at most 20 new pending addresses are recorded a day. The in-memory limiter (5 per address, 20 per IP every 15 minutes) sits in front as a first line.
 
 ## Not yet built
 
-Phase 2 (AP dashboard, return with a note, mark paid, teacher notifications, weekly digest, CSV export) and Phase 3 (receipt OCR, saved profile). The data model already carries the status, note, check number and category columns those need.
+Phase 2 (AP dashboard, return with a note, mark paid, teacher notifications, weekly digest, CSV export) and Phase 3 (receipt OCR). The data model already carries the status, note, check number and category columns those need.

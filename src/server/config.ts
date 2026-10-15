@@ -21,11 +21,18 @@ export const config = {
   /** "local" writes to ./.data; "google" uses Drive, Sheets and Gmail as fs@. */
   adapters: (env.ADAPTERS ?? "local") as AdapterKind,
   apEmail: env.AP_EMAIL ?? "ap@miralomasf.com",
+  /** Where "please approve this new user" emails go. */
+  approverEmail: env.APPROVER_EMAIL ?? env.AP_EMAIL ?? "ap@miralomasf.com",
   fromEmail: env.FROM_EMAIL ?? "fs@miralomasf.com",
   fromName: env.FROM_NAME ?? "Miraloma PTA Reimbursements",
   localDataDir: env.LOCAL_DATA_DIR ?? ".data",
   sessionDays: 30,
   magicLinkMinutes: 15,
+  approvalLinkDays: 7,
+  /** Durable per-address gap between sign-in emails. */
+  linkCooldownSeconds: 60,
+  /** New pending access requests allowed per 24 hours; bounds approver inbox and Sheet growth. */
+  maxNewPendingPerDay: 20,
   maxUploadBytes: 10 * 1024 * 1024,
   maxReceiptsPerRequest: 20,
   timeZone: "America/Los_Angeles",
@@ -51,5 +58,6 @@ export function googleConfig() {
     rootFolderId: required("GOOGLE_DRIVE_ROOT_FOLDER_ID"),
     spreadsheetId: required("GOOGLE_SHEET_ID"),
     sheetName: env.GOOGLE_SHEET_NAME ?? "Requests",
+    usersSheetName: env.GOOGLE_USERS_SHEET_NAME ?? "Users",
   };
 }

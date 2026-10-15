@@ -57,3 +57,24 @@ export async function verifySessionToken(token: string): Promise<Session | null>
     return null;
   }
 }
+
+/** Emailed to the approver; authorizes approving or denying one address. */
+export async function createApprovalToken(email: string): Promise<string> {
+  return new SignJWT({ purpose: "approval" })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(email)
+    .setJti(crypto.randomUUID())
+    .setIssuedAt()
+    .setExpirationTime(`${config.approvalLinkDays}d`)
+    .sign(signingKey());
+}
+
+export async function verifyApprovalToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, signingKey());
+    if (payload.purpose !== "approval" || typeof payload.sub !== "string") return null;
+    return payload.sub;
+  } catch {
+    return null;
+  }
+}

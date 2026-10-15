@@ -76,3 +76,32 @@ export function requesterCopyEmail(input: SubmissionEmailInput): { subject: stri
     ].join("\n"),
   };
 }
+
+export function approvalRequestEmail(input: { email: string; requestedAt: Date; approveUrl: string }): { subject: string; text: string } {
+  return {
+    subject: `Portal access request: ${input.email}`,
+    text: [
+      `${input.email} asked to use the Miraloma PTA reimbursement portal on ${formatDateTime(input.requestedAt)}.`,
+      "",
+      "If you know them as Miraloma staff or an approved volunteer, approve them here (you can also deny on that page):",
+      "",
+      input.approveUrl,
+      "",
+      `The link works for ${config.approvalLinkDays} days. Approving lets them sign in and submit reimbursement requests; it does not approve any payment.`,
+      "If you don't recognize the address, deny it or just ignore this email.",
+    ].join("\n"),
+  };
+}
+
+export function approvedEmail(link: string): { subject: string; text: string } {
+  return {
+    subject: "You're approved to use the Miraloma PTA reimbursement portal",
+    text: [
+      "The PTA approved your email address for the reimbursement portal. Sign in here:",
+      "",
+      link,
+      "",
+      `This link works for ${config.magicLinkMinutes} minutes. After that, just request a new one from the sign-in page.`,
+    ].join("\n"),
+  };
+}
