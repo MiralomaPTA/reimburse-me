@@ -41,53 +41,53 @@ describe("requestSignIn", () => {
   });
 
   it("asks the approver about an unknown address and emails the address nothing", async () => {
-    const outcome = await requestSignIn({ email: "New.Teacher@sfusd.edu", linkBase: BASE }, deps());
+    const outcome = await requestSignIn({ email: "New.Teacher@example.org", linkBase: BASE }, deps());
     expect(outcome).toBe("pending");
     expect(users.rows).toHaveLength(1);
-    expect(users.rows[0]).toMatchObject({ email: "new.teacher@sfusd.edu", status: "pending", role: "requester" });
+    expect(users.rows[0]).toMatchObject({ email: "new.teacher@example.org", status: "pending", role: "requester" });
     expect(mailer.sent).toHaveLength(1);
     expect(mailer.sent[0].to).toEqual(["ap@miralomasf.com"]);
-    expect(mailer.sent[0].subject).toContain("new.teacher@sfusd.edu");
-    expect(await verifyApprovalToken(tokenIn(mailer.sent[0].text))).toBe("new.teacher@sfusd.edu");
+    expect(mailer.sent[0].subject).toContain("new.teacher@example.org");
+    expect(await verifyApprovalToken(tokenIn(mailer.sent[0].text))).toBe("new.teacher@example.org");
   });
 
   it("sends nothing more for a pending or denied address", async () => {
-    await requestSignIn({ email: "a@x.org", linkBase: BASE }, deps());
-    await requestSignIn({ email: "a@x.org", linkBase: BASE }, deps());
+    await requestSignIn({ email: "a@example.net", linkBase: BASE }, deps());
+    await requestSignIn({ email: "a@example.net", linkBase: BASE }, deps());
     expect(mailer.sent).toHaveLength(1);
-    await decideAccess({ email: "a@x.org", decision: "deny", decidedBy: "test", linkBase: BASE }, deps());
-    expect(await requestSignIn({ email: "a@x.org", linkBase: BASE }, deps())).toBe("pending");
+    await decideAccess({ email: "a@example.net", decision: "deny", decidedBy: "test", linkBase: BASE }, deps());
+    expect(await requestSignIn({ email: "a@example.net", linkBase: BASE }, deps())).toBe("pending");
     expect(mailer.sent).toHaveLength(1);
   });
 
   it("emails an approved address a sign-in link, at most once a minute", async () => {
-    await users.upsert({ email: "ok@sfusd.edu", role: "requester", status: "approved", requested_at: "", approved_at: "", approved_by: "", last_link_at: "", note: "" });
-    expect(await requestSignIn({ email: "ok@sfusd.edu", linkBase: BASE, next: "/requests" }, deps())).toBe("sent");
+    await users.upsert({ email: "ok@example.org", role: "requester", status: "approved", requested_at: "", approved_at: "", approved_by: "", last_link_at: "", note: "" });
+    expect(await requestSignIn({ email: "ok@example.org", linkBase: BASE, next: "/requests" }, deps())).toBe("sent");
     expect(mailer.sent).toHaveLength(1);
-    expect(mailer.sent[0].to).toEqual(["ok@sfusd.edu"]);
+    expect(mailer.sent[0].to).toEqual(["ok@example.org"]);
     const link = new URL(mailer.sent[0].text.match(/https?:\/\/\S+/)![0]);
     expect(link.pathname).toBe("/auth/callback");
     expect(link.searchParams.get("next")).toBe("/requests");
-    expect(await verifyMagicToken(link.searchParams.get("token")!)).toBe("ok@sfusd.edu");
+    expect(await verifyMagicToken(link.searchParams.get("token")!)).toBe("ok@example.org");
 
     clock = new Date(clock.getTime() + 30_000);
-    expect(await requestSignIn({ email: "ok@sfusd.edu", linkBase: BASE }, deps())).toBe("sent");
+    expect(await requestSignIn({ email: "ok@example.org", linkBase: BASE }, deps())).toBe("sent");
     expect(mailer.sent).toHaveLength(1); // cooldown: nothing new
 
     clock = new Date(clock.getTime() + 60_000);
-    await requestSignIn({ email: "ok@sfusd.edu", linkBase: BASE }, deps());
+    await requestSignIn({ email: "ok@example.org", linkBase: BASE }, deps());
     expect(mailer.sent).toHaveLength(2);
   });
 
   it("stops recording new pending addresses past the daily cap", async () => {
-    for (let i = 0; i < 20; i++) await requestSignIn({ email: `spam${i}@x.org`, linkBase: BASE }, deps());
+    for (let i = 0; i < 20; i++) await requestSignIn({ email: `spam${i}@example.net`, linkBase: BASE }, deps());
     expect(mailer.sent).toHaveLength(20);
-    expect(await requestSignIn({ email: "spam20@x.org", linkBase: BASE }, deps())).toBe("pending");
+    expect(await requestSignIn({ email: "spam20@example.net", linkBase: BASE }, deps())).toBe("pending");
     expect(users.rows).toHaveLength(20);
     expect(mailer.sent).toHaveLength(20);
     // a day later the window has moved on
     clock = new Date(clock.getTime() + 25 * 60 * 60 * 1000);
-    await requestSignIn({ email: "later@x.org", linkBase: BASE }, deps());
+    await requestSignIn({ email: "later@example.net", linkBase: BASE }, deps());
     expect(users.rows).toHaveLength(21);
   });
 });
@@ -96,21 +96,21 @@ describe("decideAccess", () => {
   it("approving marks the row and emails the requester a sign-in link, once", async () => {
     const users = new MemoryUsers();
     const mailer = new MemoryMailer();
-    await requestSignIn({ email: "t@sfusd.edu", linkBase: BASE }, { users, mailer });
-    const record = await decideAccess({ email: "t@sfusd.edu", decision: "approve", decidedBy: "link", linkBase: BASE }, { users, mailer });
+    await requestSignIn({ email: "t@example.org", linkBase: BASE }, { users, mailer });
+    const record = await decideAccess({ email: "t@example.org", decision: "approve", decidedBy: "link", linkBase: BASE }, { users, mailer });
     expect(record.status).toBe("approved");
     expect(mailer.sent).toHaveLength(2);
-    expect(mailer.sent[1].to).toEqual(["t@sfusd.edu"]);
-    expect(await verifyMagicToken(tokenIn(mailer.sent[1].text))).toBe("t@sfusd.edu");
-    await decideAccess({ email: "t@sfusd.edu", decision: "approve", decidedBy: "link", linkBase: BASE }, { users, mailer });
+    expect(mailer.sent[1].to).toEqual(["t@example.org"]);
+    expect(await verifyMagicToken(tokenIn(mailer.sent[1].text))).toBe("t@example.org");
+    await decideAccess({ email: "t@example.org", decision: "approve", decidedBy: "link", linkBase: BASE }, { users, mailer });
     expect(mailer.sent).toHaveLength(2); // second click is a no-op
   });
 
   it("approving an address with no row creates it", async () => {
     const users = new MemoryUsers();
     const mailer = new MemoryMailer();
-    const record = await decideAccess({ email: "Fresh@sfusd.edu", decision: "approve", decidedBy: "link", linkBase: BASE }, { users, mailer });
-    expect(record).toMatchObject({ email: "fresh@sfusd.edu", status: "approved", role: "requester" });
+    const record = await decideAccess({ email: "Fresh@example.org", decision: "approve", decidedBy: "link", linkBase: BASE }, { users, mailer });
+    expect(record).toMatchObject({ email: "fresh@example.org", status: "approved", role: "requester" });
     expect(users.rows).toHaveLength(1);
   });
 });

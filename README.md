@@ -44,7 +44,7 @@ Copy `.env.example` to `.env.local`. Everything has a development default except
 
 ## Phase 0: Google Workspace setup
 
-One-time, done by the super admin (pta.president@miralomasf.com) and fs@miralomasf.com.
+One-time, done by the PTA's Google Workspace super admin and the fs@miralomasf.com account.
 
 1. **Google Cloud project.** In [console.cloud.google.com](https://console.cloud.google.com) under the miralomasf.com organization, create a project (e.g. "PTA reimbursements"). Enable the **Google Drive API**, **Google Sheets API** and **Gmail API**.
 2. **Service account.** IAM & Admin → Service Accounts → Create. No roles needed. Open it → Keys → Add key → JSON. Keep the file; it holds `client_email` and `private_key`. Note the numeric **Unique ID** (client ID).

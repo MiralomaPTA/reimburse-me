@@ -64,7 +64,7 @@ describe("buildPacket", () => {
   it("builds an unsigned preview: form page plus one page per receipt image", async () => {
     const input = request(2, (i) => [`r${i}`]);
     const files = new Map([["r0", await jpegReceipt("r0")], ["r1", await jpegReceipt("r1", 1800, 1200)]]);
-    const packet = await buildPacket({ requestId: "PREVIEW", submittedAt: new Date(), request: input, requesterEmail: "jane@sfusd.edu", receiptFiles: files, signature: null, audit: null });
+    const packet = await buildPacket({ requestId: "PREVIEW", submittedAt: new Date(), request: input, requesterEmail: "jane@example.org", receiptFiles: files, signature: null, audit: null });
     expect(packet.pageCount).toBe(3);
     expect(packet.sha256).toMatch(/^[0-9a-f]{64}$/);
     const doc = await PDFDocument.load(packet.bytes);
@@ -81,10 +81,10 @@ describe("buildPacket", () => {
       requestId: "FY27-042",
       submittedAt: new Date("2026-10-14T22:00:00Z"),
       request: input,
-      requesterEmail: "jane@sfusd.edu",
+      requesterEmail: "jane@example.org",
       receiptFiles: files,
       signature: { type: "typed", name: "Jane Doe" },
-      audit: { requesterEmail: "jane@sfusd.edu", signInMethod: "One-time email link", signedInAt: new Date(), ip: "127.0.0.1", userAgent: "vitest", consentText: CONSENT_TEXT },
+      audit: { requesterEmail: "jane@example.org", signInMethod: "One-time email link", signedInAt: new Date(), ip: "127.0.0.1", userAgent: "vitest", consentText: CONSENT_TEXT },
     });
     // 1 form + 1 schedule + 4 images + 2 pdf pages + 1 audit
     expect(packet.pageCount).toBe(9);
@@ -98,10 +98,10 @@ describe("buildPacket", () => {
       requestId: "FY27-001",
       submittedAt: new Date(),
       request: input,
-      requesterEmail: "jane@sfusd.edu",
+      requesterEmail: "jane@example.org",
       receiptFiles: files,
       signature: { type: "drawn", png: new Uint8Array(png) },
-      audit: { requesterEmail: "jane@sfusd.edu", signInMethod: "One-time email link", signedInAt: new Date(), ip: "", userAgent: "", consentText: CONSENT_TEXT },
+      audit: { requesterEmail: "jane@example.org", signInMethod: "One-time email link", signedInAt: new Date(), ip: "", userAgent: "", consentText: CONSENT_TEXT },
     });
     expect(packet.pageCount).toBe(3);
   }, 30_000);

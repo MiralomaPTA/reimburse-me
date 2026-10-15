@@ -151,7 +151,7 @@ Recommendation: a small custom web app (option C) that keeps all data in the PTA
 
 The app holds no data of its own: receipts and signed PDFs go to a Workspace Drive folder (the backup and the archive are the same place), each request is a row in a Sheet, and sign-in links and packets go out through Gmail. The fs@miralomasf.com account owns the folder and Sheet and sends all email.
 
-**Workspace access.** The PTA is on Google Workspace for Nonprofits; pta.president@miralomasf.com is the super admin. The app acts as fs@miralomasf.com through a service account with domain-wide delegation for the Drive, Sheets and Gmail scopes, which the super admin authorizes once in the Admin console. Service accounts no longer have Drive storage of their own, so everything is written into fs@'s Drive.
+**Workspace access.** The PTA is on Google Workspace for Nonprofits. The app acts as fs@miralomasf.com through a service account with domain-wide delegation for the Drive, Sheets and Gmail scopes, which the super admin authorizes once in the Admin console. Service accounts no longer have Drive storage of their own, so everything is written into fs@'s Drive.
 
 **Uploads.** Receipts go from the browser straight to Drive through resumable upload sessions the app creates; HEIC is converted in the browser. The app server only reads files back from Drive to build the packet.
 
@@ -169,7 +169,7 @@ The app holds no data of its own: receipts and signed PDFs go to a Workspace Dri
 
 ## Rollout plan
 
-1. **Phase 0 — Setup.** pta.president@miralomasf.com creates a Google Cloud project under the miralomasf.com organization, enables the Drive, Sheets and Gmail APIs, creates the service account and authorizes its domain-wide delegation. Under fs@miralomasf.com: create the Drive folder and the request-log Sheet with an AP-list tab, create the Vercel project, and point the hostname at it. Create the PTA GitHub organization.
+1. **Phase 0 — Setup.** The Workspace super admin creates a Google Cloud project under the miralomasf.com organization, enables the Drive, Sheets and Gmail APIs, creates the service account and authorizes its domain-wide delegation. Under fs@miralomasf.com: create the Drive folder and the request-log Sheet with an AP-list tab, create the Vercel project, and point the hostname at it. Create the PTA GitHub organization.
 2. **Phase 1 — MVP.** Sign in, form matching the PTA form, receipt upload with camera, PDF packet, built-in signature, email to ap@miralomasf.com, row in the Sheet. Pilot with 3–5 teachers on the live app.
 3. **Phase 2 — AP workflow.** Return with a note, mark paid with check number, paid/returned emails to teachers, weekly digest.
 4. **Phase 3 — Nice to have.** Receipt OCR to prefill line items.
@@ -197,7 +197,7 @@ Success measures: share of requests submitted online, requests returned for miss
 | Sign-in | One-time email links; addresses are approved once via an approval email to ap@, recorded in the Users tab of the Sheet |
 | Hosting | Vercel free (Hobby) tier, in an account under fs@miralomasf.com |
 | Code | PTA-owned GitHub organization |
-| Workspace | Google Workspace for Nonprofits; pta.president@miralomasf.com is super admin; fs@miralomasf.com sends email and owns the Drive folder and Sheet; the app acts as fs@ through a service account with domain-wide delegation |
+| Workspace | Google Workspace for Nonprofits; fs@miralomasf.com sends email and owns the Drive folder and Sheet; the app acts as fs@ through a service account with domain-wide delegation |
 | Uploads | Browser to Drive directly; HEIC converted in the browser |
 | Request-log Sheet | AP may edit it directly; status changes go through the dashboard |
 | Environments | No separate pilot environment |
@@ -230,6 +230,6 @@ Each has a proposed default. The build follows the default unless it is changed 
 - Form: the Revised July 2022 fillable PDF replaces the 03/2009 reference. Added the renamed template, the field mapping, the VP/Chairman line, and the box-width limits.
 - Sign-in: a fixed staff allow-list is replaced by a Users tab with one-time approval by email. Unknown addresses are never emailed; the approver is. Non-goals and roles reworded to match.
 - Form content: budget category is assigned by AP; one line item per receipt; partial receipts allowed; phone required; requester details prefill from the last request.
-- Architecture: Workspace for Nonprofits with pta.president@ as super admin; service account with domain-wide delegation; uploads straight to Drive; HEIC converted in the browser; PTA-owned GitHub and Vercel under fs@; no pilot environment.
+- Architecture: Workspace for Nonprofits; service account with domain-wide delegation; uploads straight to Drive; HEIC converted in the browser; PTA-owned GitHub and Vercel under fs@; no pilot environment.
 - Review: AP may edit the Sheet directly, with status changes through the dashboard.
 - Added the Open questions section with proposed defaults.
