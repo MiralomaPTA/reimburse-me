@@ -61,6 +61,8 @@ export async function requestSignIn(input: { email: string; linkBase: string; ne
     approved_by: "",
     last_link_at: "",
     note: "",
+    grade: "",
+    stipend: "",
   });
   const url = new URL("/auth/approve", input.linkBase);
   url.searchParams.set("token", await createApprovalToken(email));
@@ -71,8 +73,25 @@ export async function requestSignIn(input: { email: string; linkBase: string; ne
 
 export type AccessDecision = "approve" | "deny";
 
-/** Applies the approver's decision. Approving emails the requester a sign-in link; denying stays silent. */
-export async function decideAccess(input: { email: string; decision: AccessDecision; decidedBy: string; linkBase: string }, deps: AccessDeps): Promise<UserRecord> {
+/**
+ * Applies the approver's decision. Approving emails the requester a sign-in
+ * link; denying stays silent. `role`, `grade` and `stipend`, when given,
+ * replace the row's values on approval ("" clears them); left out, the row's
+ * are kept, so values preloaded in the Sheet survive. An AP or admin row keeps
+ * its role: the approval page only chooses between teacher and staff.
+ */
+export async function decideAccess(
+  input: {
+    email: string;
+    decision: AccessDecision;
+    decidedBy: string;
+    linkBase: string;
+    role?: "requester" | "teacher";
+    grade?: string;
+    stipend?: string;
+  },
+  deps: AccessDeps,
+): Promise<UserRecord> {
   const email = input.email.trim().toLowerCase();
   const now = (deps.now ?? (() => new Date()))();
   const existing = await deps.users.get(email);
@@ -85,6 +104,8 @@ export async function decideAccess(input: { email: string; decision: AccessDecis
     approved_by: "",
     last_link_at: "",
     note: "",
+    grade: "",
+    stipend: "",
   };
 
   if (input.decision === "deny") {
@@ -93,8 +114,17 @@ export async function decideAccess(input: { email: string; decision: AccessDecis
     return denied;
   }
 
-  if (existing?.status === "approved" && same(existing.email, email)) return existing; // idempotent: a second click sends nothing
-  const approved: UserRecord = { ...base, status: "approved", approved_at: now.toISOString(), approved_by: input.decidedBy, last_link_at: now.toISOString() };
+  const role = base.role === "ap" || base.role === "admin" ? base.role : (input.role ?? base.role);
+  const grade = input.grade ?? base.grade;
+  const stipend = input.stipend ?? base.stipend;
+  if (existing?.status === "approved" && same(existing.email, email)) {
+    // idempotent: a second click sends nothing, but may still change role, grade or stipend
+    if (role === existing.role && grade === existing.grade && stipend === existing.stipend) return existing;
+    const updated: UserRecord = { ...existing, role, grade, stipend };
+    await deps.users.upsert(updated);
+    return updated;
+  }
+  const approved: UserRecord = { ...base, status: "approved", approved_at: now.toISOString(), approved_by: input.decidedBy, last_link_at: now.toISOString(), role, grade, stipend };
   await deps.users.upsert(approved);
   const mail = approvedEmail(signInLink(input.linkBase, await createMagicToken(email)));
   await deps.mailer.send({ to: [email], subject: mail.subject, text: mail.text });

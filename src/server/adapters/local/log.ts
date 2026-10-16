@@ -45,6 +45,9 @@ export const localRequestLog: RequestLog = {
     const wanted = email.toLowerCase();
     return (await readAll()).filter((r) => r.requester_email.toLowerCase() === wanted);
   },
+  async list() {
+    return readAll();
+  },
   async update(requestId, patch) {
     const rows = await readAll();
     const index = rows.findIndex((r) => r.request_id === requestId);

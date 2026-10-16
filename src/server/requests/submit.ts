@@ -5,6 +5,7 @@ import { config } from "@/server/config";
 import { apSubmissionEmail, requesterCopyEmail } from "@/server/email/templates";
 import { buildPacket } from "@/server/pdf/build-packet";
 import { CONSENT_TEXT, type PacketSignature } from "@/server/pdf/types";
+import { FundingError, fundingLabel, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
 import { loadReceiptFiles } from "@/server/requests/receipts";
 import { fiscalYearLabel, formatRequestId, requestIdPrefix } from "@/lib/fiscal-year";
 import { moneyPlain } from "@/lib/money";
@@ -23,6 +24,8 @@ export interface SubmitResult {
   pdfFileId: string;
   sha256: string;
   pageCount: number;
+  /** The requester's stipends with this request counted. */
+  funding: FundingOptions;
   /** false when the row was written but the email could not be sent. */
   emailed: boolean;
   emailError?: string;
@@ -37,9 +40,21 @@ function toPacketSignature(signature: SignatureInput): PacketSignature {
 /** Signs, stores, logs and emails a new request. */
 export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
   const { request, session, ip, userAgent } = input;
-  const { files, log, mailer } = await getAdapters();
+  const { files, log, mailer, users, stipends } = await getAdapters();
   const submittedAt = new Date();
-  const receiptFiles = await loadReceiptFiles(request, session.email);
+  const [receiptFiles, user, stipendRows, earlierRows] = await Promise.all([
+    loadReceiptFiles(request, session.email),
+    users.get(session.email),
+    stipends.list(),
+    log.list(),
+  ]);
+  const choices = fundingOptions(user, stipendRows, earlierRows, submittedAt).stipends;
+  if (request.funding !== "none" && !choices.some((s) => s.id === request.funding)) {
+    throw new FundingError("That stipend isn't one of yours. Choose another, or \"Not from a stipend\".");
+  }
+  // Blank when there was nothing to choose; AP can tell "chose none" from "wasn't asked".
+  const chosen = parseFundingChoice(request.funding);
+  const funding = choices.length > 0 ? fundingLabel(chosen.key, chosen.grade) : "";
 
   const prefix = requestIdPrefix(submittedAt);
   const requestId = formatRequestId(prefix, (await log.maxSequence(prefix)) + 1);
@@ -95,21 +110,32 @@ export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
     version: 1,
     updated_at: submittedAt.toISOString(),
     notes: "",
+    funding,
   };
   await log.append(row);
+  const after = fundingOptions(user, stipendRows, [...earlierRows, row], submittedAt);
 
-  const emailInput = { requestId, request, requesterEmail: session.email, submittedAt, sha256: packet.sha256, version: 1 };
+  const emailInput = {
+    requestId,
+    request,
+    requesterEmail: session.email,
+    submittedAt,
+    sha256: packet.sha256,
+    version: 1,
+    funding,
+    stipend: after.stipends.find((s) => s.id === request.funding) ?? null,
+  };
   const attachment = { filename: pdfName, mimeType: "application/pdf", bytes: packet.bytes };
   try {
     const ap = apSubmissionEmail(emailInput);
     await mailer.send({ to: [config.apEmail], replyTo: session.email, subject: ap.subject, text: ap.text, attachments: [attachment] });
     const copy = requesterCopyEmail(emailInput);
     await mailer.send({ to: [session.email], subject: copy.subject, text: copy.text, attachments: [attachment] });
-    return { requestId, pdfFileId: stored.id, sha256: packet.sha256, pageCount: packet.pageCount, emailed: true };
+    return { requestId, pdfFileId: stored.id, sha256: packet.sha256, pageCount: packet.pageCount, funding: after, emailed: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[submit] email failed for ${requestId}: ${message}`);
     await log.update(requestId, { notes: `Email failed at submission: ${message}` }).catch(() => undefined);
-    return { requestId, pdfFileId: stored.id, sha256: packet.sha256, pageCount: packet.pageCount, emailed: false, emailError: message };
+    return { requestId, pdfFileId: stored.id, sha256: packet.sha256, pageCount: packet.pageCount, funding: after, emailed: false, emailError: message };
   }
 }

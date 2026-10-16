@@ -5,10 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { formatMoney, parseMoney } from "@/lib/money";
 import { DESCRIPTION_MAX, type RequestInput } from "@/lib/request-schema";
 import { uploadReceipt } from "@/lib/upload-client";
+import type { FundingOptions, StipendStatus } from "@/server/requests/stipends";
 import type { Profile } from "@/server/requests/profile";
 import { MailtoLink } from "@/components/MailtoLink";
 import { ReceiptUpload, type ReceiptState } from "@/components/ReceiptUpload";
 import { SignaturePad, type SignaturePadHandle } from "@/components/SignaturePad";
+import { stipendLeft } from "@/components/StipendSummary";
 
 interface ItemState {
   key: string;
@@ -27,6 +29,8 @@ interface FormState {
   purpose: string;
   items: ItemState[];
   donation: string;
+  /** A choice's id ("classroom", "grade:2", "none"), or "" until the requester picks; only asked when they have stipends. */
+  funding: string;
 }
 
 const DRAFT_KEY = "rm:draft:v1";
@@ -44,6 +48,7 @@ const emptyForm = (profile: Profile | null): FormState => ({
   purpose: "",
   items: [newItem()],
   donation: "",
+  funding: "",
 });
 
 function loadDraft(): FormState | null {
@@ -54,6 +59,7 @@ function loadDraft(): FormState | null {
     // Only finished uploads survive a reload; anything mid-flight is dropped.
     draft.items = draft.items.map((item) => ({ ...item, receipts: item.receipts.filter((r) => r.status === "done" && r.fileId) }));
     if (draft.items.length === 0) draft.items = [newItem()];
+    draft.funding ??= "";
     return draft;
   } catch {
     return null;
@@ -77,7 +83,7 @@ function clearDraft() {
 }
 
 /** Converts form state to the API payload, collecting user-facing problems. */
-function toRequestInput(form: FormState): { input: RequestInput | null; problems: string[] } {
+function toRequestInput(form: FormState, stipends: StipendStatus[]): { input: RequestInput | null; problems: string[] } {
   const problems: string[] = [];
   const items: RequestInput["items"] = [];
   form.items.forEach((item, i) => {
@@ -103,6 +109,9 @@ function toRequestInput(form: FormState): { input: RequestInput | null; problems
   if (form.phone.replace(/\D/g, "").length < 7) problems.push("Enter a phone number.");
   if (!form.purpose.trim()) problems.push("Say what the expenditure was for.");
   if (form.checkDelivery === "mail" && (!form.address.trim() || !form.cityZip.trim())) problems.push("Enter the address to mail the check to.");
+  // A draft may name a stipend the requester no longer has; make them choose again.
+  const funding = form.funding === "none" || stipends.some((s) => s.id === form.funding) ? form.funding : "";
+  if (stipends.length > 0 && !funding) problems.push("Choose which stipend this comes from, or \"Not from a stipend\".");
   if (problems.length) return { input: null, problems };
   return {
     input: {
@@ -115,6 +124,7 @@ function toRequestInput(form: FormState): { input: RequestInput | null; problems
       purpose: form.purpose.trim(),
       items,
       donationCents: donationCents ?? 0,
+      funding: funding || "none",
     },
     problems,
   };
@@ -142,26 +152,32 @@ const noop = () => () => {};
  * state without a hydration mismatch. A draft in progress wins; otherwise the
  * "about you" fields start from the requester's last request.
  */
-export function NewRequestForm({ email, apEmail, profile }: { email: string; apEmail: string; profile: Profile | null }) {
+export function NewRequestForm({ email, apEmail, profile, funding }: { email: string; apEmail: string; profile: Profile | null; funding: FundingOptions }) {
   const mounted = useSyncExternalStore(noop, () => true, () => false);
   if (!mounted) return <p className="text-neutral-500">Loading…</p>;
   const draft = loadDraft();
-  return <RequestForm email={email} apEmail={apEmail} profile={profile} initialForm={draft ?? emptyForm(profile)} prefilled={!draft && profile !== null} />;
+  return (
+    <RequestForm email={email} apEmail={apEmail} profile={profile} funding={funding} initialForm={draft ?? emptyForm(profile)} prefilled={!draft && profile !== null} />
+  );
 }
 
 interface RequestFormProps {
   email: string;
   apEmail: string;
   profile: Profile | null;
+  /** The requester's stipends before this request; none means the form doesn't ask. */
+  funding: FundingOptions;
   initialForm: FormState;
   /** True when the "about you" fields came from the last request rather than a draft. */
   prefilled: boolean;
 }
 
-function RequestForm({ email, apEmail, profile, initialForm, prefilled }: RequestFormProps) {
+function RequestForm({ email, apEmail, profile, funding: initialFunding, initialForm, prefilled }: RequestFormProps) {
   const [form, setForm] = useState<FormState>(initialForm);
   // After a submission, "Start another" prefills from what was just sent.
   const latestProfile = useRef<Profile | null>(profile);
+  // ...and counts it against the stipend it came from.
+  const [funding, setFunding] = useState<FundingOptions>(initialFunding);
   const [step, setStep] = useState<Step>("form");
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState<null | "preview" | "submit">(null);
@@ -170,7 +186,7 @@ function RequestForm({ email, apEmail, profile, initialForm, prefilled }: Reques
   const [consent, setConsent] = useState(false);
   const [signMode, setSignMode] = useState<"typed" | "drawn">("typed");
   const [typedName, setTypedName] = useState("");
-  const [result, setResult] = useState<{ requestId: string; emailed: boolean } | null>(null);
+  const [result, setResult] = useState<{ requestId: string; emailed: boolean; funding: string } | null>(null);
   const padRef = useRef<SignaturePadHandle>(null);
 
   useEffect(() => {
@@ -234,7 +250,7 @@ function RequestForm({ email, apEmail, profile, initialForm, prefilled }: Reques
   }, [form.items, form.donation]);
 
   async function preview() {
-    const { input, problems: found } = toRequestInput(form);
+    const { input, problems: found } = toRequestInput(form, funding.stipends);
     setProblems(found);
     if (!input) {
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -299,7 +315,8 @@ function RequestForm({ email, apEmail, profile, initialForm, prefilled }: Reques
         address: requestInput.address,
         cityZip: requestInput.cityZip,
       };
-      setResult({ requestId: body.requestId, emailed: body.emailed });
+      if (body.funding) setFunding(body.funding);
+      setResult({ requestId: body.requestId, emailed: body.emailed, funding: requestInput.funding });
       setStep("done");
       window.scrollTo({ top: 0 });
     } catch {
@@ -319,7 +336,11 @@ function RequestForm({ email, apEmail, profile, initialForm, prefilled }: Reques
     setStep("form");
   }
 
+  // The stipend picked on the form, or the one just submitted against.
+  const chosen = funding.stipends.find((s) => s.id === (step === "done" ? result?.funding : form.funding)) ?? null;
+
   if (step === "done" && result) {
+    const left = chosen && stipendLeft(chosen);
     return (
       <div className="mx-auto max-w-lg space-y-4">
         <h1 className="text-2xl font-semibold">Sent to the PTA</h1>
@@ -327,6 +348,11 @@ function RequestForm({ email, apEmail, profile, initialForm, prefilled }: Reques
           Your request <strong>{result.requestId}</strong> is signed and on its way to the accounts payable team.
           {result.emailed ? ` A copy went to ${email}.` : ""}
         </p>
+        {chosen && left && (
+          <p className="text-neutral-700">
+            {chosen.label}: {left}.
+          </p>
+        )}
         {!result.emailed && (
           <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             The request was recorded, but the email to the AP team didn&apos;t go through. Please let <MailtoLink email={apEmail} /> know your
@@ -369,7 +395,10 @@ function RequestForm({ email, apEmail, profile, initialForm, prefilled }: Reques
             <a href={previewUrl} target="_blank" rel="noopener" className="underline">
               Open preview in a new tab
             </a>
-            <span className="text-neutral-500">Reimbursement claimed: {formatMoney(totals.claimed)}</span>
+            <span className="text-neutral-500">
+              Reimbursement claimed: {formatMoney(totals.claimed)}
+              {chosen ? ` · ${chosen.label}` : form.funding === "none" && funding.stipends.length > 0 ? " · Not from a stipend" : ""}
+            </span>
           </div>
         </div>
 
@@ -490,6 +519,17 @@ function RequestForm({ email, apEmail, profile, initialForm, prefilled }: Reques
           </label>
           <input id="purpose" className="field" placeholder="2nd grade art supplies" maxLength={60} value={form.purpose} onChange={(e) => update("purpose", e.target.value)} />
         </div>
+        {funding.stipends.length > 0 && (
+          <fieldset>
+            <legend className="label">Which stipend is this from?</legend>
+            <div className="space-y-2">
+              {funding.stipends.map((stipend) => (
+                <FundingChoice key={stipend.id} checked={form.funding === stipend.id} onChange={() => update("funding", stipend.id)} label={stipend.label} detail={stipend.sharedWith && `Shared with ${stipend.sharedWith}`} left={stipendLeft(stipend)} />
+              ))}
+              <FundingChoice checked={form.funding === "none"} onChange={() => update("funding", "none")} label="Not from a stipend" />
+            </div>
+          </fieldset>
+        )}
       </section>
 
       <section className="space-y-4">
@@ -563,6 +603,7 @@ function RequestForm({ email, apEmail, profile, initialForm, prefilled }: Reques
           <dt className="font-medium">Reimbursement claimed</dt>
           <dd className="text-right text-lg font-semibold">{formatMoney(totals.claimed)}</dd>
         </dl>
+        {chosen && chosen.remainingCents !== null && <StipendAfter stipend={chosen} claimedCents={totals.claimed} />}
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -572,5 +613,40 @@ function RequestForm({ email, apEmail, profile, initialForm, prefilled }: Reques
         <span className="text-sm text-neutral-500">Your draft is saved on this device.</span>
       </div>
     </form>
+  );
+}
+
+function FundingChoice({ checked, onChange, label, detail, left }: { checked: boolean; onChange: () => void; label: string; detail?: string | null; left?: string | null }) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-md border border-neutral-200 bg-white p-3 text-sm has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
+      <input type="radio" name="funding" className="mt-0.5" checked={checked} onChange={onChange} />
+      <span className="flex-1">
+        <span className="font-medium">{label}</span>
+        {detail && <span className="block text-neutral-500">{detail}</span>}
+      </span>
+      {left && <span className="text-neutral-600">{left}</span>}
+    </label>
+  );
+}
+
+/** What's left of the chosen stipend, before and after this request. A warning, never a block: AP decides. */
+function StipendAfter({ stipend, claimedCents }: { stipend: StipendStatus; claimedCents: number }) {
+  const before = stipend.remainingCents ?? 0;
+  const afterCents = before - claimedCents;
+  return (
+    <div className="space-y-2 border-t border-neutral-200 pt-4">
+      <dl className="grid grid-cols-2 gap-y-2 text-sm">
+        <dt className="text-neutral-600">Left in {stipend.label.toLowerCase()}</dt>
+        <dd className="text-right">{formatMoney(before)}</dd>
+        <dt className="text-neutral-600">Left after this request</dt>
+        <dd className={`text-right font-medium ${afterCents < 0 ? "text-amber-800" : ""}`}>{formatMoney(afterCents)}</dd>
+      </dl>
+      {afterCents < 0 && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          This is {formatMoney(Math.min(-afterCents, claimedCents))} more than what&apos;s left in the {stipend.label.toLowerCase()}. You can still submit it;
+          the AP team will decide what to reimburse.
+        </p>
+      )}
+    </div>
   );
 }

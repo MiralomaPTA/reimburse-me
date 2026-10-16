@@ -41,19 +41,55 @@ export class SheetTable<T extends object> {
     return `'${this.sheetName.replace(/'/g, "''")}'!${a1}`;
   }
 
-  /** The header row, written once if the tab is empty. */
+  /**
+   * The header row. Written in full if the tab is empty or missing; columns
+   * the app gained since the tab was made are appended to the end, so an
+   * existing spreadsheet never needs rebuilding.
+   */
   async headers(): Promise<string[]> {
     const { spreadsheetId } = googleConfig();
-    const { data } = await sheets().spreadsheets.values.get({ spreadsheetId, range: this.range("1:1") });
-    const existing = (data.values?.[0] ?? []).map(String);
-    if (existing.length > 0) return existing;
+    const existing = await this.headerRow();
+    const missing = this.columns.filter((col) => !existing.includes(col));
+    if (missing.length === 0) return existing;
+    await this.ensureColumns(existing.length + missing.length);
     await sheets().spreadsheets.values.update({
       spreadsheetId,
-      range: this.range("A1"),
+      range: this.range(`${columnLetter(existing.length)}1`),
       valueInputOption: "RAW",
-      requestBody: { values: [[...this.columns]] },
+      requestBody: { values: [missing] },
     });
-    return [...this.columns];
+    return [...existing, ...missing];
+  }
+
+  /** Row 1 as written. A tab the app gained after setup (like Stipends) is created, empty, on first use. */
+  private async headerRow(): Promise<string[]> {
+    const { spreadsheetId } = googleConfig();
+    try {
+      const { data } = await sheets().spreadsheets.values.get({ spreadsheetId, range: this.range("1:1") });
+      return (data.values?.[0] ?? []).map(String);
+    } catch (error) {
+      if (await this.tab()) throw error; // the tab exists, so this is some other failure
+      await sheets().spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [{ addSheet: { properties: { title: this.sheetName } } }] } });
+      return [];
+    }
+  }
+
+  private async tab(): Promise<sheets_v4.Schema$SheetProperties | null> {
+    const { spreadsheetId } = googleConfig();
+    const { data } = await sheets().spreadsheets.get({ spreadsheetId, fields: "sheets.properties" });
+    return data.sheets?.find((s) => s.properties?.title === this.sheetName)?.properties ?? null;
+  }
+
+  /** Widens the tab to `count` columns if needed; a new tab has only 26 (A–Z), and writing past the grid fails. */
+  private async ensureColumns(count: number): Promise<void> {
+    const { spreadsheetId } = googleConfig();
+    const props = await this.tab();
+    const current = props?.gridProperties?.columnCount ?? 0;
+    if (props?.sheetId == null || current >= count) return;
+    await sheets().spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: { requests: [{ appendDimension: { sheetId: props.sheetId, dimension: "COLUMNS", length: count - current } }] },
+    });
   }
 
   private fromSheet(cols: string[], values: unknown[]): T {

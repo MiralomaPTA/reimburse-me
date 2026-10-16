@@ -48,6 +48,16 @@ describe("request schema", () => {
     expect(totals(parsed)).toEqual({ totalCents: 1250, donationCents: 0, reimbursementCents: 1250 });
   });
 
+  it("takes a funding choice, naming the grade for a grade's stipend", () => {
+    expect(requestInputSchema.parse(base).funding).toBe("none");
+    for (const funding of ["classroom", "grade:2", "grade:TK", "field_trip", "stipend", "none"]) {
+      expect(requestInputSchema.safeParse({ ...base, funding }).success).toBe(true);
+    }
+    for (const funding of ["grade", "grade:", "grade:2nd grade", "budget"]) {
+      expect(requestInputSchema.safeParse({ ...base, funding }).success).toBe(false);
+    }
+  });
+
   it("requires an address when the check is mailed", () => {
     const result = requestInputSchema.safeParse({ ...base, checkDelivery: "mail" });
     expect(result.success).toBe(false);

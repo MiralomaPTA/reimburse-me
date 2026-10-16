@@ -31,6 +31,9 @@ export const googleRequestLog: RequestLog = {
     const wanted = email.toLowerCase();
     return (await requests().readAll()).map((r) => r.row).filter((r) => r.requester_email.toLowerCase() === wanted);
   },
+  async list() {
+    return (await requests().readAll()).map((r) => r.row);
+  },
   async update(requestId, patch) {
     await requests().update(requestId, { ...patch, updated_at: new Date().toISOString() });
   },

@@ -1,0 +1,122 @@
+[
+  {
+    "email": "treasurer@example.org",
+    "role": "ap",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "AP team. Not asked which stipend: AP members aren't teachers and have no stipend of their own.",
+    "grade": "",
+    "stipend": ""
+  },
+  {
+    "email": "admin@example.org",
+    "role": "admin",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "PTA tech volunteer who maintains the Users and Stipends tabs.",
+    "grade": "",
+    "stipend": ""
+  },
+  {
+    "email": "grade2.teacher@example.org",
+    "role": "teacher",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "Chooses classroom stipend, Grade 2 stipend, field trip, or none.",
+    "grade": "2",
+    "stipend": ""
+  },
+  {
+    "email": "grade2.partner@example.org",
+    "role": "teacher",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "Shares the Grade 2 stipend with grade2.teacher; each has their own classroom stipend.",
+    "grade": "2",
+    "stipend": ""
+  },
+  {
+    "email": "combo.teacher@example.org",
+    "role": "teacher",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "Combination class: chooses from the Grade 1 and Grade 2 stipends as well as classroom and field trip. List grades with commas; the Sheet turns 1/2 into a date.",
+    "grade": "1, 2",
+    "stipend": ""
+  },
+  {
+    "email": "tk.teacher@example.org",
+    "role": "teacher",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "Transitional kindergarten: draws on the Grade TK stipend.",
+    "grade": "TK",
+    "stipend": ""
+  },
+  {
+    "email": "jobshare.teacher@example.org",
+    "role": "teacher",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "Job share: their own stipend ($125) overrides the standard classroom amount.",
+    "grade": "K",
+    "stipend": "125"
+  },
+  {
+    "email": "music.teacher@example.org",
+    "role": "teacher",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "Teaches every grade, so no grade: chooses classroom stipend, field trip, or none.",
+    "grade": "",
+    "stipend": ""
+  },
+  {
+    "email": "librarian@example.org",
+    "role": "requester",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "Staff with their own stipend: chooses Stipend or Not from a stipend.",
+    "grade": "",
+    "stipend": "300"
+  },
+  {
+    "email": "volunteer@example.org",
+    "role": "requester",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "note": "Approved volunteer with no stipend: never asked which stipend.",
+    "grade": "",
+    "stipend": ""
+  }
+]

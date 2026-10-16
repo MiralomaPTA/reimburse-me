@@ -1,0 +1,11 @@
+[
+  { "name": "Classroom", "amount": "250", "note": "Each teacher's own classroom stipend. A stipend on a teacher's Users row overrides it." },
+  { "name": "Field trip", "amount": "3000", "note": "One fund for the whole school, shared by all teachers." },
+  { "name": "Grade TK", "amount": "600", "note": "Transitional kindergarten, shared by the TK teachers." },
+  { "name": "Grade K", "amount": "1000", "note": "Shared by the kindergarten teachers." },
+  { "name": "Grade 1", "amount": "1000", "note": "" },
+  { "name": "Grade 2", "amount": "1200", "note": "" },
+  { "name": "Grade 3", "amount": "1200", "note": "" },
+  { "name": "Grade 4", "amount": "1200", "note": "" },
+  { "name": "Grade 5", "amount": "1200", "note": "" }
+]

@@ -61,7 +61,7 @@ describe("requestSignIn", () => {
   });
 
   it("emails an approved address a sign-in link, at most once a minute", async () => {
-    await users.upsert({ email: "ok@example.org", role: "requester", status: "approved", requested_at: "", approved_at: "", approved_by: "", last_link_at: "", note: "" });
+    await users.upsert({ email: "ok@example.org", role: "requester", status: "approved", requested_at: "", approved_at: "", approved_by: "", last_link_at: "", note: "", grade: "", stipend: "" });
     expect(await requestSignIn({ email: "ok@example.org", linkBase: BASE, next: "/requests" }, deps())).toBe("sent");
     expect(mailer.sent).toHaveLength(1);
     expect(mailer.sent[0].to).toEqual(["ok@example.org"]);
@@ -112,5 +112,33 @@ describe("decideAccess", () => {
     const record = await decideAccess({ email: "Fresh@example.org", decision: "approve", decidedBy: "link", linkBase: BASE }, { users, mailer });
     expect(record).toMatchObject({ email: "fresh@example.org", status: "approved", role: "requester" });
     expect(users.rows).toHaveLength(1);
+  });
+
+  it("sets role, grade and stipend on approval, and a later click can change them without another email", async () => {
+    const users = new MemoryUsers();
+    const mailer = new MemoryMailer();
+    await requestSignIn({ email: "b@example.org", linkBase: BASE }, { users, mailer });
+    await decideAccess({ email: "b@example.org", decision: "approve", decidedBy: "link", linkBase: BASE, role: "teacher", grade: "2", stipend: "" }, { users, mailer });
+    expect(users.rows[0]).toMatchObject({ status: "approved", role: "teacher", grade: "2", stipend: "" });
+    expect(mailer.sent).toHaveLength(2);
+    await decideAccess({ email: "b@example.org", decision: "approve", decidedBy: "link", linkBase: BASE, role: "requester", grade: "", stipend: "150.00" }, { users, mailer });
+    expect(users.rows[0]).toMatchObject({ role: "requester", grade: "", stipend: "150.00" });
+    expect(mailer.sent).toHaveLength(2);
+  });
+
+  it("never changes an AP or admin role from the approval page", async () => {
+    const users = new MemoryUsers();
+    const mailer = new MemoryMailer();
+    await users.upsert({ email: "ap@example.org", role: "ap", status: "pending", requested_at: "", approved_at: "", approved_by: "", last_link_at: "", note: "", grade: "", stipend: "" });
+    await decideAccess({ email: "ap@example.org", decision: "approve", decidedBy: "link", linkBase: BASE, role: "teacher" }, { users, mailer });
+    expect(users.rows[0]).toMatchObject({ status: "approved", role: "ap" });
+  });
+
+  it("keeps a role, grade and stipend preloaded in the Sheet when the approval doesn't give them", async () => {
+    const users = new MemoryUsers();
+    const mailer = new MemoryMailer();
+    await users.upsert({ email: "p@example.org", role: "teacher", status: "pending", requested_at: "", approved_at: "", approved_by: "", last_link_at: "", note: "", grade: "K", stipend: "300" });
+    await decideAccess({ email: "p@example.org", decision: "approve", decidedBy: "link", linkBase: BASE }, { users, mailer });
+    expect(users.rows[0]).toMatchObject({ status: "approved", role: "teacher", grade: "K", stipend: "300" });
   });
 });

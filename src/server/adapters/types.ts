@@ -69,6 +69,12 @@ export interface RequestRow {
   version: number;
   updated_at: string;
   notes: string;
+  /**
+   * Which stipend the requester chose to pay this from: "Classroom stipend",
+   * "Grade 2 stipend", "Field trip", "Stipend" or "Not from a stipend". Blank
+   * when they had none to choose from. AP may correct it in the Sheet.
+   */
+  funding: string;
 }
 
 export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
@@ -98,6 +104,7 @@ export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
   "version",
   "updated_at",
   "notes",
+  "funding",
 ];
 
 export interface RequestLog {
@@ -106,6 +113,8 @@ export interface RequestLog {
   append(row: RequestRow): Promise<void>;
   get(requestId: string): Promise<RequestRow | null>;
   listByEmail(email: string): Promise<RequestRow[]>;
+  /** Every request; shared stipends add up across requesters. */
+  list(): Promise<RequestRow[]>;
   update(requestId: string, patch: Partial<RequestRow>): Promise<void>;
 }
 
@@ -128,13 +137,14 @@ export interface Mailer {
   send(message: MailMessage): Promise<void>;
 }
 
-export type UserRole = "requester" | "ap" | "admin";
+/** `requester` covers staff and volunteers; `teacher` gets the teacher stipends; `ap` and `admin` are set in the Sheet. */
+export type UserRole = "requester" | "teacher" | "ap" | "admin";
 export type UserStatus = "pending" | "approved" | "denied";
 
 /**
  * One row in the Users tab: the allow-list for sign-in and, through `role`,
- * the AP list. Admins may edit the tab directly (paste staff emails as
- * approved, set role to ap or admin).
+ * the teacher list and the AP list. Admins may edit the tab directly (paste
+ * staff emails as approved, set role to teacher, ap or admin).
  */
 export interface UserRecord {
   email: string;
@@ -146,6 +156,19 @@ export interface UserRecord {
   /** When a sign-in link was last emailed; backs a durable per-address cooldown. */
   last_link_at: string;
   note: string;
+  /**
+   * For a teacher, the grade or grades they teach, e.g. "2", or "1, 2" for a
+   * combination class: whose shared stipends they draw on. Blank for a teacher
+   * of no one grade (they still get the classroom stipend and field-trip fund)
+   * and for non-teachers.
+   */
+  grade: string;
+  /**
+   * A non-teacher's own yearly stipend in dollars, e.g. "300"; they choose
+   * between it and none. For a teacher it replaces the standard classroom
+   * amount. Blank means none.
+   */
+  stipend: string;
 }
 
 export const USER_COLUMNS: (keyof UserRecord)[] = [
@@ -157,6 +180,8 @@ export const USER_COLUMNS: (keyof UserRecord)[] = [
   "approved_by",
   "last_link_at",
   "note",
+  "grade",
+  "stipend",
 ];
 
 export interface UserDirectory {
@@ -167,9 +192,28 @@ export interface UserDirectory {
   countPendingSince(sinceIso: string): Promise<number>;
 }
 
+/**
+ * One row in the Stipends tab: the PTA-wide amounts for the current fiscal
+ * year, edited by the treasurer. `name` is "Classroom" (each teacher's own
+ * amount), "Field trip" (one fund the whole school shares) or "Grade TK",
+ * "Grade 1", ... (one fund per grade, shared by its teachers).
+ */
+export interface StipendRow {
+  name: string;
+  amount: string;
+  note: string;
+}
+
+export const STIPEND_COLUMNS: (keyof StipendRow)[] = ["name", "amount", "note"];
+
+export interface StipendTable {
+  list(): Promise<StipendRow[]>;
+}
+
 export interface Adapters {
   files: FileStore;
   log: RequestLog;
   users: UserDirectory;
+  stipends: StipendTable;
   mailer: Mailer;
 }

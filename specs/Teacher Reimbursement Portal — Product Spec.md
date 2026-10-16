@@ -1,6 +1,6 @@
 # Teacher Reimbursement Portal — Product Spec
 
-Oct 14, 2026 · @Russ · Draft v0.2
+Oct 16, 2026 · @Russ · Draft v0.3
 
 ## Overview
 
@@ -8,7 +8,7 @@ A web form on miralomasf.com where a teacher uploads receipts, fills in a few de
 
 **Problem today:** teachers fill out a paper or emailed form, photocopy or photograph receipts, sign by hand, and get it to the treasurer. Packets arrive incomplete (missing receipts, budget line, or signature), the treasurer chases details, and there is no single place to see what is pending or paid.
 
-**What the portal does:** collects the request in a structured form, assembles a standard PDF with the receipts attached, captures the teacher's signature electronically, notifies the treasurer, and tracks the request through approval and payment.
+**What the portal does:** collects the request in a structured form, assembles a standard PDF with the receipts attached, captures the teacher's signature electronically, notifies the treasurer, and tracks the request through approval and payment. Each request also says which stipend it comes from, and teachers and staff can see how much of each stipend is left.
 
 ## Goals and non-goals
 
@@ -18,12 +18,13 @@ A web form on miralomasf.com where a teacher uploads receipts, fills in a few de
 - Every submission produces one PDF: the PTA reimbursement form on page 1, receipts on the following pages.
 - The teacher signs electronically; no printing or scanning.
 - The treasurer gets a complete, consistent packet every time and can see all open requests in one list.
+- Teachers and staff with a stipend can see how much is left before they spend, and the treasurer sees which stipend every request comes from.
 - Zero added running cost: no paid services or subscriptions (hard requirement). Sized for about 50 requests a month.
 
 **Non-goals (for now)**
 
 - Issuing payment. Teachers stay on paper checks; the portal only records the check number and date.
-- Replacing the PTA's bookkeeping software or budget tracking.
+- Replacing the PTA's bookkeeping software. The portal shows where each stipend stands so requesters can plan, but it never blocks a request for going over; the treasurer's books stay the record.
 - Purchase pre-approval or purchase orders.
 - Checking who a requester is beyond the one-time approval of their email address. The PTA still only reimburses staff and approved volunteers, and AP confirms that at review.
 
@@ -31,19 +32,20 @@ A web form on miralomasf.com where a teacher uploads receipts, fills in a few de
 
 | Role | Who | What they do in the portal |
 | --- | --- | --- |
-| Requester | Teachers, staff and approved volunteers, each approved once by email address | Submit requests, sign, see status of their own requests |
-| AP team | Everyone on ap@miralomasf.com, including the treasurer | Approve new requester addresses, receive every signed packet, review, assign the budget category, return with a note, mark paid with check number |
-| Admin | PTA tech volunteer | Maintain the Users tab of the request-log Sheet: pre-approve staff addresses, set roles, fix mistakes |
+| Teacher | Classroom teachers, each approved once by email address; `role` = teacher in the Users tab | Submit requests, choose which stipend each comes from, sign, see their own requests and their stipends |
+| Staff or volunteer | Other staff and approved volunteers, approved the same way; `role` = requester | Submit requests, sign, see their own requests. Staff with their own stipend also choose whether each request comes from it |
+| AP team | Everyone on ap@miralomasf.com, including the treasurer | Approve new requester addresses and mark each as teacher or staff, receive every signed packet, review, assign the budget category, return with a note, mark paid with check number. The treasurer keeps the Stipends tab's amounts current each fiscal year |
+| Admin | PTA tech volunteer | Maintain the Users and Stipends tabs of the request-log Sheet: pre-approve addresses, set roles, grades and stipends, fix mistakes |
 
 Only the requester signs; no second signature is collected in the portal. The form's *Signature of VP/Chairman for Program/Event* line and the *For PTA treasurer use* block stay blank for AP to handle outside the portal.
 
 Sign-in uses one-time links emailed to the requester: no passwords and no Google account. Links expire after 15 minutes. Who may sign in is the *Users* tab of the request-log Sheet:
 
 - An approved address gets a sign-in link, at most one a minute.
-- An unknown address gets nothing. It is added to the tab as pending, and one email goes to the approver address (ap@miralomasf.com by default) with an approve/deny link that works for 7 days. Approving flips the row and emails the teacher a sign-in link right away; denying is silent. Repeat requests from a pending or denied address send nothing.
-- The admin can paste staff addresses into the tab as approved ahead of time, so most teachers never wait.
+- An unknown address gets nothing. It is added to the tab as pending, and one email goes to the approver address (ap@miralomasf.com by default) with an approve/deny link that works for 7 days. On the approval page the approver says whether they are a teacher (and which grades) or staff, and can enter a staff stipend. Approving flips the row and emails the teacher a sign-in link right away; denying is silent. Repeat requests from a pending or denied address send nothing.
+- The admin can paste staff addresses into the tab as approved ahead of time, with their role, grade and stipend, so most teachers never wait.
 
-Because nothing is ever emailed to an unknown address, the form can't be used to spam strangers; the worst case is a bounded trickle of approval requests to ap@, capped at 20 new pending addresses a day. The tab's *role* column (requester, ap, admin) is also the AP list that unlocks the dashboard in Phase 2.
+Because nothing is ever emailed to an unknown address, the form can't be used to spam strangers; the worst case is a bounded trickle of approval requests to ap@, capped at 20 new pending addresses a day. The tab's *role* column (requester, teacher, ap, admin) marks who gets the teacher stipends and is also the AP list that unlocks the dashboard in Phase 2. The approval page only chooses between teacher and requester; ap and admin are set in the Sheet, and approving never changes them.
 
 ## User flow
 
@@ -66,6 +68,7 @@ Fields map one-to-one to the PTA's *Payment Authorization / Request for Reimburs
 | Telephone | phone_area_code, phone_number | Text, required | |
 | Email | email | Prefilled | From the sign-in link |
 | Expenditure was for | purpose | Text | Purpose, e.g. "2nd grade art supplies" |
+| Paid from | — | Choice, required when shown | Which stipend the request comes from. Not on the form; recorded in the Sheet and in both emails. The choices depend on the requester; see *Stipends* |
 | List Expenditures (4 lines) | item_1_description, item_1_amount … item_4_description, item_4_amount | Repeating line items: description, amount, receipt | One line item per receipt. Description capped at 30 characters to fit the form. Amount may be less than the receipt total (partial reimbursement is allowed). More than 4 lines → see *PDF generation* |
 | TOTAL EXPENSE | total_expense | Calculated | Sum of line items |
 | Total Amount Claimed From Above | total_claimed | Calculated | Equals total expense |
@@ -112,17 +115,38 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 
 - AP dashboard: list of requests with status, amount, category, age; filter by status.
 - AP assigns the budget category at review. It lives in the Sheet and the CSV export, not on the teacher's form.
-- Statuses: Draft → Submitted → Approved / Returned → Paid.
+- Statuses: Draft → Submitted → Approved / Returned → Check written → Paid. *Check written* covers the gap while a check waits for the PTA's required second signature; the teacher is emailed only at Paid, when it has gone out.
 - Returned requests go back to the teacher with a note; they edit and re-sign.
-- AP marks Paid with check number and date.
+- AP records the check number and date when the check is written, and marks it Paid once both signatures are on it and it has gone out.
 - The request-log Sheet may be edited directly. The app finds rows by request ID and columns by header name, so sorting, filtering and adding columns are safe; renaming a header breaks it. Status changes should still be made in the dashboard, because that is what sends the teacher's email and writes the audit trail; a status typed into the Sheet sends nothing.
 - CSV export for bookkeeping.
 
 ### 6. Notifications
 
-- Every completed request: signed PDF emailed to ap@miralomasf.com, with a copy to the requester.
+- Every completed request: signed PDF emailed to ap@miralomasf.com, with a copy to the requester. Both say which stipend the request comes from and where that stipend stands after it, e.g. "Paid from: Grade 2 stipend (shared by grade 2 teachers): $1,200.00, $529.15 claimed including this request, $670.85 left".
 - Requester emailed when a request is returned (with the note) and when it is paid (check number and date).
 - Weekly digest to ap@miralomasf.com of anything not marked paid after 7 days.
+
+### 7. Stipends
+
+Some requesters spend against PTA stipends that reset each fiscal year (July to June). Every request records which stipend it comes from, and the portal shows how much of each is left.
+
+| Stipend | Who can choose it | Amount comes from | Shared |
+| --- | --- | --- | --- |
+| Classroom stipend | Teachers | The *Classroom* row of the Stipends tab, the same for every teacher. A teacher's own *stipend* in the Users tab replaces it (a job share, say) | No: each teacher's own |
+| Grade *N* stipend | Teachers of grade *N*; a teacher of several grades (a combination class) gets one choice per grade | The *Grade N* row of the Stipends tab | Yes: by that grade's teachers |
+| Field trip | Teachers | The *Field trip* row of the Stipends tab | Yes: by all teachers, school-wide |
+| Stipend | Anyone else with their own stipend (staff) | Their *stipend* in the Users tab | No |
+| Not from a stipend | Everyone who is asked | — | — |
+
+- **Who is asked.** Teachers (`role` = teacher) choose among their classroom stipend, the stipend of each grade they teach (one per grade for a combination class, none if their row has no grade), the field-trip fund, or not from a stipend. Anyone else with their own stipend chooses it or not. Everyone else is not asked, and the request's *funding* cell stays blank.
+- **Required.** When the choice is shown, the requester must pick one. The server rejects a stipend the requester doesn't have.
+- **What counts.** The reimbursement claimed (after any donation to the PTA) on this fiscal year's requests charged to the stipend, by everyone who shares it. A request belongs to the fiscal year in its ID, the year it was first submitted. Returned requests don't count until they are re-signed. Paid and unpaid requests both count; the portal says how much is not paid yet.
+- **Where it shows.** *My requests*: a bar for each stipend with what has been claimed and what is left, and the stipend beside each request. The form: what is left on each choice, then what will be left after this request. The confirmation screen, the request's page, and both submission emails.
+- **Going over.** A warning, never a block. The requester can still submit; AP decides what to reimburse.
+- **Where amounts live.** A Stipends tab in the request-log Sheet with columns *name*, *amount* and *note*, and rows *Classroom*, *Field trip*, *Grade TK* (transitional kindergarten), *Grade K*, *Grade 1*, and so on. The treasurer updates it each fiscal year; the amounts always apply to the current year. A stipend with no amount is still offered and recorded, and shows "No amount set".
+- **In the Sheet.** The choice is stored as a readable label in the Requests tab's *funding* column ("Grade 2 stipend", "Field trip", "Not from a stipend"). AP may correct it there, and the totals follow.
+- **Not the budget category.** AP's budget category stays separate and is still assigned at review. The stipend is not printed on the signed PDF.
 
 ## E-signature options
 
@@ -151,6 +175,8 @@ Recommendation: a small custom web app (option C) that keeps all data in the PTA
 
 The app holds no data of its own: receipts and signed PDFs go to a Workspace Drive folder (the backup and the archive are the same place), each request is a row in a Sheet, and sign-in links and packets go out through Gmail. The fs@miralomasf.com account owns the folder and Sheet and sends all email.
 
+**The Sheet.** Three tabs: *Requests* (one row per request), *Users* (who may sign in, their role, grade and stipend) and *Stipends* (the year's amounts). The app writes each header row on first use and creates a tab that is missing. When the app gains a column, it adds the header to the end of the existing row, widening the tab first if needed, so the Sheet never needs rebuilding.
+
 **Workspace access.** The PTA is on Google Workspace for Nonprofits. The app acts as fs@miralomasf.com through a service account with domain-wide delegation for the Drive, Sheets and Gmail scopes, which the super admin authorizes once in the Admin console. Service accounts no longer have Drive storage of their own, so everything is written into fs@'s Drive.
 
 **Uploads.** Receipts go from the browser straight to Drive through resumable upload sessions the app creates; HEIC is converted in the browser. The app server only reads files back from Drive to build the packet.
@@ -161,17 +187,17 @@ The app holds no data of its own: receipts and signed PDFs go to a Workspace Dri
 
 ## Data, privacy and retention
 
-- **What we store:** name, PTA position, mailing address (only if the check is mailed), phone, email, purchase details, receipt images, signed PDFs, audit log. No bank or card numbers; payment stays by check.
+- **What we store:** name, PTA position, mailing address (only if the check is mailed), phone, email, purchase details, receipt images, signed PDFs, audit log, each requester's role, grade and stipend amount, and which stipend each request comes from. No bank or card numbers; payment stays by check.
 - **Where:** a Google Workspace Drive folder and Sheet owned by fs@miralomasf.com, shared only with the AP team and the admin. The app keeps nothing after it writes there.
 - **Receipts can contain personal data** (partial card numbers, home addresses on online orders). Show a tip to crop or cover these before upload.
-- **Access:** requesters see only their own requests in the app; files are never public links.
+- **Access:** requesters see only their own requests in the app; files are never public links. A shared stipend shows only the total claimed by everyone sharing it, never who claimed what.
 - **Retention:** keep all signed packets and request records indefinitely; nothing is deleted automatically.
 
 ## Rollout plan
 
-1. **Phase 0 — Setup.** The Workspace super admin creates a Google Cloud project under the miralomasf.com organization, enables the Drive, Sheets and Gmail APIs, creates the service account and authorizes its domain-wide delegation. Under fs@miralomasf.com: create the Drive folder and the request-log Sheet with an AP-list tab, create the Vercel project, and point the hostname at it. Create the PTA GitHub organization.
-2. **Phase 1 — MVP.** Sign in, form matching the PTA form, receipt upload with camera, PDF packet, built-in signature, email to ap@miralomasf.com, row in the Sheet. Pilot with 3–5 teachers on the live app.
-3. **Phase 2 — AP workflow.** Return with a note, mark paid with check number, paid/returned emails to teachers, weekly digest.
+1. **Phase 0 — Setup.** The Workspace super admin creates a Google Cloud project under the miralomasf.com organization, enables the Drive, Sheets and Gmail APIs, creates the service account and authorizes its domain-wide delegation. Under fs@miralomasf.com: create the Drive folder and the request-log Sheet with Requests, Users and Stipends tabs (the app creates any that are missing), have the treasurer enter the year's stipend amounts, create the Vercel project, and point the hostname at it. Create the PTA GitHub organization.
+2. **Phase 1 — MVP.** Sign in, form matching the PTA form, receipt upload with camera, PDF packet, built-in signature, email to ap@miralomasf.com, row in the Sheet, and the stipend choice with what's left in each stipend. Pilot with 3–5 teachers on the live app.
+3. **Phase 2 — AP workflow.** Return with a note, mark paid with check number, paid/returned emails to teachers, weekly digest. Detailed in *Phase 2 — AP Workflow Spec* (same folder).
 4. **Phase 3 — Nice to have.** Receipt OCR to prefill line items.
 
 Success measures: share of requests submitted online, requests returned for missing info, and days from submission to payment.
@@ -186,6 +212,14 @@ Success measures: share of requests submitted online, requests returned for miss
 | Routing | Every completed request goes to ap@miralomasf.com (includes the treasurer) |
 | Payment | Paper check, unchanged |
 | Budget category | Assigned by AP at review, not collected from the teacher |
+| Teachers | Marked by `role` = teacher in the Users tab, set on the approval page or in the Sheet |
+| Stipends | Classroom (one standard amount per teacher), grade-level (one shared fund per grade), field trip (one fund for the whole school, not per grade), and staff stipends (per person). Each request names one, or "Not from a stipend" |
+| Grades | TK (transitional kindergarten), K and 1–5, plus any other grade the Stipends tab names. A teacher may teach several (a combination class): ticked on the approval page, or listed with commas in the Users tab's *grade* cell, like "1, 2" (not "1/2", which the Sheet turns into a date) |
+| A teacher's own stipend | Overrides the standard classroom amount for that teacher |
+| AP and teacher roles | No AP member is also a teacher, so the role column's single value is enough |
+| Stipend on the PDF | Not printed; it is recorded in the Sheet and both emails |
+| Stipend limits | Shown, never enforced; AP decides |
+| Stipend year | PTA fiscal year (July to June), by request ID |
 | Line items | One line item per receipt |
 | Partial receipts | Allowed; the claimed amount may be less than the receipt total |
 | Phone number | Required |
@@ -213,17 +247,27 @@ Each has a proposed default. The build follows the default unless it is changed 
 | Topic | Proposed default |
 | --- | --- |
 | Hostname | reimburse.miralomasf.com. Who can add the DNS record? |
-| Admin screens | None in the MVP; the Users tab in the Sheet is the AP list and the allow-list |
+| Admin screens | None in the MVP; the Users tab in the Sheet is the allow-list, the teacher list and the AP list, and the Stipends tab holds the amounts |
 | VP/Chairman signature line | Left blank by the portal. Does AP collect it on paper afterward, or skip it? |
 | Approved step | Optional; AP can go from Submitted straight to Paid. No email to the teacher on Approved |
 | Resubmission after Return | Keeps the request ID, produces a new PDF version, sends a fresh email to AP; the earlier signed PDF stays in Drive |
-| Drafts | Form state lives in the browser until signing; receipts upload to a pending folder as they are added; pending uploads with no signed packet after 30 days are deleted; signed packets are kept forever |
-| What "locked" means | SHA-256 hash on the audit page and in the Sheet, file read-only in Drive, app never rewrites it. No certificate-based PDF signature |
+| Drafts | Built: form state lives in the browser until signing; receipts upload to a pending folder as they are added; signed packets are kept forever. Not built yet: deleting pending uploads with no signed packet after 30 days |
+| What "locked" means | Built: SHA-256 hash of the signed file in the Sheet and both emails; the app never rewrites the file. Not built yet: marking the file read-only in Drive. No certificate-based PDF signature |
 | CSV export | One row per request with the Sheet's columns. Which bookkeeping software does the treasurer use, so the columns match its import? |
-| Emails | PDF attached to both the AP email and the requester's copy; the AP email body summarizes name, total, line items and check delivery |
+| Emails | PDF attached to both the AP email and the requester's copy; the body summarizes name, total, line items, check delivery and the stipend |
 | Weekly digest | Monday morning; lists anything not Paid seven days after submission |
 | Request ID | Sequential per PTA fiscal year, e.g. FY27-042 |
 | Signatures | Drawn or typed fresh each time; never stored for reuse |
+
+## Changes since v0.2
+
+- Stipends: each request records which stipend it comes from (classroom, grade-level, field trip, a staff member's own stipend, or none), and the portal shows what is left in each, with a warning but no block when a request goes over. New *Stipends* tab; new *grade* and *stipend* columns in Users; new *funding* column in Requests. Added *Stipends* under Functional requirements.
+- Roles: a *teacher* role marks teachers. The approval page now sets teacher or staff, the grades (TK, K or 1–5, several for a combination class) and a staff stipend; ap and admin are still set only in the Sheet.
+- Non-goals: budget tracking reworded. Balances are shown, not enforced.
+- Sheet: the app creates a missing tab and appends columns it gains to the end of the header row.
+- Open questions: the Drafts and "locked" rows now say what is built and what isn't.
+- Decided: the field-trip fund is one for the whole school; a teacher's own stipend overrides the classroom amount; no AP member is also a teacher; the stipend is not printed on the PDF.
+- Statuses: added *Check written* between Approved and Paid, for checks waiting on the second signature (detailed in the Phase 2 spec).
 
 ## Changes since v0.1
 

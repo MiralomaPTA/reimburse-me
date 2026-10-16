@@ -1,0 +1,11 @@
+email,role,status,requested_at,approved_at,approved_by,last_link_at,note,grade,stipend
+treasurer@example.org,ap,approved,,,preloaded,,AP team. Not asked which stipend: AP members aren't teachers and have no stipend of their own.,,
+admin@example.org,admin,approved,,,preloaded,,PTA tech volunteer who maintains the Users and Stipends tabs.,,
+grade2.teacher@example.org,teacher,approved,,,preloaded,,"Chooses classroom stipend, Grade 2 stipend, field trip, or none.",2,
+grade2.partner@example.org,teacher,approved,,,preloaded,,Shares the Grade 2 stipend with grade2.teacher; each has their own classroom stipend.,2,
+combo.teacher@example.org,teacher,approved,,,preloaded,,Combination class: chooses from the Grade 1 and Grade 2 stipends as well as classroom and field trip. List grades with commas; the Sheet turns 1/2 into a date.,"1, 2",
+tk.teacher@example.org,teacher,approved,,,preloaded,,Transitional kindergarten: draws on the Grade TK stipend.,TK,
+jobshare.teacher@example.org,teacher,approved,,,preloaded,,Job share: their own stipend ($125) overrides the standard classroom amount.,K,125
+music.teacher@example.org,teacher,approved,,,preloaded,,"Teaches every grade, so no grade: chooses classroom stipend, field trip, or none.",,
+librarian@example.org,requester,approved,,,preloaded,,Staff with their own stipend: chooses Stipend or Not from a stipend.,,300
+volunteer@example.org,requester,approved,,,preloaded,,Approved volunteer with no stipend: never asked which stipend.,,

@@ -1,6 +1,7 @@
 import { clientIp } from "@/server/auth/rate-limit";
 import { getSession } from "@/server/auth/session";
 import { ReceiptError } from "@/server/requests/receipts";
+import { FundingError } from "@/server/requests/stipends";
 import { submitRequest } from "@/server/requests/submit";
 import { submitSchema } from "@/lib/request-schema";
 
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
     });
     return Response.json(result);
   } catch (error) {
-    if (error instanceof ReceiptError) return Response.json({ error: error.message }, { status: 400 });
+    if (error instanceof ReceiptError || error instanceof FundingError) return Response.json({ error: error.message }, { status: 400 });
     console.error("[submit]", error);
     return Response.json({ error: "Something went wrong while submitting. Nothing was sent; please try again." }, { status: 500 });
   }

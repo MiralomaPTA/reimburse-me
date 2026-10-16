@@ -48,6 +48,7 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
         <Row label="Total expense" value={money(row.total_expense)} />
         {parseMoney(row.donation_to_pta) ? <Row label="Donated to PTA" value={money(row.donation_to_pta)} /> : null}
         <Row label="Reimbursement claimed" value={money(row.reimbursement_claimed)} />
+        {row.funding ? <Row label="Paid from" value={row.funding} /> : null}
       </dl>
 
       <div className="flex flex-wrap gap-3">

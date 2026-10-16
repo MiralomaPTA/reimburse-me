@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { getAdapters } from "@/server/adapters";
 import { requireSession } from "@/server/auth/session";
+import { currentFunding } from "@/server/requests/stipends";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney, parseMoney } from "@/lib/money";
+import { StipendSummary } from "@/components/StipendSummary";
 import { StatusBadge } from "@/components/StatusBadge";
 
 export default async function RequestsPage() {
   const session = await requireSession("/requests");
   const { log } = await getAdapters();
-  const rows = (await log.listByEmail(session.email)).sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
+  const [rows, funding] = await Promise.all([log.listByEmail(session.email), currentFunding(session.email)]);
+  rows.sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
 
   return (
     <div>
@@ -18,6 +21,11 @@ export default async function RequestsPage() {
           New request
         </Link>
       </div>
+      {funding.stipends.length > 0 && (
+        <div className="mb-6">
+          <StipendSummary funding={funding} />
+        </div>
+      )}
       {rows.length === 0 ? (
         <div className="card text-neutral-600">
           You haven&apos;t submitted anything yet. <Link href="/requests/new" className="underline">Start a request</Link>.
@@ -31,6 +39,7 @@ export default async function RequestsPage() {
                   <div className="truncate font-medium">{row.purpose}</div>
                   <div className="text-sm text-neutral-500">
                     {row.request_id} · {formatDateTime(new Date(row.submitted_at))}
+                    {row.funding ? ` · ${row.funding}` : ""}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">

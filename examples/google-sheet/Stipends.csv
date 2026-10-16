@@ -1,0 +1,10 @@
+name,amount,note
+Classroom,250,Each teacher's own classroom stipend. A stipend on a teacher's Users row overrides it.
+Field trip,3000,"One fund for the whole school, shared by all teachers."
+Grade TK,600,"Transitional kindergarten, shared by the TK teachers."
+Grade K,1000,Shared by the kindergarten teachers.
+Grade 1,1000,
+Grade 2,1200,
+Grade 3,1200,
+Grade 4,1200,
+Grade 5,1200,

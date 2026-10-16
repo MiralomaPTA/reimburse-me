@@ -59,5 +59,6 @@ export function googleConfig() {
     spreadsheetId: required("GOOGLE_SHEET_ID"),
     sheetName: env.GOOGLE_SHEET_NAME ?? "Requests",
     usersSheetName: env.GOOGLE_USERS_SHEET_NAME ?? "Users",
+    stipendsSheetName: env.GOOGLE_STIPENDS_SHEET_NAME ?? "Stipends",
   };
 }

@@ -8,6 +8,12 @@ export function fiscalYearLabel(date: Date, timeZone = "America/Los_Angeles"): s
   return `FY${String(endYear % 100).padStart(2, "0")}`;
 }
 
+/** "July 2026 – June 2027" for "FY27". */
+export function fiscalYearSpan(label: string): string {
+  const endYear = 2000 + Number(label.slice(2));
+  return `July ${endYear - 1} – June ${endYear}`;
+}
+
 export function requestIdPrefix(date: Date): string {
   return `${fiscalYearLabel(date)}-`;
 }

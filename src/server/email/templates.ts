@@ -2,6 +2,7 @@ import { config } from "@/server/config";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { CHECK_DELIVERY_LABEL, totals, type RequestInput } from "@/lib/request-schema";
+import type { StipendStatus } from "@/server/requests/stipends";
 
 export function signInEmail(link: string): { subject: string; text: string } {
   return {
@@ -24,6 +25,10 @@ export interface SubmissionEmailInput {
   submittedAt: Date;
   sha256: string;
   version: number;
+  /** The `funding` cell: the stipend chosen, "Not from a stipend", or "" when there was no choice. */
+  funding: string;
+  /** Where the chosen stipend stands with this request counted; null when none was chosen. */
+  stipend: StipendStatus | null;
 }
 
 function summary(input: SubmissionEmailInput): string[] {
@@ -44,8 +49,20 @@ function summary(input: SubmissionEmailInput): string[] {
     `Total expense: ${formatMoney(t.totalCents)}`,
   ];
   if (t.donationCents > 0) lines.push(`Donated to PTA: ${formatMoney(t.donationCents)}`);
-  lines.push(`Reimbursement claimed: ${formatMoney(t.reimbursementCents)}`, "", `Signed PDF attached. SHA-256: ${sha256}`);
+  lines.push(`Reimbursement claimed: ${formatMoney(t.reimbursementCents)}`);
+  if (input.funding) lines.push(fundingLine(input.funding, input.stipend));
+  lines.push("", `Signed PDF attached. SHA-256: ${sha256}`);
   return lines;
+}
+
+/** "Paid from: Grade 2 stipend (shared by grade 2 teachers): $1,200.00, $846.55 claimed including this request, $353.45 left" */
+function fundingLine(funding: string, stipend: StipendStatus | null): string {
+  if (!stipend) return `Paid from: ${funding}`;
+  const name = stipend.sharedWith ? `${stipend.label} (shared by ${stipend.sharedWith})` : stipend.label;
+  const claimed = `${formatMoney(stipend.usedCents)} claimed including this request`;
+  if (stipend.amountCents === null || stipend.remainingCents === null) return `Paid from: ${name}, no amount set, ${claimed}`;
+  const left = stipend.remainingCents < 0 ? `${formatMoney(-stipend.remainingCents)} over` : `${formatMoney(stipend.remainingCents)} left`;
+  return `Paid from: ${name}: ${formatMoney(stipend.amountCents)}, ${claimed}, ${left}`;
 }
 
 export function apSubmissionEmail(input: SubmissionEmailInput): { subject: string; text: string } {

@@ -4,6 +4,10 @@ import { z } from "zod";
 
 export const DESCRIPTION_MAX = 30;
 export const ALLOWED_RECEIPT_TYPES = ["image/jpeg", "image/png", "application/pdf"] as const;
+export const FUNDING_KEYS = ["classroom", "grade", "field_trip", "stipend", "none"] as const;
+export type FundingKey = (typeof FUNDING_KEYS)[number];
+/** A funding choice: one of the keys, with the grade spelled out for a grade's stipend ("grade:2"). */
+export const FUNDING_CHOICE = /^(classroom|field_trip|stipend|none|grade:[A-Z0-9]{1,8})$/;
 
 export const receiptSchema = z.object({
   fileId: z.string().min(8).max(128),
@@ -28,6 +32,8 @@ export const requestInputSchema = z
     purpose: z.string().trim().min(1, "Say what the expenditure was for").max(60),
     items: z.array(lineItemSchema).min(1, "Add at least one receipt").max(40),
     donationCents: z.number().int().min(0).default(0),
+    /** Which of the requester's stipends pays for this, e.g. "classroom" or "grade:2"; "none" when it isn't from one (or they have none). */
+    funding: z.string().regex(FUNDING_CHOICE, "Choose which stipend this comes from").default("none"),
   })
   .superRefine((value, ctx) => {
     if (value.checkDelivery === "mail") {

@@ -18,7 +18,7 @@ function normalize(row: UserRecord): UserRecord {
   return {
     ...row,
     email: row.email.trim().toLowerCase(),
-    role: role === "ap" || role === "admin" ? role : "requester",
+    role: role === "teacher" || role === "ap" || role === "admin" ? role : "requester",
     status: status === "approved" || status === "denied" ? status : "pending",
   };
 }
