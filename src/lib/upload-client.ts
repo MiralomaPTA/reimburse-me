@@ -1,5 +1,7 @@
 "use client";
 
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/lib/request-schema";
+
 /** Browser-side receipt upload: HEIC conversion, then a direct PUT to the storage URL. */
 
 export interface UploadedReceipt {
@@ -31,7 +33,7 @@ async function toUploadable(file: File): Promise<{ blob: Blob; name: string; mim
 
 export async function uploadReceipt(file: File, onProgress: (fraction: number) => void): Promise<UploadedReceipt> {
   const { blob, name, mimeType } = await toUploadable(file);
-  if (blob.size > 10 * 1024 * 1024) throw new Error("Each receipt must be under 10 MB.");
+  if (blob.size > MAX_UPLOAD_BYTES) throw new Error(`Each receipt must be under ${MAX_UPLOAD_LABEL}.`);
 
   const open = await fetch("/api/uploads", {
     method: "POST",

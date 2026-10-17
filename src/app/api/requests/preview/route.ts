@@ -1,4 +1,5 @@
-import { getSession } from "@/server/auth/session";
+import { getAdapters } from "@/server/adapters";
+import { getApprovedSession } from "@/server/auth/session";
 import { pdfResponse } from "@/server/http";
 import { buildPacket } from "@/server/pdf/build-packet";
 import { loadReceiptFiles, ReceiptError } from "@/server/requests/receipts";
@@ -8,13 +9,14 @@ export const maxDuration = 60;
 
 /** Builds the unsigned packet so the teacher can check it before signing. */
 export async function POST(request: Request) {
-  const session = await getSession();
+  const session = await getApprovedSession();
   if (!session) return Response.json({ error: "Please sign in again" }, { status: 401 });
   const parsed = requestInputSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Please fix the form", issues: parsed.error.issues }, { status: 400 });
 
   try {
-    const receiptFiles = await loadReceiptFiles(parsed.data, session.email);
+    const { files } = await getAdapters();
+    const receiptFiles = await loadReceiptFiles(parsed.data, session.email, files);
     const packet = await buildPacket({
       requestId: "PREVIEW",
       submittedAt: new Date(),

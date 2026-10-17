@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAdapters } from "@/server/adapters";
-import { requireSession } from "@/server/auth/session";
+import { requireApprovedSession } from "@/server/auth/session";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { StatusBadge } from "@/components/StatusBadge";
 
 export default async function RequestPage(props: PageProps<"/requests/[id]">) {
   const { id } = await props.params;
-  const session = await requireSession(`/requests/${id}`);
+  const session = await requireApprovedSession(`/requests/${id}`);
   const { log } = await getAdapters();
   const row = await log.get(id);
   if (!row || row.requester_email.toLowerCase() !== session.email.toLowerCase()) notFound();

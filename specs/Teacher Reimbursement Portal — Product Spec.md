@@ -39,13 +39,15 @@ A web form on miralomasf.com where a teacher uploads receipts, fills in a few de
 
 Only the requester signs; no second signature is collected in the portal. The form's *Signature of VP/Chairman for Program/Event* line and the *For PTA treasurer use* block stay blank for AP to handle outside the portal.
 
-Sign-in uses one-time links emailed to the requester: no passwords and no Google account. Links expire after 15 minutes. Who may sign in is the *Users* tab of the request-log Sheet:
+Sign-in uses one-time links emailed to the requester: no passwords and no Google account. Links expire after 15 minutes and work once. Who may sign in is the *Users* tab of the request-log Sheet:
 
 - An approved address gets a sign-in link, at most one a minute.
 - An unknown address gets nothing. It is added to the tab as pending, and one email goes to the approver address (ap@miralomasf.com by default) with an approve/deny link that works for 7 days. On the approval page the approver says whether they are a teacher (and which grades) or staff, and can enter a staff stipend. Approving flips the row and emails the teacher a sign-in link right away; denying is silent. Repeat requests from a pending or denied address send nothing.
 - The admin can paste staff addresses into the tab as approved ahead of time, with their role, grade and stipend, so most teachers never wait.
 
 Because nothing is ever emailed to an unknown address, the form can't be used to spam strangers; the worst case is a bounded trickle of approval requests to ap@, capped at 20 new pending addresses a day. The tab's *role* column (requester, teacher, ap, admin) marks who gets the teacher stipends and is also the AP list that unlocks the dashboard in Phase 2. The approval page only chooses between teacher and requester; ap and admin are set in the Sheet, and approving never changes them.
+
+The reply to a sign-in request says whether a link was sent or the address was queued for approval, so it reveals whether an address is on the list. Accepted: the list is school staff and approved volunteers, nothing is emailed to the address either way, and one vague reply would leave a new teacher unsure whether to wait for approval or check spam. Every page and API call re-reads the Users row, so a denied or deleted address loses access at once, not when its 30-day session runs out.
 
 ## User flow
 
@@ -263,6 +265,8 @@ Each has a proposed default. The build follows the default unless it is changed 
 
 - Stipends: each request records which stipend it comes from (classroom, grade-level, field trip, a staff member's own stipend, or none), and the portal shows what is left in each, with a warning but no block when a request goes over. New *Stipends* tab; new *grade* and *stipend* columns in Users; new *funding* column in Requests. Added *Stipends* under Functional requirements.
 - Roles: a *teacher* role marks teachers. The approval page now sets teacher or staff, the grades (TK, K or 1–5, several for a combination class) and a staff stipend; ap and admin are still set only in the Sheet.
+- Sign-in: links work once (a `signed_in_at` column in Users records their use); every page and API call re-checks the Users row, so a denied or deleted address loses access at once; an approval link does nothing once a decision is on the row. The sign-in reply's sent-or-pending distinction is an accepted disclosure (see *Users and roles*).
+- Receipts: a receipt belongs to one request. A file already moved into a request's folder is refused with the request it belongs to; the Phase 2 re-sign of a returned request is the one case to allow.
 - Non-goals: budget tracking reworded. Balances are shown, not enforced.
 - Sheet: the app creates a missing tab and appends columns it gains to the end of the header row.
 - Open questions: the Drafts and "locked" rows now say what is built and what isn't.

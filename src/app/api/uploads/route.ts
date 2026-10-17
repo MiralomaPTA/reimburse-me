@@ -1,18 +1,18 @@
 import { z } from "zod";
 import { getAdapters } from "@/server/adapters";
-import { getSession } from "@/server/auth/session";
+import { getApprovedSession } from "@/server/auth/session";
 import { config } from "@/server/config";
-import { ALLOWED_RECEIPT_TYPES } from "@/lib/request-schema";
+import { ALLOWED_RECEIPT_TYPES, MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/lib/request-schema";
 
 const bodySchema = z.object({
   name: z.string().min(1).max(200),
   mimeType: z.enum(ALLOWED_RECEIPT_TYPES, { message: "Receipts must be JPG, PNG or PDF. HEIC photos are converted in the browser." }),
-  size: z.number().int().positive().max(config.maxUploadBytes, "Each receipt must be under 10 MB"),
+  size: z.number().int().positive().max(MAX_UPLOAD_BYTES, `Each receipt must be under ${MAX_UPLOAD_LABEL}`),
 });
 
 /** Opens a direct upload for one receipt; the browser then PUTs the bytes to `uploadUrl`. */
 export async function POST(request: Request) {
-  const session = await getSession();
+  const session = await getApprovedSession();
   if (!session) return Response.json({ error: "Please sign in again" }, { status: 401 });
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: parsed.error.issues[0]?.message ?? "Invalid upload" }, { status: 400 });

@@ -210,9 +210,9 @@ export function fundingOptions(
   return { fiscalYear, stipends };
 }
 
-/** The signed-in requester's stipends this fiscal year. */
-export async function currentFunding(email: string): Promise<FundingOptions> {
-  const { users, stipends, log } = await getAdapters();
-  const [user, stipendRows, requests] = await Promise.all([users.get(email), stipends.list(), log.list()]);
+/** `user`'s stipends this fiscal year; the caller has already loaded the Users row. */
+export async function currentFunding(user: UserRecord | null): Promise<FundingOptions> {
+  const { stipends, log } = await getAdapters();
+  const [stipendRows, requests] = await Promise.all([stipends.list(), log.list()]);
   return fundingOptions(user, stipendRows, requests, new Date());
 }

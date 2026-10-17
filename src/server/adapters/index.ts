@@ -16,6 +16,12 @@ export async function getAdapters(): Promise<Adapters> {
     ]);
     adapters = { files: googleFileStore, log: googleRequestLog, users: googleUserDirectory, stipends: googleStipendTable, mailer: googleMailer };
   } else {
+    // On Vercel the local adapter writes to the function's ephemeral disk: every
+    // request would look submitted and then vanish. Refuse unless someone is
+    // knowingly trying a production build on their own machine.
+    if (config.isProduction && process.env.ALLOW_LOCAL_ADAPTERS_IN_PRODUCTION !== "1") {
+      throw new Error("ADAPTERS=local in production would lose every request. Set ADAPTERS=google, or ALLOW_LOCAL_ADAPTERS_IN_PRODUCTION=1 to try a production build on a laptop.");
+    }
     const [{ localFileStore }, { localRequestLog }, { localUserDirectory }, { localStipendTable }, { localMailer }] = await Promise.all([
       import("@/server/adapters/local/files"),
       import("@/server/adapters/local/log"),

@@ -9,7 +9,7 @@ import type { FileStore, StoredFileMeta } from "@/server/adapters/types";
  * a PUT to /api/local-upload/<id>, which is only mounted when ADAPTERS=local.
  */
 
-interface LocalMeta extends StoredFileMeta {
+interface LocalMeta extends Omit<StoredFileMeta, "attachedTo"> {
   folderPath: string[];
   pending: boolean;
 }
@@ -36,6 +36,13 @@ function safeId(id: string) {
   return id;
 }
 
+/** What the rest of the app sees. A file outside pending/ belongs to the request its folder is named for. */
+function publicMeta(meta: LocalMeta): StoredFileMeta {
+  const { id, name, mimeType, size, uploader, folderPath } = meta;
+  const attachedTo = folderPath[0] === "pending" ? "" : (folderPath[folderPath.length - 1] ?? "");
+  return { id, name, mimeType, size, uploader, attachedTo };
+}
+
 export const localFileStore: FileStore = {
   async createUploadSession({ name, mimeType, size, uploader }) {
     const id = crypto.randomUUID().replace(/-/g, "");
@@ -48,7 +55,7 @@ export const localFileStore: FileStore = {
   async getFileMeta(id) {
     const meta = await readMeta(safeId(id));
     if (!meta || meta.pending) return null;
-    return { id: meta.id, name: meta.name, mimeType: meta.mimeType, size: meta.size, uploader: meta.uploader };
+    return publicMeta(meta);
   },
 
   async getFileBytes(id) {
@@ -70,12 +77,17 @@ export const localFileStore: FileStore = {
   },
 };
 
-/** Called by the local upload route once the browser has PUT the bytes. */
-export async function completeLocalUpload(id: string, bytes: Uint8Array): Promise<StoredFileMeta> {
+/**
+ * Called by the local upload route once the browser has PUT the bytes. Like a
+ * Drive upload session, it only accepts the bytes from the sign-in that
+ * opened it.
+ */
+export async function completeLocalUpload(id: string, bytes: Uint8Array, uploader: string): Promise<StoredFileMeta> {
   const meta = await readMeta(safeId(id));
   if (!meta || !meta.pending) throw new Error("No pending upload with that id");
+  if (meta.uploader.toLowerCase() !== uploader.toLowerCase()) throw new Error("This upload was opened by another sign-in");
   await fs.writeFile(path.join(filesDir(), id), bytes);
   const done = { ...meta, size: bytes.byteLength, pending: false };
   await writeMeta(done);
-  return { id, name: done.name, mimeType: done.mimeType, size: done.size, uploader: done.uploader };
+  return publicMeta(done);
 }

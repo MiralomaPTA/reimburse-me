@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { config } from "@/server/config";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { totals, type RequestInput } from "@/lib/request-schema";
@@ -165,7 +166,7 @@ export async function appendAuditPage(doc: PDFDocument, input: AuditPageInput): 
   w.space(6);
   w.sub("Integrity");
   w.paragraph(
-    "The SHA-256 hash of this file is recorded in the PTA's request log and in the submission email to ap@miralomasf.com. " +
+    `The SHA-256 hash of this file is recorded in the PTA's request log and in the submission email to ${config.apEmail}. ` +
       "Any change to the file after signing changes that hash. A corrected request is signed again and gets a new version.",
   );
 }

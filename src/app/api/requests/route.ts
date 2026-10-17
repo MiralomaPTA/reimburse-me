@@ -1,5 +1,7 @@
+import { getAdapters } from "@/server/adapters";
+import { linkBase } from "@/server/auth/links";
 import { clientIp } from "@/server/auth/rate-limit";
-import { getSession } from "@/server/auth/session";
+import { getApprovedSession } from "@/server/auth/session";
 import { ReceiptError } from "@/server/requests/receipts";
 import { FundingError } from "@/server/requests/stipends";
 import { submitRequest } from "@/server/requests/submit";
@@ -9,19 +11,23 @@ export const maxDuration = 60;
 
 /** Signs and submits a request: builds the PDF, stores it, logs it, emails AP and the requester. */
 export async function POST(request: Request) {
-  const session = await getSession();
+  const session = await getApprovedSession();
   if (!session) return Response.json({ error: "Please sign in again" }, { status: 401 });
   const parsed = submitSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Please fix the form", issues: parsed.error.issues }, { status: 400 });
 
   try {
-    const result = await submitRequest({
-      request: parsed.data.request,
-      signature: parsed.data.signature,
-      session,
-      ip: clientIp(request),
-      userAgent: request.headers.get("user-agent") ?? "",
-    });
+    const result = await submitRequest(
+      {
+        request: parsed.data.request,
+        signature: parsed.data.signature,
+        session,
+        ip: clientIp(request),
+        userAgent: request.headers.get("user-agent") ?? "",
+        linkBase: linkBase(request),
+      },
+      await getAdapters(),
+    );
     return Response.json(result);
   } catch (error) {
     if (error instanceof ReceiptError || error instanceof FundingError) return Response.json({ error: error.message }, { status: 400 });

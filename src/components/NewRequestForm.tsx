@@ -476,8 +476,8 @@ function RequestForm({ email, apEmail, profile, funding: initialFunding, initial
             <input id="phone" className="field" type="tel" autoComplete="tel" inputMode="tel" value={form.phone} onChange={(e) => update("phone", e.target.value)} />
           </div>
           <div>
-            <label className="label">Email</label>
-            <input className="field bg-neutral-100" value={email} readOnly />
+            <label htmlFor="requesterEmail" className="label">Email</label>
+            <input id="requesterEmail" className="field bg-neutral-100" value={email} readOnly />
           </div>
         </div>
         <fieldset>

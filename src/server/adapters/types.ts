@@ -11,6 +11,8 @@ export interface StoredFileMeta {
   size: number;
   /** Email of the signed-in user who uploaded it; set server-side, never by the client. */
   uploader: string;
+  /** The request this receipt was moved into, or "" while it still sits in pending/. A receipt is used once. */
+  attachedTo: string;
 }
 
 export interface UploadSession {
@@ -155,6 +157,8 @@ export interface UserRecord {
   approved_by: string;
   /** When a sign-in link was last emailed; backs a durable per-address cooldown. */
   last_link_at: string;
+  /** When a sign-in link was last used; links issued before this are refused, so each works once. */
+  signed_in_at: string;
   note: string;
   /**
    * For a teacher, the grade or grades they teach, e.g. "2", or "1, 2" for a
@@ -179,6 +183,7 @@ export const USER_COLUMNS: (keyof UserRecord)[] = [
   "approved_at",
   "approved_by",
   "last_link_at",
+  "signed_in_at",
   "note",
   "grade",
   "stipend",

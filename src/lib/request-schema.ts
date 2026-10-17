@@ -4,6 +4,9 @@ import { z } from "zod";
 
 export const DESCRIPTION_MAX = 30;
 export const ALLOWED_RECEIPT_TYPES = ["image/jpeg", "image/png", "application/pdf"] as const;
+/** The upload route and the browser both refuse larger receipts. */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOAD_LABEL = "10 MB";
 export const FUNDING_KEYS = ["classroom", "grade", "field_trip", "stipend", "none"] as const;
 export type FundingKey = (typeof FUNDING_KEYS)[number];
 /** A funding choice: one of the keys, with the grade spelled out for a grade's stipend ("grade:2"). */

@@ -1,6 +1,5 @@
-import { getAdapters } from "@/server/adapters";
-import type { RequestRow } from "@/server/adapters/types";
-import type { Session } from "@/server/auth/tokens";
+import type { Adapters, RequestRow } from "@/server/adapters/types";
+import type { ApprovedSession } from "@/server/auth/session";
 import { config } from "@/server/config";
 import { apSubmissionEmail, requesterCopyEmail } from "@/server/email/templates";
 import { buildPacket } from "@/server/pdf/build-packet";
@@ -14,9 +13,12 @@ import { totals, type RequestInput, type SignatureInput } from "@/lib/request-sc
 export interface SubmitInput {
   request: RequestInput;
   signature: SignatureInput;
-  session: Session;
+  /** The requester, already checked against the Users tab. */
+  session: ApprovedSession;
   ip: string;
   userAgent: string;
+  /** Base URL for the links in the emails. */
+  linkBase: string;
 }
 
 export interface SubmitResult {
@@ -37,17 +39,32 @@ function toPacketSignature(signature: SignatureInput): PacketSignature {
   return { type: "drawn", png: new Uint8Array(Buffer.from(base64, "base64")) };
 }
 
-/** Signs, stores, logs and emails a new request. */
-export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
+/** Highest sequence number among `rows` whose ID starts with `prefix` (0 if none). */
+export function maxSequenceIn(rows: Pick<RequestRow, "request_id">[], prefix: string): number {
+  let max = 0;
+  for (const row of rows) {
+    if (!row.request_id.startsWith(prefix)) continue;
+    const n = Number(row.request_id.slice(prefix.length));
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
+}
+
+/**
+ * Signs, stores, logs and emails a new request.
+ *
+ * The order decides what a failure leaves behind. The PDF is stored, then the
+ * row is written, and only then are the receipts moved and the emails sent.
+ * Failing in the first two steps leaves at most an orphan PDF in Drive and the
+ * requester simply tries again. Trouble in the last two is noted on the row
+ * and reported, never retried, so no request is ever logged twice.
+ */
+export async function submitRequest(input: SubmitInput, adapters: Adapters): Promise<SubmitResult> {
   const { request, session, ip, userAgent } = input;
-  const { files, log, mailer, users, stipends } = await getAdapters();
+  const { files, log, mailer, stipends } = adapters;
+  const { user } = session;
   const submittedAt = new Date();
-  const [receiptFiles, user, stipendRows, earlierRows] = await Promise.all([
-    loadReceiptFiles(request, session.email),
-    users.get(session.email),
-    stipends.list(),
-    log.list(),
-  ]);
+  const [receiptFiles, stipendRows, earlierRows] = await Promise.all([loadReceiptFiles(request, session.email, files), stipends.list(), log.list()]);
   const choices = fundingOptions(user, stipendRows, earlierRows, submittedAt).stipends;
   if (request.funding !== "none" && !choices.some((s) => s.id === request.funding)) {
     throw new FundingError("That stipend isn't one of yours. Choose another, or \"Not from a stipend\".");
@@ -56,31 +73,44 @@ export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
   const chosen = parseFundingChoice(request.funding);
   const funding = choices.length > 0 ? fundingLabel(chosen.key, chosen.grade) : "";
 
-  const prefix = requestIdPrefix(submittedAt);
-  const requestId = formatRequestId(prefix, (await log.maxSequence(prefix)) + 1);
   const signature = toPacketSignature(input.signature);
-
-  const packet = await buildPacket({
-    requestId,
-    submittedAt,
-    request,
-    requesterEmail: session.email,
-    receiptFiles,
-    signature,
-    audit: {
+  const build = (requestId: string) =>
+    buildPacket({
+      requestId,
+      submittedAt,
+      request,
       requesterEmail: session.email,
-      signInMethod: "One-time email link",
-      signedInAt: new Date(session.signedInAt),
-      ip,
-      userAgent,
-      consentText: CONSENT_TEXT,
-    },
-  });
+      receiptFiles,
+      signature,
+      audit: {
+        requesterEmail: session.email,
+        signInMethod: "One-time email link",
+        signedInAt: new Date(session.signedInAt),
+        ip,
+        userAgent,
+        consentText: CONSENT_TEXT,
+      },
+    });
+
+  // The ID is printed in the PDF, so it is chosen before the packet is built,
+  // and building takes seconds. Another submission may take the number in
+  // that time, so check again just before claiming it and rebuild if it did.
+  // What remains is the moment between this check and the row being written.
+  const prefix = requestIdPrefix(submittedAt);
+  let sequence = maxSequenceIn(earlierRows, prefix) + 1;
+  let requestId = formatRequestId(prefix, sequence);
+  let packet = await build(requestId);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const latest = await log.maxSequence(prefix);
+    if (latest < sequence) break;
+    sequence = latest + 1;
+    requestId = formatRequestId(prefix, sequence);
+    packet = await build(requestId);
+  }
 
   const folderPath = ["requests", fiscalYearLabel(submittedAt), requestId];
   const pdfName = `${requestId}.pdf`;
   const stored = await files.putFile({ name: pdfName, mimeType: "application/pdf", bytes: packet.bytes, folderPath });
-  await Promise.all([...receiptFiles.keys()].map((id) => files.moveFile(id, folderPath)));
 
   const t = totals(request);
   const row: RequestRow = {
@@ -115,6 +145,16 @@ export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
   await log.append(row);
   const after = fundingOptions(user, stipendRows, [...earlierRows, row], submittedAt);
 
+  // From here on the request exists; anything that goes wrong is noted on the row rather than failing the submission.
+  const problems: string[] = [];
+  try {
+    await Promise.all([...receiptFiles.keys()].map((id) => files.moveFile(id, folderPath)));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[submit] could not move the receipts of ${requestId}: ${message}`);
+    problems.push(`Receipts could not be moved into the request folder: ${message}`);
+  }
+
   const emailInput = {
     requestId,
     request,
@@ -124,18 +164,22 @@ export async function submitRequest(input: SubmitInput): Promise<SubmitResult> {
     version: 1,
     funding,
     stipend: after.stipends.find((s) => s.id === request.funding) ?? null,
+    linkBase: input.linkBase,
   };
   const attachment = { filename: pdfName, mimeType: "application/pdf", bytes: packet.bytes };
+  let emailError: string | undefined;
   try {
     const ap = apSubmissionEmail(emailInput);
     await mailer.send({ to: [config.apEmail], replyTo: session.email, subject: ap.subject, text: ap.text, attachments: [attachment] });
     const copy = requesterCopyEmail(emailInput);
     await mailer.send({ to: [session.email], subject: copy.subject, text: copy.text, attachments: [attachment] });
-    return { requestId, pdfFileId: stored.id, sha256: packet.sha256, pageCount: packet.pageCount, funding: after, emailed: true };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[submit] email failed for ${requestId}: ${message}`);
-    await log.update(requestId, { notes: `Email failed at submission: ${message}` }).catch(() => undefined);
-    return { requestId, pdfFileId: stored.id, sha256: packet.sha256, pageCount: packet.pageCount, funding: after, emailed: false, emailError: message };
+    emailError = error instanceof Error ? error.message : String(error);
+    console.error(`[submit] email failed for ${requestId}: ${emailError}`);
+    problems.push(`Email failed at submission: ${emailError}`);
   }
+  if (problems.length > 0) await log.update(requestId, { notes: problems.join(" | ") }).catch(() => undefined);
+
+  const result: SubmitResult = { requestId, pdfFileId: stored.id, sha256: packet.sha256, pageCount: packet.pageCount, funding: after, emailed: !emailError };
+  return emailError ? { ...result, emailError } : result;
 }

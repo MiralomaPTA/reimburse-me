@@ -1,4 +1,5 @@
 import { getAdapters } from "@/server/adapters";
+import { approvalLinkIsStale } from "@/server/auth/access";
 import { verifyApprovalToken } from "@/server/auth/tokens";
 import { gradeName, parseAmount, parseGrades, stipendGrades } from "@/server/requests/stipends";
 import { formatDateTime } from "@/lib/dates";
@@ -8,9 +9,9 @@ import { moneyPlain } from "@/lib/money";
 export default async function ApprovePage(props: PageProps<"/auth/approve">) {
   const query = await props.searchParams;
   const token = typeof query.token === "string" ? query.token : "";
-  const email = token ? await verifyApprovalToken(token) : null;
+  const verified = token ? await verifyApprovalToken(token) : null;
 
-  if (!email) {
+  if (!verified) {
     return (
       <div className="mx-auto max-w-md">
         <h1 className="mb-2 text-2xl font-semibold">This approval link isn&apos;t valid</h1>
@@ -22,8 +23,20 @@ export default async function ApprovePage(props: PageProps<"/auth/approve">) {
     );
   }
 
+  const email = verified.email;
   const { users, stipends } = await getAdapters();
   const [record, stipendRows] = await Promise.all([users.get(email), stipends.list()]);
+  if (record && approvalLinkIsStale(verified.issuedAt, record)) {
+    return (
+      <div className="mx-auto max-w-md">
+        <h1 className="mb-2 text-2xl font-semibold">This link was already used</h1>
+        <p className="text-neutral-700">
+          <strong>{email}</strong> was {record.status === "denied" ? "denied" : "approved"} on {formatDateTime(new Date(record.approved_at))}. To
+          change their role, grades or stipend, or to reverse the decision, edit the Users tab of the request log.
+        </p>
+      </div>
+    );
+  }
   const teaches = parseGrades(record?.grade);
   const grades = [...new Set([...stipendGrades(stipendRows), ...teaches])];
   const stipendCents = parseAmount(record?.stipend);

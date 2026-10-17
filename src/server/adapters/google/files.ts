@@ -13,12 +13,18 @@ import type { FileStore } from "@/server/adapters/types";
  * resumable upload session (which fixes the file's name, folder and
  * `appProperties.uploader`), hands the session URL to the browser, and the
  * browser PUTs the bytes. Drive answers that PUT with the file resource, whose
- * `id` the browser sends back with the form.
+ * `id` the browser sends back with the form. Moving a receipt into a request's
+ * folder also records that request in `appProperties.attachedTo`, so a receipt
+ * can't be claimed twice.
+ *
+ * Folders are looked up by name on every call, one `files.list` per path
+ * element, rather than cached. Drive IDs survive renames and moves, but a
+ * trashed folder would sit in a cache until the next cold start, and the few
+ * extra calls per submission are nothing against the quota.
  */
 
 const FOLDER = "application/vnd.google-apps.folder";
 let api: drive_v3.Drive | null = null;
-const folderCache = new Map<string, string>();
 
 function drive(): drive_v3.Drive {
   if (!api) api = driveApi({ version: "v3", auth: googleAuth() });
@@ -28,14 +34,7 @@ function drive(): drive_v3.Drive {
 async function folderId(folderPath: string[]): Promise<string> {
   const { rootFolderId } = googleConfig();
   let parent = rootFolderId;
-  let key = "";
   for (const name of folderPath) {
-    key += `/${name}`;
-    const cached = folderCache.get(key);
-    if (cached) {
-      parent = cached;
-      continue;
-    }
     const escaped = name.replace(/'/g, "\\'");
     const found = await drive().files.list({
       q: `name='${escaped}' and '${parent}' in parents and mimeType='${FOLDER}' and trashed=false`,
@@ -53,8 +52,7 @@ async function folderId(folderPath: string[]): Promise<string> {
       });
       id = created.data.id ?? null;
     }
-    if (!id) throw new Error(`Could not create Drive folder ${key}`);
-    folderCache.set(key, id);
+    if (!id) throw new Error(`Could not create Drive folder ${folderPath.join("/")}`);
     parent = id;
   }
   return parent;
@@ -104,6 +102,7 @@ export const googleFileStore: FileStore = {
         mimeType: data.mimeType ?? "application/octet-stream",
         size: Number(data.size ?? 0),
         uploader: data.appProperties?.uploader ?? "",
+        attachedTo: data.appProperties?.attachedTo ?? "",
       };
     } catch {
       return null;
@@ -137,6 +136,8 @@ export const googleFileStore: FileStore = {
       fileId: id,
       addParents: target,
       removeParents: (data.parents ?? []).join(","),
+      // Drive merges appProperties, so uploader and kind stay.
+      requestBody: { appProperties: { attachedTo: folderPath[folderPath.length - 1] ?? "" } },
       supportsAllDrives: true,
     });
   },

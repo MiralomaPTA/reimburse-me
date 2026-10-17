@@ -1,7 +1,10 @@
 import { cookies } from "next/headers";
+import { getAdapters } from "@/server/adapters";
+import { completeSignIn } from "@/server/auth/access";
 import { seeOther } from "@/server/http";
-import { createSessionToken, verifyMagicToken } from "@/server/auth/tokens";
+import { createSessionToken } from "@/server/auth/tokens";
 import { SESSION_COOKIE, sessionCookieOptions } from "@/server/auth/session";
+import { safeNextPath } from "@/lib/next-path";
 
 /**
  * The sign-in page POSTs the token here (a click, not a GET), so link
@@ -10,14 +13,13 @@ import { SESSION_COOKIE, sessionCookieOptions } from "@/server/auth/session";
 export async function POST(request: Request) {
   const form = await request.formData();
   const token = String(form.get("token") ?? "");
-  const next = String(form.get("next") ?? "");
-  const email = await verifyMagicToken(token);
+  const { users, mailer } = await getAdapters();
+  const result = await completeSignIn(token, { users, mailer });
   // Relative Location headers: the browser resolves them against whatever host
   // and port it is actually using, so no APP_URL or Host reasoning is needed.
-  if (!email) return seeOther("/?expired=1");
+  if (!result.ok) return seeOther(result.reason === "not-approved" ? "/?unapproved=1" : "/?expired=1");
 
-  const session = await createSessionToken({ email, method: "email-link", signedInAt: new Date().toISOString() });
+  const session = await createSessionToken({ email: result.email, method: "email-link", signedInAt: new Date().toISOString() });
   (await cookies()).set(SESSION_COOKIE, session, sessionCookieOptions);
-  const target = next.startsWith("/") && !next.startsWith("//") ? next : "/requests/new";
-  return seeOther(target);
+  return seeOther(safeNextPath(form.get("next")) ?? "/requests/new");
 }

@@ -11,8 +11,9 @@ export async function POST(request: Request) {
   const form = await request.formData();
   const token = String(form.get("token") ?? "");
   const decision = form.get("decision") === "deny" ? "deny" : "approve";
-  const email = await verifyApprovalToken(token);
-  if (!email) return seeOther("/auth/approve?expired=1");
+  const verified = await verifyApprovalToken(token);
+  if (!verified) return seeOther("/auth/approve?expired=1");
+  const email = verified.email;
 
   // Blank means none. Stored as plain dollars, like the money columns in the request log.
   const stipendInput = String(form.get("stipend") ?? "").trim();
@@ -26,10 +27,11 @@ export async function POST(request: Request) {
   const role = roleInput === "teacher" || roleInput === "requester" ? roleInput : undefined;
 
   const { users, mailer } = await getAdapters();
-  const record = await decideAccess(
+  const { outcome, record } = await decideAccess(
     {
       email,
       decision,
+      issuedAt: verified.issuedAt,
       decidedBy: "approval email link",
       linkBase: linkBase(request),
       role,
@@ -39,8 +41,8 @@ export async function POST(request: Request) {
     },
     { users, mailer },
   );
-  const done = new URLSearchParams({ status: record.status, email: record.email });
-  if (record.status === "approved") {
+  const done = new URLSearchParams({ outcome, email: record.email });
+  if (record.status === "approved" && outcome !== "already-decided") {
     if (record.role === "teacher") done.set("teacher", record.grade || "yes");
     if (record.stipend) done.set("stipend", record.stipend);
   }

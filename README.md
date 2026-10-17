@@ -29,11 +29,13 @@ Then sign in as one of them, e.g. `grade2.teacher@example.org` (a grade 2 teache
 Other commands:
 
 ```bash
-npm test             # unit tests (vitest): schema, money, fiscal year, stipends, PDF builder, MIME, examples
+npm test             # unit tests (vitest): schema, money, fiscal year, stipends, access, submit, sheet table, PDF builder, MIME, examples
 npm run typecheck
 npm run lint
 npm run build
 ```
+
+The same four checks run in GitHub Actions on every push and pull request; see `.github/workflows/ci.yml`.
 
 ## Configuration
 
@@ -49,6 +51,7 @@ Copy `.env.example` to `.env.local`. Everything has a development default except
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` | Service account credentials |
 | `GOOGLE_IMPERSONATE_EMAIL` | Workspace user to act as (fs@) |
 | `GOOGLE_DRIVE_ROOT_FOLDER_ID`, `GOOGLE_SHEET_ID`, `GOOGLE_SHEET_NAME`, `GOOGLE_USERS_SHEET_NAME`, `GOOGLE_STIPENDS_SHEET_NAME` | Where data lives |
+| `ALLOW_LOCAL_ADAPTERS_IN_PRODUCTION` | `1` only to try a production build on a laptop with `ADAPTERS=local`; otherwise a production build refuses to run without Google, since the local adapter would write to the serverless disk and lose everything |
 
 ## Phase 0: Google Workspace setup
 
@@ -61,6 +64,8 @@ One-time, done by the PTA's Google Workspace super admin and the fs@miralomasf.c
 4. **Drive and Sheet, as fs@.** Create a folder "PTA reimbursements" in fs@'s My Drive and note its ID (the last part of the folder URL). Create a Google Sheet "PTA reimbursement log" with tabs named `Requests`, `Users` and `Stipends`; the app writes each header row on first use, and adds columns it gained later to the end of an existing header row. Share both with the AP team. To spare teachers the approval wait, paste staff addresses into `Users` with `status` = `approved` with `role` = `teacher` and their `grade` (`TK`, `K`, `1`, …; for a combination class list several with commas, like `1, 2`, not `1/2`, which the Sheet turns into a date) for teachers, `role` = `ap` for AP team members, and the `stipend` amount for staff who have their own. In `Stipends`, the treasurer enters each fiscal year's amounts: one row `Classroom` (what each teacher gets), one `Field trip` (one fund for the whole school), and one per grade, `Grade TK`, `Grade K`, `Grade 1`, … (shared by that grade's teachers; TK is transitional kindergarten).
 
    To start from templates, import the CSVs in [`examples/google-sheet/`](examples/google-sheet/) into that one spreadsheet (uploading them to Drive on their own would make three separate spreadsheets): **File → Import → Upload**, choose `Users.csv`, and set *Import location* to **Insert new sheet(s)**. The new tab takes the file's name; make sure it reads exactly `Users`. Repeat for `Stipends.csv` and `Requests.csv` (headers only). Then replace the sample `example.org` people with real staff and enter the real stipend amounts.
+
+   Every month or so, clear files older than 30 days out of `pending/`. They are receipts from drafts that were never signed, and can hold personal data; the app does not delete them yet.
 5. **Vercel.** Create the Vercel account under fs@miralomasf.com, import the GitHub repo, set the environment variables above with `ADAPTERS=google`, and add the custom domain.
 
 The app never stores the key on disk; it reads `GOOGLE_PRIVATE_KEY` from the environment. In Vercel, paste the key with its `\n` line breaks intact.
@@ -88,7 +93,7 @@ src/lib/                 shared schema, money and date helpers
 assets/form-template.pdf the official form with its fields renamed (see specs/)
 ```
 
-Receipts never pass through the app server: the server opens an upload session (local: a dev-only PUT route; Google: a Drive resumable upload with the uploader recorded in `appProperties`), and the browser PUTs the bytes. HEIC photos are converted to JPEG in the browser before upload. At submit time the server re-checks that every receipt was uploaded by the signed-in user, builds the PDF with pdf-lib and sharp, hashes it, writes the row, and emails AP and the requester with the PDF attached.
+Receipts never pass through the app server: the server opens an upload session (local: a dev-only PUT route; Google: a Drive resumable upload with the uploader recorded in `appProperties`), and the browser PUTs the bytes. HEIC photos are converted to JPEG in the browser before upload. At submit time the server re-checks that every receipt was uploaded by the signed-in user, builds the PDF with pdf-lib and sharp, hashes it, writes the row, and emails AP and the requester with the PDF attached. A page view costs about four Sheets API reads and a submission about six plus the Drive calls; the Sheets quota is 300 requests a minute per project, far above a school's use, so nothing is cached and every read sees AP's latest edits.
 
 ## What the MVP decides for you
 
@@ -98,7 +103,7 @@ These follow the proposed defaults in the spec's *Open questions* and are easy t
 - The form draft lives in the browser's local storage until it is signed. With no draft, the "about you" fields prefill from the requester's most recent request in the log.
 - Signatures are typed or drawn fresh each time and never stored.
 - "Locked" means: SHA-256 of the signed file recorded in the log and in the emails; the app never rewrites a packet.
-- Sessions last 30 days; sign-in links last 15 minutes.
+- Sessions last 30 days, but every page and API call re-checks the Users tab, so denying or deleting a row locks that address out at once. Sign-in links last 15 minutes and work once.
 - Each request says which stipend pays for it. Teachers (`role` = `teacher` on their `Users` row) choose their classroom stipend, the shared stipend of each grade in their `grade` cell (none, one, or several for a combination class), the field-trip fund, or "Not from a stipend"; anyone else with a `stipend` amount chooses it or not; everyone else isn't asked. The approval page sets teacher or staff, the grade and the stipend; `ap` and `admin` are only set in the Sheet. The choice is stored as a readable label in the `funding` column of `Requests`, which AP may correct by hand. What's left is worked out per PTA fiscal year from this year's requests (by request ID, leaving out returned ones), across all requesters for the shared grade and field-trip funds. Teachers see it on *My requests* and on the form, and both submission emails say where the chosen stipend stands. Going over shows a warning, never a block; AP decides. A teacher's own `stipend` amount, if set, replaces the standard classroom amount.
 - Who can sign in is the `Users` tab: approved addresses get links (one a minute, tracked on the row); unknown addresses are never emailed, the approver is, once, and at most 20 new pending addresses are recorded a day. The in-memory limiter (5 per address, 20 per IP every 15 minutes) sits in front as a first line.
 

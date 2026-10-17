@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fiscalYearLabel, formatRequestId } from "@/lib/fiscal-year";
 import { formatMoney, moneyPlain, parseMoney } from "@/lib/money";
+import { safeNextPath } from "@/lib/next-path";
 import { requestInputSchema, splitPhone, submitSchema, totals } from "@/lib/request-schema";
 
 describe("money", () => {
@@ -79,5 +80,15 @@ describe("request schema", () => {
     expect(splitPhone("(415) 555-1234")).toEqual({ area: "415", number: "555-1234" });
     expect(splitPhone("1-415-555-1234")).toEqual({ area: "415", number: "555-1234" });
     expect(splitPhone("+44 20 7946 0958")).toEqual({ area: "", number: "+44 20 7946 0958" });
+  });
+});
+
+describe("safeNextPath", () => {
+  it("keeps paths on this site and rejects anything a browser could read as another origin", () => {
+    expect(safeNextPath("/requests/FY27-001")).toBe("/requests/FY27-001");
+    expect(safeNextPath("/requests?page=2")).toBe("/requests?page=2");
+    for (const bad of ["//evil.com", "/\\evil.com", "/\\\\evil.com", "https://evil.com", "/\t/evil.com", "/\n/evil.com", "requests", "", undefined, null, 42]) {
+      expect(safeNextPath(bad), String(bad)).toBeNull();
+    }
   });
 });

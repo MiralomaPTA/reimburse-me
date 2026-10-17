@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import { getAdapters } from "@/server/adapters";
-import { getSession } from "@/server/auth/session";
+import { getApprovedSession } from "@/server/auth/session";
 import { pdfResponse } from "@/server/http";
 
 /** Serves a requester's own signed packet. Files are never public links. */
 export async function GET(_request: NextRequest, ctx: RouteContext<"/requests/[id]/pdf">) {
-  const session = await getSession();
+  const session = await getApprovedSession();
   if (!session) return new Response("Sign in required", { status: 401 });
   const { id } = await ctx.params;
   const { log, files } = await getAdapters();

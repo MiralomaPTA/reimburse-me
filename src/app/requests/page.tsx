@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getAdapters } from "@/server/adapters";
-import { requireSession } from "@/server/auth/session";
+import { requireApprovedSession } from "@/server/auth/session";
 import { currentFunding } from "@/server/requests/stipends";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney, parseMoney } from "@/lib/money";
@@ -8,9 +8,9 @@ import { StipendSummary } from "@/components/StipendSummary";
 import { StatusBadge } from "@/components/StatusBadge";
 
 export default async function RequestsPage() {
-  const session = await requireSession("/requests");
+  const session = await requireApprovedSession("/requests");
   const { log } = await getAdapters();
-  const [rows, funding] = await Promise.all([log.listByEmail(session.email), currentFunding(session.email)]);
+  const [rows, funding] = await Promise.all([log.listByEmail(session.email), currentFunding(session.user)]);
   rows.sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
 
   return (

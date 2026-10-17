@@ -12,7 +12,7 @@ export function signInEmail(link: string): { subject: string; text: string } {
       "",
       link,
       "",
-      `It works for ${config.magicLinkMinutes} minutes and only on the device where you open it.`,
+      `It works once, for ${config.magicLinkMinutes} minutes, and only on the device where you open it.`,
       "If you didn't ask for this, you can ignore this email.",
     ].join("\n"),
   };
@@ -29,6 +29,8 @@ export interface SubmissionEmailInput {
   funding: string;
   /** Where the chosen stipend stands with this request counted; null when none was chosen. */
   stipend: StipendStatus | null;
+  /** Base URL for the links, the same one the sign-in emails use. */
+  linkBase: string;
 }
 
 function summary(input: SubmissionEmailInput): string[] {
@@ -74,7 +76,7 @@ export function apSubmissionEmail(input: SubmissionEmailInput): { subject: strin
       "",
       ...summary(input),
       "",
-      `Open the portal: ${config.appUrl}/requests/${input.requestId}`,
+      `Open the portal: ${input.linkBase}/requests/${input.requestId}`,
     ].join("\n"),
   };
 }
@@ -89,7 +91,7 @@ export function requesterCopyEmail(input: SubmissionEmailInput): { subject: stri
       "",
       ...summary(input),
       "",
-      `See your requests: ${config.appUrl}/requests`,
+      `See your requests: ${input.linkBase}/requests`,
     ].join("\n"),
   };
 }
@@ -104,7 +106,7 @@ export function approvalRequestEmail(input: { email: string; requestedAt: Date; 
       "",
       input.approveUrl,
       "",
-      `The link works for ${config.approvalLinkDays} days. Approving lets them sign in and submit reimbursement requests; it does not approve any payment.`,
+      `The link works for ${config.approvalLinkDays} days, until you approve or deny. Approving lets them sign in and submit reimbursement requests; it does not approve any payment.`,
       "If you don't recognize the address, deny it or just ignore this email.",
     ].join("\n"),
   };
@@ -118,7 +120,7 @@ export function approvedEmail(link: string): { subject: string; text: string } {
       "",
       link,
       "",
-      `This link works for ${config.magicLinkMinutes} minutes. After that, just request a new one from the sign-in page.`,
+      `This link works once, for ${config.magicLinkMinutes} minutes. After that, just request a new one from the sign-in page.`,
     ].join("\n"),
   };
 }

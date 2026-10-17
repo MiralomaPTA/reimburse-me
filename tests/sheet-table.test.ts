@@ -4,7 +4,7 @@ const api = vi.hoisted(() => ({
   spreadsheets: {
     get: vi.fn(),
     batchUpdate: vi.fn(),
-    values: { get: vi.fn(), update: vi.fn() },
+    values: { get: vi.fn(), update: vi.fn(), append: vi.fn() },
   },
 }));
 vi.mock("@googleapis/sheets", () => ({ sheets: () => api }));
@@ -59,5 +59,51 @@ describe("SheetTable.headers", () => {
     api.spreadsheets.get.mockResolvedValue(grid(26));
     await expect(new SheetTable<Row>("Requests", ["a", "b", "c"], "a").headers()).rejects.toThrow("quota exceeded");
     expect(api.spreadsheets.batchUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("SheetTable rows", () => {
+  type Rec = { a: string; b: string; c: string; n: number };
+  const table = () => new SheetTable<Rec>("Requests", ["a", "b", "c", "n"], "a", ["n"]);
+  beforeEach(() => vi.clearAllMocks());
+
+  it("reads the header and the records in one call, mapping columns by name and skipping blank keys", async () => {
+    api.spreadsheets.values.get.mockResolvedValue({
+      data: { values: [["b", "a", "extra", "c", "n"], ["B1", "A1", "x", "C1", 7], ["", "", "", "", ""], ["B3", "A3"]] },
+    });
+    const rows = await table().readAll();
+    expect(api.spreadsheets.values.get).toHaveBeenCalledTimes(1);
+    expect(api.spreadsheets.values.get).toHaveBeenCalledWith(expect.objectContaining({ range: "'Requests'" }));
+    expect(rows.map((r) => [r.rowNumber, r.row])).toEqual([
+      [2, { a: "A1", b: "B1", c: "C1", n: 7 }],
+      [4, { a: "A3", b: "B3", c: "", n: 0 }],
+    ]);
+    expect(api.spreadsheets.values.update).not.toHaveBeenCalled();
+  });
+
+  it("updates a found row in place with one read and one write, keeping cells in columns it doesn't know", async () => {
+    api.spreadsheets.values.get.mockResolvedValue({ data: { values: [["a", "b", "ap_only", "c", "n"], ["k1", "x", "", "y", 1], ["k2", "p", "AP wrote this", "q", 2]] } });
+    await table().update("K2", { b: "changed" });
+    expect(api.spreadsheets.values.get).toHaveBeenCalledTimes(1);
+    expect(api.spreadsheets.values.update).toHaveBeenCalledTimes(1);
+    expect(api.spreadsheets.values.update).toHaveBeenCalledWith(
+      expect.objectContaining({ range: "'Requests'!A3:E3", requestBody: { values: [["k2", "changed", "AP wrote this", "q", 2]] } }),
+    );
+  });
+
+  it("refuses to update a key that isn't there", async () => {
+    api.spreadsheets.values.get.mockResolvedValue({ data: { values: [["a", "b", "c", "n"]] } });
+    await expect(table().update("nope", { b: "x" })).rejects.toThrow("No row with a=nope in Requests");
+  });
+
+  it("upsert appends a new key and rewrites an existing one", async () => {
+    api.spreadsheets.values.get.mockResolvedValue({ data: { values: [["a", "b", "c", "n"], ["k1", "x", "y", 1]] } });
+    await table().upsert({ a: "k9", b: "", c: "", n: 0 });
+    expect(api.spreadsheets.values.append).toHaveBeenCalledWith(expect.objectContaining({ range: "'Requests'!A1", requestBody: { values: [["k9", "", "", 0]] } }));
+    expect(api.spreadsheets.values.update).not.toHaveBeenCalled();
+
+    await table().upsert({ a: "k1", b: "new", c: "y", n: 1 });
+    expect(api.spreadsheets.values.update).toHaveBeenCalledWith(expect.objectContaining({ range: "'Requests'!A2:D2", requestBody: { values: [["k1", "new", "y", 1]] } }));
+    expect(api.spreadsheets.values.get).toHaveBeenCalledTimes(2);
   });
 });
