@@ -1,7 +1,7 @@
 import type { Adapters, RequestRow } from "@/server/adapters/types";
 import type { ApprovedSession } from "@/server/auth/session";
 import { config } from "@/server/config";
-import { apSubmissionEmail, requesterCopyEmail } from "@/server/email/templates";
+import { apSubmissionEmail, requesterCopyEmail, requesterPacketEmail } from "@/server/email/templates";
 import { buildPacket } from "@/server/pdf/build-packet";
 import { CONSENT_TEXT, type PacketSignature } from "@/server/pdf/types";
 import { FundingError, fundingLabel, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
@@ -52,6 +52,9 @@ export function maxSequenceIn(rows: Pick<RequestRow, "request_id">[], prefix: st
 
 /**
  * Signs, stores, logs and emails a new request.
+ *
+ * Where the packet goes depends on `config.sendPacketsTo`: to AP with a copy
+ * to the requester, or only to the requester, who forwards it to AP by hand.
  *
  * The order decides what a failure leaves behind. The PDF is stored, then the
  * row is written, and only then are the receipts moved and the emails sent.
@@ -169,10 +172,15 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
   const attachment = { filename: pdfName, mimeType: "application/pdf", bytes: packet.bytes };
   let emailError: string | undefined;
   try {
-    const ap = apSubmissionEmail(emailInput);
-    await mailer.send({ to: [config.apEmail], replyTo: session.email, subject: ap.subject, text: ap.text, attachments: [attachment] });
-    const copy = requesterCopyEmail(emailInput);
-    await mailer.send({ to: [session.email], subject: copy.subject, text: copy.text, attachments: [attachment] });
+    if (config.sendPacketsTo === "ap") {
+      const ap = apSubmissionEmail(emailInput);
+      await mailer.send({ to: [config.apEmail], replyTo: session.email, subject: ap.subject, text: ap.text, attachments: [attachment] });
+      const copy = requesterCopyEmail(emailInput);
+      await mailer.send({ to: [session.email], subject: copy.subject, text: copy.text, attachments: [attachment] });
+    } else {
+      const packet = requesterPacketEmail(emailInput);
+      await mailer.send({ to: [session.email], subject: packet.subject, text: packet.text, attachments: [attachment] });
+    }
   } catch (error) {
     emailError = error instanceof Error ? error.message : String(error);
     console.error(`[submit] email failed for ${requestId}: ${emailError}`);

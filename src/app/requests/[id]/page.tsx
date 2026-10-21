@@ -2,8 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAdapters } from "@/server/adapters";
 import { requireApprovedSession } from "@/server/auth/session";
+import { config } from "@/server/config";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney, parseMoney } from "@/lib/money";
+import { MailtoLink } from "@/components/MailtoLink";
 import { StatusBadge } from "@/components/StatusBadge";
 
 export default async function RequestPage(props: PageProps<"/requests/[id]">) {
@@ -27,6 +29,12 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
         <p className="text-neutral-600">{row.purpose}</p>
       </div>
 
+      {row.status === "Submitted" && config.sendPacketsTo === "requester" && (
+        <div className="rounded-md border border-sky-300 bg-sky-50 p-4 text-sm text-sky-900">
+          The portal doesn&apos;t send requests to the PTA yet. If you haven&apos;t already, email the signed PDF below to{" "}
+          <MailtoLink email={config.apEmail} /> to be reimbursed.
+        </div>
+      )}
       {row.status === "Returned" && row.returned_note && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900">
           <div className="font-medium">Returned by the AP team</div>

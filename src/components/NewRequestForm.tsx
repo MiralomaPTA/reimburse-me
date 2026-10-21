@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { formatMoney, parseMoney } from "@/lib/money";
 import { DESCRIPTION_MAX, type RequestInput } from "@/lib/request-schema";
 import { uploadReceipt } from "@/lib/upload-client";
+import type { PacketRecipient } from "@/server/config";
 import type { FundingOptions, StipendStatus } from "@/server/requests/stipends";
 import type { Profile } from "@/server/requests/profile";
 import { MailtoLink } from "@/components/MailtoLink";
@@ -152,18 +153,40 @@ const noop = () => () => {};
  * state without a hydration mismatch. A draft in progress wins; otherwise the
  * "about you" fields start from the requester's last request.
  */
-export function NewRequestForm({ email, apEmail, profile, funding }: { email: string; apEmail: string; profile: Profile | null; funding: FundingOptions }) {
+export function NewRequestForm({
+  email,
+  apEmail,
+  sendPacketsTo,
+  profile,
+  funding,
+}: {
+  email: string;
+  apEmail: string;
+  sendPacketsTo: PacketRecipient;
+  profile: Profile | null;
+  funding: FundingOptions;
+}) {
   const mounted = useSyncExternalStore(noop, () => true, () => false);
   if (!mounted) return <p className="text-neutral-500">Loading…</p>;
   const draft = loadDraft();
   return (
-    <RequestForm email={email} apEmail={apEmail} profile={profile} funding={funding} initialForm={draft ?? emptyForm(profile)} prefilled={!draft && profile !== null} />
+    <RequestForm
+      email={email}
+      apEmail={apEmail}
+      sendPacketsTo={sendPacketsTo}
+      profile={profile}
+      funding={funding}
+      initialForm={draft ?? emptyForm(profile)}
+      prefilled={!draft && profile !== null}
+    />
   );
 }
 
 interface RequestFormProps {
   email: string;
   apEmail: string;
+  /** Whether the signed packet went to AP, or only to the requester to forward by hand. */
+  sendPacketsTo: PacketRecipient;
   profile: Profile | null;
   /** The requester's stipends before this request; none means the form doesn't ask. */
   funding: FundingOptions;
@@ -172,7 +195,7 @@ interface RequestFormProps {
   prefilled: boolean;
 }
 
-function RequestForm({ email, apEmail, profile, funding: initialFunding, initialForm, prefilled }: RequestFormProps) {
+function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialFunding, initialForm, prefilled }: RequestFormProps) {
   const [form, setForm] = useState<FormState>(initialForm);
   // After a submission, "Start another" prefills from what was just sent.
   const latestProfile = useRef<Profile | null>(profile);
@@ -341,22 +364,37 @@ function RequestForm({ email, apEmail, profile, funding: initialFunding, initial
 
   if (step === "done" && result) {
     const left = chosen && stipendLeft(chosen);
+    const toAp = sendPacketsTo === "ap";
     return (
       <div className="mx-auto max-w-lg space-y-4">
-        <h1 className="text-2xl font-semibold">Sent to the PTA</h1>
-        <p className="text-neutral-700">
-          Your request <strong>{result.requestId}</strong> is signed and on its way to the accounts payable team.
-          {result.emailed ? ` A copy went to ${email}.` : ""}
-        </p>
+        <h1 className="text-2xl font-semibold">{toAp ? "Sent to the PTA" : "Signed and ready to send"}</h1>
+        {toAp ? (
+          <p className="text-neutral-700">
+            Your request <strong>{result.requestId}</strong> is signed and on its way to the accounts payable team.
+            {result.emailed ? ` A copy went to ${email}.` : ""}
+          </p>
+        ) : (
+          <p className="text-neutral-700">
+            Your request <strong>{result.requestId}</strong> is signed.
+            {result.emailed ? ` The PDF was emailed to ${email}.` : ""} The portal hasn&apos;t sent it to the PTA: to be reimbursed, forward that email,
+            with the PDF attached, to <MailtoLink email={apEmail} />.
+          </p>
+        )}
         {chosen && left && (
           <p className="text-neutral-700">
             {chosen.label}: {left}.
           </p>
         )}
-        {!result.emailed && (
+        {!result.emailed && toAp && (
           <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             The request was recorded, but the email to the AP team didn&apos;t go through. Please let <MailtoLink email={apEmail} /> know your
             request number so they can pick it up from the log.
+          </p>
+        )}
+        {!result.emailed && !toAp && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            The request was recorded, but the email with your PDF didn&apos;t go through. Open the request below, download the signed PDF and
+            email it to <MailtoLink email={apEmail} /> yourself.
           </p>
         )}
         <div className="flex flex-wrap gap-3">

@@ -9,7 +9,7 @@ import { submitSchema } from "@/lib/request-schema";
 
 export const maxDuration = 60;
 
-/** Signs and submits a request: builds the PDF, stores it, logs it, emails AP and the requester. */
+/** Signs and submits a request: builds the PDF, stores it, logs it, emails it (see config.sendPacketsTo). */
 export async function POST(request: Request) {
   const session = await getApprovedSession();
   if (!session) return Response.json({ error: "Please sign in again" }, { status: 401 });

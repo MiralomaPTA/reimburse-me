@@ -165,8 +165,9 @@ export async function appendAuditPage(doc: PDFDocument, input: AuditPageInput): 
   w.field("Pages", `${input.pagesBeforeAudit} before this record: the PTA form, ${request.items.length > 4 ? "a schedule of expenditures, " : ""}then the receipts`);
   w.space(6);
   w.sub("Integrity");
+  const emailedTo = config.sendPacketsTo === "ap" ? `the submission email to ${config.apEmail}` : `the email sent to ${audit.requesterEmail}`;
   w.paragraph(
-    `The SHA-256 hash of this file is recorded in the PTA's request log and in the submission email to ${config.apEmail}. ` +
+    `The SHA-256 hash of this file is recorded in the PTA's request log and in ${emailedTo}. ` +
       "Any change to the file after signing changes that hash. A corrected request is signed again and gets a new version.",
   );
 }

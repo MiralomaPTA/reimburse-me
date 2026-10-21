@@ -81,6 +81,25 @@ export function apSubmissionEmail(input: SubmissionEmailInput): { subject: strin
   };
 }
 
+/**
+ * The only email sent when packets go to the requester: the signed PDF with
+ * instructions to forward it to AP. The subject is the one AP would have
+ * received, so a plain "Forward" lands in their inbox looking the same.
+ */
+export function requesterPacketEmail(input: SubmissionEmailInput): { subject: string; text: string } {
+  return {
+    subject: apSubmissionEmail(input).subject,
+    text: [
+      `Thanks, ${input.request.payeeName}. Your signed request is attached, but the portal has not sent it to the PTA.`,
+      `To be reimbursed, forward this email, with the PDF still attached, to the PTA's accounts payable team at ${config.apEmail}.`,
+      "",
+      ...summary(input),
+      "",
+      `See your requests: ${input.linkBase}/requests`,
+    ].join("\n"),
+  };
+}
+
 export function requesterCopyEmail(input: SubmissionEmailInput): { subject: string; text: string } {
   const t = totals(input.request);
   return {

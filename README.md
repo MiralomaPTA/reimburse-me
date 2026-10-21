@@ -46,7 +46,8 @@ Copy `.env.example` to `.env.local`. Everything has a development default except
 | `APP_URL` | Public base URL used in emailed links |
 | `ADAPTERS` | `local` or `google` |
 | `SESSION_SECRET` | Signs sign-in links and session cookies |
-| `AP_EMAIL`, `FROM_EMAIL`, `FROM_NAME` | Where packets go and who they come from |
+| `AP_EMAIL`, `FROM_EMAIL`, `FROM_NAME` | The AP team's address and who emails come from |
+| `SEND_PACKETS_TO` | `requester` (default) emails the signed packet only to the person who signed it, to forward to `AP_EMAIL` by hand while the portal is being tried out; `ap` emails it to `AP_EMAIL` with a copy to the requester |
 | `APPROVER_EMAIL` | Who approves new requester addresses (defaults to `AP_EMAIL`) |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY` | Service account credentials |
 | `GOOGLE_IMPERSONATE_EMAIL` | Workspace user to act as (fs@) |
@@ -93,7 +94,7 @@ src/lib/                 shared schema, money and date helpers
 assets/form-template.pdf the official form with its fields renamed (see specs/)
 ```
 
-Receipts never pass through the app server: the server opens an upload session (local: a dev-only PUT route; Google: a Drive resumable upload with the uploader recorded in `appProperties`), and the browser PUTs the bytes. HEIC photos are converted to JPEG in the browser before upload. At submit time the server re-checks that every receipt was uploaded by the signed-in user, builds the PDF with pdf-lib and sharp, hashes it, writes the row, and emails AP and the requester with the PDF attached. A page view costs about four Sheets API reads and a submission about six plus the Drive calls; the Sheets quota is 300 requests a minute per project, far above a school's use, so nothing is cached and every read sees AP's latest edits.
+Receipts never pass through the app server: the server opens an upload session (local: a dev-only PUT route; Google: a Drive resumable upload with the uploader recorded in `appProperties`), and the browser PUTs the bytes. HEIC photos are converted to JPEG in the browser before upload. At submit time the server re-checks that every receipt was uploaded by the signed-in user, builds the PDF with pdf-lib and sharp, hashes it, writes the row, and emails the PDF: to the requester alone, to forward to AP by hand (`SEND_PACKETS_TO=requester`, the default while the portal is being tried out), or to AP with a copy to the requester (`SEND_PACKETS_TO=ap`). A page view costs about four Sheets API reads and a submission about six plus the Drive calls; the Sheets quota is 300 requests a minute per project, far above a school's use, so nothing is cached and every read sees AP's latest edits.
 
 ## What the MVP decides for you
 

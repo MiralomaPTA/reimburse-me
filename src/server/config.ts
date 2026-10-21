@@ -28,12 +28,29 @@ function adapterKind(): AdapterKind {
   throw new Error(`ADAPTERS must be "local" or "google", not "${value}"`);
 }
 
+export type PacketRecipient = "requester" | "ap";
+
+/**
+ * Who gets the signed packet. "requester" (the default while the portal is
+ * being tried out) emails it only to the person who signed, who forwards it to
+ * AP by hand; "ap" emails AP directly and sends the requester a copy. As with
+ * ADAPTERS, a typo must not quietly pick either one.
+ */
+function packetRecipient(): PacketRecipient {
+  const value = env.SEND_PACKETS_TO ?? "requester";
+  if (value === "requester" || value === "ap") return value;
+  throw new Error(`SEND_PACKETS_TO must be "requester" or "ap", not "${value}"`);
+}
+
 export const config = {
   /** Public base URL used in emailed links, e.g. https://reimburse.miralomasf.com */
   appUrl: (env.APP_URL ?? "http://localhost:3000").replace(/\/$/, ""),
   /** "local" writes to ./.data; "google" uses Drive, Sheets and Gmail as fs@. */
   adapters: adapterKind(),
+  /** The PTA's accounts payable address: where packets go when sendPacketsTo is "ap", and the contact shown to requesters. */
   apEmail: env.AP_EMAIL ?? "ap@miralomasf.com",
+  /** "requester": only the signer gets the packet, to forward to AP by hand. "ap": AP gets it, the signer a copy. */
+  sendPacketsTo: packetRecipient(),
   /** Where "please approve this new user" emails go. */
   approverEmail: env.APPROVER_EMAIL ?? env.AP_EMAIL ?? "ap@miralomasf.com",
   fromEmail: env.FROM_EMAIL ?? "fs@miralomasf.com",

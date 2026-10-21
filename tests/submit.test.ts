@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { PDFDocument } from "pdf-lib";
 import type { Adapters, FileStore, MailMessage, Mailer, RequestLog, RequestRow, StipendRow, StoredFileMeta, UserDirectory, UserRecord } from "@/server/adapters/types";
@@ -130,7 +130,13 @@ function submit(adapters: Adapters, req: RequestInput, user = teacher, extra: Pa
 }
 
 describe("submitRequest", () => {
+  const defaultRecipient = config.sendPacketsTo;
+  afterEach(() => {
+    config.sendPacketsTo = defaultRecipient;
+  });
+
   it("stores the packet, writes the row, moves the receipts and emails AP and the requester", async () => {
+    config.sendPacketsTo = "ap";
     const { files, log, mailer, adapters } = world();
     files.add("r1", ME, await jpeg());
     const result = await submit(adapters, request(["r1"], "grade:2"));
@@ -154,6 +160,21 @@ describe("submitRequest", () => {
     expect(mailer.sent[0].text).toContain(`https://portal.example/requests/${result.requestId}`);
     expect(mailer.sent[0].attachments?.[0].filename).toBe(`${result.requestId}.pdf`);
     expect(result.funding.stipends.find((s) => s.id === "grade:2")).toMatchObject({ usedCents: 1000, remainingCents: 119000 });
+  }, 30_000);
+
+  it("emails only the requester, with the packet to forward, when packets go to the requester", async () => {
+    config.sendPacketsTo = "requester";
+    const { mailer, files, adapters } = world();
+    files.add("r1", ME, await jpeg());
+    const result = await submit(adapters, request(["r1"]));
+    expect(result.emailed).toBe(true);
+    expect(mailer.sent.map((m) => m.to)).toEqual([[ME]]);
+    const [mail] = mailer.sent;
+    expect(mail.replyTo).toBeUndefined();
+    expect(mail.subject).toBe(`Reimbursement request ${result.requestId} - Pat Teacher - $10.00`);
+    expect(mail.text).toContain(`forward this email, with the PDF still attached, to the PTA's accounts payable team at ${config.apEmail}`);
+    expect(mail.text).toContain(`SHA-256: ${result.sha256}`);
+    expect(mail.attachments?.[0].filename).toBe(`${result.requestId}.pdf`);
   }, 30_000);
 
   it("refuses a stipend the requester doesn't have, before anything is written", async () => {
