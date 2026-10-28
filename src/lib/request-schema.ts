@@ -30,20 +30,14 @@ export const lineItemSchema = z.object({
 export const requestInputSchema = z
   .object({
     payeeName: z.string().trim().min(1, "Enter your name").max(80),
-    ptaPosition: z.string().trim().min(1, "Enter your position, e.g. Teacher, Room 12").max(80),
+    ptaPosition: z.string().trim().min(1, "Enter your PTA position").max(80),
     phone: z.string().trim().min(7, "Enter a phone number").max(30),
-    checkDelivery: z.enum(["mail", "mailbox"]),
-    address: z.string().trim().max(120).default(""),
-    cityZip: z.string().trim().max(80).default(""),
+    checkDelivery: z.enum(["pickup", "mailbox"]),
     purpose: z.string().trim().min(1, "Say what the expenditure was for").max(60),
     items: z.array(lineItemSchema).min(1, "Add at least one receipt").max(40),
     donationCents: z.number().int().min(0).default(0),
   })
   .superRefine((value, ctx) => {
-    if (value.checkDelivery === "mail") {
-      if (!value.address) ctx.addIssue({ code: "custom", path: ["address"], message: "Enter the address to mail the check to" });
-      if (!value.cityZip) ctx.addIssue({ code: "custom", path: ["cityZip"], message: "Enter city and ZIP" });
-    }
     const total = value.items.reduce((sum, item) => sum + item.amountCents, 0);
     if (value.donationCents > total) {
       ctx.addIssue({ code: "custom", path: ["donationCents"], message: "You can't donate more than the total" });
@@ -124,6 +118,6 @@ export function splitPhone(phone: string): { area: string; number: string } {
 }
 
 export const CHECK_DELIVERY_LABEL: Record<RequestInput["checkDelivery"], string> = {
-  mail: "Mail the check to the address above",
+  pickup: "Requester will arrange pickup with the PTA",
   mailbox: "Leave the check in the staff mailbox",
 };

@@ -106,8 +106,6 @@ function request(fileIds: string[], funding: string | string[] = "none", donatio
     ptaPosition: "Teacher, Room 12",
     phone: "(415) 555-1234",
     checkDelivery: "mailbox",
-    address: "",
-    cityZip: "",
     purpose: "Art supplies",
     donationCents,
     items: fileIds.map((fileId, i) => ({

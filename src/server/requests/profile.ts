@@ -5,9 +5,7 @@ export interface Profile {
   payeeName: string;
   ptaPosition: string;
   phone: string;
-  checkDelivery: "mail" | "mailbox";
-  address: string;
-  cityZip: string;
+  checkDelivery: "pickup" | "mailbox";
 }
 
 /**
@@ -24,8 +22,7 @@ export async function lastProfile(email: string): Promise<Profile | null> {
     payeeName: last.payee_name,
     ptaPosition: last.pta_position,
     phone: last.phone,
-    checkDelivery: last.check_delivery === "mail" ? "mail" : "mailbox",
-    address: last.address,
-    cityZip: last.city_zip,
+    // Rows from before pickup replaced mailing say "mail"; both mean "not the staff mailbox".
+    checkDelivery: last.check_delivery === "mailbox" ? "mailbox" : "pickup",
   };
 }

@@ -7,6 +7,7 @@ import { formatDateTime } from "@/lib/dates";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { MailtoLink } from "@/components/MailtoLink";
 import { StatusBadge } from "@/components/StatusBadge";
+import type { RequestRow } from "@/server/adapters/types";
 
 export default async function RequestPage(props: PageProps<"/requests/[id]">) {
   const { id } = await props.params;
@@ -51,7 +52,7 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
         <Row label="Submitted" value={formatDateTime(new Date(row.submitted_at))} />
         <Row label="Name" value={row.payee_name} />
         <Row label="PTA position" value={row.pta_position} />
-        <Row label="Check" value={row.check_delivery === "mail" ? `Mail to ${row.address}, ${row.city_zip}` : "Staff mailbox"} />
+        <Row label="Check" value={checkDelivery(row)} />
         <Row label="Line items" value={`${row.line_count}, ${row.receipt_count} receipt${row.receipt_count === 1 ? "" : "s"}`} />
         <Row label="Total expense" value={money(row.total_expense)} />
         {parseMoney(row.donation_to_pta) ? <Row label="Donated to PTA" value={money(row.donation_to_pta)} /> : null}
@@ -67,6 +68,12 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
       <p className="text-xs text-neutral-500">SHA-256 of the signed file: {row.pdf_sha256}</p>
     </div>
   );
+}
+
+/** Rows from before pickup replaced mailing still carry the address the check went to. */
+function checkDelivery(row: RequestRow): string {
+  if (row.check_delivery === "mail") return `Mail to ${row.address}, ${row.city_zip}`;
+  return row.check_delivery === "pickup" ? "Pickup from the PTA" : "Staff mailbox";
 }
 
 function Row({ label, value }: { label: string; value: string }) {

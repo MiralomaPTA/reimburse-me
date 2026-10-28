@@ -25,9 +25,7 @@ function request(itemCount: number, receiptsPerItem: (i: number) => string[]): R
     payeeName: "Jane Doe",
     ptaPosition: "Teacher, Room 12",
     phone: "(415) 555-1234",
-    checkDelivery: "mail",
-    address: "123 Main St",
-    cityZip: "San Francisco, CA 94127",
+    checkDelivery: "pickup",
     purpose: "2nd grade art supplies",
     donationCents: 500,
     items: Array.from({ length: itemCount }, (_, i) => ({

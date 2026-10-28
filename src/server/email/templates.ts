@@ -52,7 +52,6 @@ function summary(input: SubmissionEmailInput): string[] {
     `Submitted: ${formatDateTime(submittedAt)}`,
     `Purpose: ${request.purpose}`,
     `Check: ${CHECK_DELIVERY_LABEL[request.checkDelivery]}`,
-    ...(request.checkDelivery === "mail" ? [`Mail to: ${request.address}, ${request.cityZip}`] : []),
     `Phone: ${request.phone}`,
     "",
     "Line items:",

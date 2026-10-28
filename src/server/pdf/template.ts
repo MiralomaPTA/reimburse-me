@@ -9,7 +9,7 @@ export async function templateBytes(): Promise<Uint8Array> {
   return cached;
 }
 
-/** Field names in the template. Treasurer-block fields are listed for completeness but never filled. */
+/** Field names in the template. Treasurer-block and address fields are listed for completeness but never filled. */
 export const FIELDS = {
   payeeName: "payee_name",
   ptaPosition: "pta_position",

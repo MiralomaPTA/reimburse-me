@@ -44,10 +44,6 @@ export async function fillForm({ doc, request, requesterEmail, signedAt, signatu
 
   setFitted(text(FIELDS.payeeName), helv, request.payeeName);
   setFitted(text(FIELDS.ptaPosition), helv, request.ptaPosition);
-  if (request.checkDelivery === "mail") {
-    setFitted(text(FIELDS.address), helv, request.address);
-    setFitted(text(FIELDS.cityZip), helv, request.cityZip);
-  }
   const phone = splitPhone(request.phone);
   setFitted(text(FIELDS.phoneArea), helv, phone.area);
   setFitted(text(FIELDS.phoneNumber), helv, phone.number);

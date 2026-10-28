@@ -61,7 +61,11 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             .
           </p>
           <p>
-            Questions about a payment? Email <MailtoLink email={config.apEmail} />.
+            New here?{" "}
+            <Link href="/help" className="underline">
+              See how it works
+            </Link>
+            . Questions about a payment? Email <MailtoLink email={config.apEmail} />.
           </p>
         </footer>
       </body>

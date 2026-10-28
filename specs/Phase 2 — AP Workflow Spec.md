@@ -52,7 +52,7 @@ A request is always in exactly one status. *Draft* from the main spec lives only
 | Approved | AP has reviewed it and will pay | AP | `approved_at`, `approved_by` | None *(default)* |
 | Returned | AP needs a change before paying | AP, note required | `returned_at`, `returned_by`, `returned_note` | Teacher: the note and a link to fix it |
 | Check written | The treasurer has written the check; it is waiting for the second signature | AP, check number and date required | `check_number`, `check_date`, `check_written_by` | None. The teacher's request page shows "Check written, awaiting second signature" |
-| Paid | Both signatures are on the check and it has gone out, to the staff mailbox or the mail | AP or the co-signer | `paid_date` (the date it went out), `paid_by` | Teacher: check number, date, and where the check went |
+| Paid | Both signatures are on the check and it has gone out, to the staff mailbox or handed over at pickup | AP or the co-signer | `paid_date` (the date it went out), `paid_by` | Teacher: check number, date, and where the check went |
 
 **Transitions**
 
@@ -97,7 +97,7 @@ To refill the form, the app saves the exact request content as `request.json` in
 **/ap/[id]** — one request.
 
 - Everything on the row, the AP note history from the Actions tab, and links to the current signed PDF and any previous versions.
-- The action panel: a category dropdown, and the buttons **Approve**, **Return with a note**, **Record check**, **Mark sent**. Return opens a note field. Record check asks for the check number and date (defaults to today) and has an "already signed by both and sent" box. Mark sent asks only for the date (defaults to today) and reminds whether the check goes to the staff mailbox or the mail.
+- The action panel: a category dropdown, and the buttons **Approve**, **Return with a note**, **Record check**, **Mark sent**. Return opens a note field. Record check asks for the check number and date (defaults to today) and has an "already signed by both and sent" box. Mark sent asks only for the date (defaults to today) and reminds whether the check goes to the staff mailbox or is picked up from the PTA.
 - After an action the page reloads from the Sheet. Two AP members acting on the same request at the same moment is last-write-wins; at this volume that is acceptable, and the Actions tab shows both.
 - The buttons are disabled on your own request.
 
@@ -109,7 +109,7 @@ The pages are responsive so the treasurer can clear requests from a phone.
 | --- | --- | --- |
 | Returned | Teacher | The AP note, who to contact, and a link that opens the request to fix |
 | Check written | Nobody | The status is visible on the teacher's request page, but no email: the check is not in their hands yet |
-| Paid | Teacher | Check number, the date it went out, and "in your staff mailbox" or "mailed to [address]" |
+| Paid | Teacher | Check number, the date it went out, and "in your staff mailbox" or "ready for pickup from the PTA" |
 | Resubmitted | ap@ | The new packet, marked with the version and the note it answers |
 | Weekly digest | ap@ | Every request not Paid that was submitted more than 7 days ago: ID, requester, amount, status, age, with checks awaiting signature in their own section. Sent Monday at 8 AM Pacific. Not sent when the list is empty *(defaults)* |
 
@@ -168,6 +168,6 @@ Each has a default. The build follows it unless changed here.
 | 8 | Weekly digest | Monday 8 AM Pacific; requests not Paid and older than 7 days; skipped when empty |
 | 9 | Acting on your own request | Blocked for every action; another AP member must do it |
 | 10 | Undoing Paid | Admin edits the Sheet and writes a note; no Reopen button |
-| 12 | Who marks a check sent | Whoever puts it in the mailbox or the mail. The co-signer may be given the `ap` role to do it right after signing |
+| 12 | Who marks a check sent | Whoever puts it in the mailbox or hands it over at pickup. The co-signer may be given the `ap` role to do it right after signing |
 | 13 | Voiding a written check | Return it with a note; the check number stays in the Actions tab and the new check gets a new Record check entry |
 | 11 | VP/Chairman signature line | Still blank on the PDF (carried from the main spec). Does AP collect it on paper, or skip it? |

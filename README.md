@@ -81,6 +81,8 @@ src/app/                 pages and route handlers
   auth/approve           the approver's page from the approval email: Approve / Deny
   requests/new           the form: details, one line per receipt, preview, sign
   requests/[id]          status and the signed PDF
+  help, help/teachers, help/volunteers
+                         step-by-step guides with screenshots (see below)
   api/auth/request-link  approved address: sends a link; unknown address: asks the approver
   api/auth/approve       applies the approver's decision
   api/uploads            opens a direct upload for one receipt
@@ -96,6 +98,19 @@ assets/form-template.pdf the official form with its fields renamed (see specs/)
 ```
 
 Receipts never pass through the app server: the server opens an upload session (local: a dev-only PUT route; Google: a Drive resumable upload with the uploader recorded in `appProperties`), and the browser PUTs the bytes. HEIC photos are converted to JPEG in the browser before upload. At submit time the server re-checks that every receipt was uploaded by the signed-in user, builds the PDF with pdf-lib and sharp, hashes it, writes the row, and emails the PDF: to the requester alone, to forward to AP by hand (`SEND_PACKETS_TO=requester`, the default while the portal is being tried out), or to AP with a copy to the requester (`SEND_PACKETS_TO=ap`). A page view costs about four Sheets API reads and a submission about six plus the Drive calls; the Sheets quota is 300 requests a minute per project, far above a school's use, so nothing is cached and every read sees AP's latest edits.
+
+## Help pages
+
+`/help` links to two step-by-step guides, `/help/teachers` and `/help/volunteers`, reachable from the sign-in page, the header and the footer. They are ordinary pages in `src/app/help/`, so their wording follows the configuration: the AP address, how long sign-in links last, and whether the signed packet goes to AP or is forwarded by the requester (`SEND_PACKETS_TO`).
+
+The screenshots in `src/images/help/` are taken from the app itself. After a change to the form or to any page they show, regenerate them:
+
+```bash
+npx playwright install chromium   # once
+npm run help:screenshots
+```
+
+The script starts `next dev` on port 3100 with the local adapters and a throwaway data folder (`.data/help-screenshots`, seeded from `examples/local-data`), submits a request as the sample volunteer and the sample teacher on a phone-sized headless Chromium, and captures the done and request pages in both `SEND_PACKETS_TO` modes so each guide can show the one in use. The preview PDF on the "Check and sign" page is rendered with Quick Look on macOS or `pdftoppm` (poppler) elsewhere; without either, that one screenshot shows an empty frame. Commit the new images with the change that made them necessary.
 
 ## What the MVP decides for you
 

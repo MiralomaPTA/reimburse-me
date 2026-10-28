@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { formatMoney, parseMoney } from "@/lib/money";
+import { DEFAULT_POSITION, GRADE_LABELS, otherPosition, parseTeacherPosition, teacherPosition } from "@/lib/pta-position";
 import { DESCRIPTION_MAX, fundingSplit, type FundingShare, type RequestInput } from "@/lib/request-schema";
 import { uploadReceipt } from "@/lib/upload-client";
 import type { PacketRecipient } from "@/server/config";
@@ -22,20 +23,39 @@ interface ItemState {
   funding: string;
 }
 
+/** Who is filling the form in, as far as the "about you" fields care. */
+export interface Requester {
+  /** Teachers are asked for grade and room instead of a free-text position. */
+  teacher: boolean;
+  /** The grades on their Users row as the form shows them ("2nd", "1st/2nd"), or "" when it names none. */
+  grade: string;
+}
+
 interface FormState {
   payeeName: string;
+  /** Non-teachers only; teachers build theirs from `grade` and `room`. */
   ptaPosition: string;
+  grade: string;
+  room: string;
   phone: string;
-  checkDelivery: "mail" | "mailbox";
-  address: string;
-  cityZip: string;
+  checkDelivery: "pickup" | "mailbox";
   purpose: string;
   items: ItemState[];
   donation: string;
 }
 
-/** Drafts saved before the stipend was chosen per line kept one choice for the whole request. */
-type SavedForm = FormState & { funding?: string; items: (Omit<ItemState, "funding"> & { funding?: string })[] };
+/**
+ * Drafts saved before the stipend was chosen per line kept one choice for the whole request,
+ * drafts from before pickup replaced mailing may still say "mail", and drafts from before
+ * teachers were asked for grade and room have neither.
+ */
+type SavedForm = Omit<FormState, "checkDelivery" | "grade" | "room"> & {
+  checkDelivery?: string;
+  grade?: string;
+  room?: string;
+  funding?: string;
+  items: (Omit<ItemState, "funding"> & { funding?: string })[];
+};
 
 /** Drafts before v2 were keyed per device, so one signed-in address could resume another's. */
 const LEGACY_DRAFT_KEY = "rm:draft:v1";
@@ -46,19 +66,28 @@ const CONSENT_LABEL = "I agree to sign this reimbursement request electronically
 const newKey = () => Math.random().toString(36).slice(2, 10);
 /** A new line takes the stipend of the line before it, so a request from one stipend is chosen once. */
 const newItem = (funding = ""): ItemState => ({ key: newKey(), description: "", amount: "", receipts: [], funding });
-const emptyForm = (profile: Profile | null): FormState => ({
-  payeeName: profile?.payeeName ?? "",
-  ptaPosition: profile?.ptaPosition ?? "",
-  phone: profile?.phone ?? "",
-  checkDelivery: profile?.checkDelivery ?? "mailbox",
-  address: profile?.address ?? "",
-  cityZip: profile?.cityZip ?? "",
-  purpose: "",
-  items: [newItem()],
-  donation: "",
-});
+/**
+ * The "about you" fields from the last request. A teacher's grade and room come
+ * back out of the position line they built last time, or start from their Users
+ * row; a position that was only the default is left blank again.
+ */
+const emptyForm = (profile: Profile | null, requester: Requester): FormState => {
+  const last = profile && requester.teacher ? parseTeacherPosition(profile.ptaPosition) : null;
+  const position = profile?.ptaPosition ?? "";
+  return {
+    payeeName: profile?.payeeName ?? "",
+    ptaPosition: requester.teacher || position === DEFAULT_POSITION ? "" : position,
+    grade: last?.grade ?? requester.grade,
+    room: last?.room ?? "",
+    phone: profile?.phone ?? "",
+    checkDelivery: profile?.checkDelivery ?? "mailbox",
+    purpose: "",
+    items: [newItem()],
+    donation: "",
+  };
+};
 
-function loadDraft(email: string): FormState | null {
+function loadDraft(email: string, requester: Requester): FormState | null {
   try {
     // A pre-v2 draft can't be attributed to anyone, so it is dropped rather than resumed.
     localStorage.removeItem(LEGACY_DRAFT_KEY);
@@ -71,7 +100,13 @@ function loadDraft(email: string): FormState | null {
       receipts: item.receipts.filter((r) => r.status === "done" && r.fileId),
       funding: item.funding ?? legacyFunding ?? "",
     }));
-    return { ...draft, items: items.length > 0 ? items : [newItem()] };
+    return {
+      ...draft,
+      grade: draft.grade ?? requester.grade,
+      room: draft.room ?? "",
+      checkDelivery: draft.checkDelivery === "mailbox" ? "mailbox" : "pickup",
+      items: items.length > 0 ? items : [newItem()],
+    };
   } catch {
     return null;
   }
@@ -94,7 +129,7 @@ function clearDraft(email: string) {
 }
 
 /** Converts form state to the API payload, collecting user-facing problems. */
-function toRequestInput(form: FormState, stipends: StipendStatus[]): { input: RequestInput | null; problems: string[] } {
+function toRequestInput(form: FormState, stipends: StipendStatus[], requester: Requester): { input: RequestInput | null; problems: string[] } {
   const problems: string[] = [];
   const items: RequestInput["items"] = [];
   form.items.forEach((item, i) => {
@@ -120,19 +155,19 @@ function toRequestInput(form: FormState, stipends: StipendStatus[]): { input: Re
   const donationCents = form.donation.trim() ? parseMoney(form.donation) : 0;
   if (donationCents === null) problems.push("Enter the donation as an amount, like 5.00, or leave it blank.");
   if (!form.payeeName.trim()) problems.push("Enter your name.");
-  if (!form.ptaPosition.trim()) problems.push("Enter your PTA position, e.g. Teacher, Room 12.");
+  if (requester.teacher) {
+    if (!form.grade.trim()) problems.push("Enter the grade you teach.");
+    if (!form.room.trim()) problems.push("Enter your room number.");
+  }
   if (form.phone.replace(/\D/g, "").length < 7) problems.push("Enter a phone number.");
   if (!form.purpose.trim()) problems.push("Say what the expenditure was for.");
-  if (form.checkDelivery === "mail" && (!form.address.trim() || !form.cityZip.trim())) problems.push("Enter the address to mail the check to.");
   if (problems.length) return { input: null, problems };
   return {
     input: {
       payeeName: form.payeeName.trim(),
-      ptaPosition: form.ptaPosition.trim(),
+      ptaPosition: requester.teacher ? teacherPosition(form.grade, form.room) : otherPosition(form.ptaPosition),
       phone: form.phone.trim(),
       checkDelivery: form.checkDelivery,
-      address: form.address.trim(),
-      cityZip: form.cityZip.trim(),
       purpose: form.purpose.trim(),
       items,
       donationCents: donationCents ?? 0,
@@ -168,25 +203,28 @@ export function NewRequestForm({
   apEmail,
   sendPacketsTo,
   profile,
+  requester,
   funding,
 }: {
   email: string;
   apEmail: string;
   sendPacketsTo: PacketRecipient;
   profile: Profile | null;
+  requester: Requester;
   funding: FundingOptions;
 }) {
   const mounted = useSyncExternalStore(noop, () => true, () => false);
   if (!mounted) return <p className="text-neutral-500">Loading…</p>;
-  const draft = loadDraft(email);
+  const draft = loadDraft(email, requester);
   return (
     <RequestForm
       email={email}
       apEmail={apEmail}
       sendPacketsTo={sendPacketsTo}
       profile={profile}
+      requester={requester}
       funding={funding}
-      initialForm={draft ?? emptyForm(profile)}
+      initialForm={draft ?? emptyForm(profile, requester)}
       prefilled={!draft && profile !== null}
     />
   );
@@ -198,6 +236,7 @@ interface RequestFormProps {
   /** Whether the signed packet went to AP, or only to the requester to forward by hand. */
   sendPacketsTo: PacketRecipient;
   profile: Profile | null;
+  requester: Requester;
   /** The requester's stipends before this request; none means the form doesn't ask. */
   funding: FundingOptions;
   initialForm: FormState;
@@ -205,7 +244,7 @@ interface RequestFormProps {
   prefilled: boolean;
 }
 
-function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialFunding, initialForm, prefilled }: RequestFormProps) {
+function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, funding: initialFunding, initialForm, prefilled }: RequestFormProps) {
   const [form, setForm] = useState<FormState>(initialForm);
   // After a submission, "Start another" prefills from what was just sent.
   const latestProfile = useRef<Profile | null>(profile);
@@ -301,7 +340,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
   );
 
   async function preview() {
-    const { input, problems: found } = toRequestInput(form, funding.stipends);
+    const { input, problems: found } = toRequestInput(form, funding.stipends, requester);
     setProblems(found);
     if (!input) {
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -363,8 +402,6 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
         ptaPosition: requestInput.ptaPosition,
         phone: requestInput.phone,
         checkDelivery: requestInput.checkDelivery,
-        address: requestInput.address,
-        cityZip: requestInput.cityZip,
       };
       if (body.funding) setFunding(body.funding);
       setResult({ requestId: body.requestId, emailed: body.emailed, shares: fundingSplit(requestInput) });
@@ -378,7 +415,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
   }
 
   function startAnother() {
-    setForm(emptyForm(latestProfile.current));
+    setForm(emptyForm(latestProfile.current, requester));
     setRequestInput(null);
     setConsent(false);
     setTypedName("");
@@ -391,7 +428,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
   function discardDraft() {
     if (!window.confirm("Discard this draft? Anything you've entered, including uploaded receipts, will be removed from the form.")) return;
     clearDraft(email);
-    setForm(emptyForm(latestProfile.current));
+    setForm(emptyForm(latestProfile.current, requester));
     setProblems([]);
     window.scrollTo({ top: 0 });
   }
@@ -553,12 +590,44 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
             </label>
             <input id="payeeName" className="field" autoComplete="name" value={form.payeeName} onChange={(e) => update("payeeName", e.target.value)} />
           </div>
-          <div>
-            <label htmlFor="ptaPosition" className="label">
-              PTA position
-            </label>
-            <input id="ptaPosition" className="field" placeholder="Teacher, Room 12" value={form.ptaPosition} onChange={(e) => update("ptaPosition", e.target.value)} />
-          </div>
+          {requester.teacher ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="grade" className="label">
+                  Grade
+                </label>
+                <input id="grade" className="field" list="grade-labels" placeholder="2nd" value={form.grade} onChange={(e) => update("grade", e.target.value)} />
+                <datalist id="grade-labels">
+                  {GRADE_LABELS.map((label) => (
+                    <option key={label} value={label} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label htmlFor="room" className="label">
+                  Room
+                </label>
+                <input id="room" className="field" placeholder="106" value={form.room} onChange={(e) => update("room", e.target.value)} />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label htmlFor="ptaPosition" className="label">
+                PTA position <span className="font-normal text-neutral-500">(optional)</span>
+              </label>
+              <input
+                id="ptaPosition"
+                className="field"
+                placeholder={DEFAULT_POSITION}
+                value={form.ptaPosition}
+                onChange={(e) => update("ptaPosition", e.target.value)}
+                aria-describedby="ptaPosition_help"
+              />
+              <p id="ptaPosition_help" className="mt-1 text-xs text-neutral-500">
+                Leave it blank and the form will say &quot;{DEFAULT_POSITION}&quot;, or put your role, like &quot;Librarian&quot; or &quot;Fall Festival chair&quot;.
+              </p>
+            </div>
+          )}
           <div>
             <label htmlFor="phone" className="label">
               Phone
@@ -578,27 +647,11 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
               Leave it in my staff mailbox
             </label>
             <label className="flex items-center gap-2">
-              <input type="radio" name="checkDelivery" checked={form.checkDelivery === "mail"} onChange={() => update("checkDelivery", "mail")} />
-              Mail it to me
+              <input type="radio" name="checkDelivery" checked={form.checkDelivery === "pickup"} onChange={() => update("checkDelivery", "pickup")} />
+              Arrange pickup with the PTA
             </label>
           </div>
         </fieldset>
-        {form.checkDelivery === "mail" && (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="address" className="label">
-                Street address
-              </label>
-              <input id="address" className="field" autoComplete="street-address" value={form.address} onChange={(e) => update("address", e.target.value)} />
-            </div>
-            <div>
-              <label htmlFor="cityZip" className="label">
-                City and ZIP
-              </label>
-              <input id="cityZip" className="field" placeholder="San Francisco, CA 94127" value={form.cityZip} onChange={(e) => update("cityZip", e.target.value)} />
-            </div>
-          </div>
-        )}
       </section>
 
       <section className="card space-y-4">

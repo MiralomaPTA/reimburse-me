@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import logo from "@/images/miraloma-logo.png";
 import { approvedUser, getSession } from "@/server/auth/session";
@@ -23,6 +24,11 @@ export default async function SignInPage(props: PageProps<"/">) {
         Enter your email and we&apos;ll send you a sign-in link. No password needed. Then photograph your receipts,
         fill in a few details, and sign from your phone. First time here? The PTA approves new emails once, usually
         within a day.
+      </p>
+      <p className="-mt-4 mb-6 text-center text-sm">
+        <Link href="/help" className="underline">
+          Step-by-step guides for teachers and volunteers
+        </Link>
       </p>
       {session && (
         <p className={notice}>

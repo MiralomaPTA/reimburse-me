@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fiscalYearLabel, formatRequestId } from "@/lib/fiscal-year";
 import { formatMoney, moneyPlain, parseMoney } from "@/lib/money";
 import { safeNextPath } from "@/lib/next-path";
+import { gradeLabel, otherPosition, parseTeacherPosition, teacherPosition } from "@/lib/pta-position";
 import { fundingSplit, requestInputSchema, splitPhone, submitSchema, totals } from "@/lib/request-schema";
 
 describe("money", () => {
@@ -45,7 +46,6 @@ describe("request schema", () => {
   it("accepts a minimal request and fills defaults", () => {
     const parsed = requestInputSchema.parse(base);
     expect(parsed.donationCents).toBe(0);
-    expect(parsed.address).toBe("");
     expect(totals(parsed)).toEqual({ totalCents: 1250, donationCents: 0, reimbursementCents: 1250 });
   });
 
@@ -79,10 +79,9 @@ describe("request schema", () => {
     expect(fundingSplit({ items: [], donationCents: 0 })).toEqual([]);
   });
 
-  it("requires an address when the check is mailed", () => {
-    const result = requestInputSchema.safeParse({ ...base, checkDelivery: "mail" });
-    expect(result.success).toBe(false);
-    expect(result.error?.issues.map((i) => i.path.join("."))).toEqual(expect.arrayContaining(["address", "cityZip"]));
+  it("accepts pickup without an address and rejects mailing", () => {
+    expect(requestInputSchema.safeParse({ ...base, checkDelivery: "pickup" }).success).toBe(true);
+    expect(requestInputSchema.safeParse({ ...base, checkDelivery: "mail" }).success).toBe(false);
   });
 
   it("rejects donating more than the total and lines without receipts", () => {
@@ -110,5 +109,26 @@ describe("safeNextPath", () => {
     for (const bad of ["//evil.com", "/\\evil.com", "/\\\\evil.com", "https://evil.com", "/\t/evil.com", "/\n/evil.com", "requests", "", undefined, null, 42]) {
       expect(safeNextPath(bad), String(bad)).toBeNull();
     }
+  });
+});
+
+describe("PTA position", () => {
+  it("builds a teacher's line from grade and room and reads it back", () => {
+    expect(teacherPosition("2nd", "106")).toBe("Teacher - 2nd - Room 106");
+    expect(teacherPosition(" 1st/2nd ", "Room 12")).toBe("Teacher - 1st/2nd - Room 12");
+    expect(parseTeacherPosition("Teacher - 2nd - Room 106")).toEqual({ grade: "2nd", room: "106" });
+    expect(parseTeacherPosition("Teacher - 1st/2nd - Room 12")).toEqual({ grade: "1st/2nd", room: "12" });
+    expect(parseTeacherPosition("Teacher, Room 12")).toBeNull();
+    expect(parseTeacherPosition("Volunteer")).toBeNull();
+  });
+  it("labels Users-row grades the way the form shows them", () => {
+    expect(gradeLabel(["2"])).toBe("2nd");
+    expect(gradeLabel(["1", "2"])).toBe("1st/2nd");
+    expect(gradeLabel(["TK"])).toBe("TK");
+    expect(gradeLabel([])).toBe("");
+  });
+  it("defaults everyone else to Volunteer", () => {
+    expect(otherPosition("  ")).toBe("Volunteer");
+    expect(otherPosition(" Librarian ")).toBe("Librarian");
   });
 });

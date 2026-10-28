@@ -64,9 +64,9 @@ Fields map one-to-one to the PTA's *Payment Authorization / Request for Reimburs
 | Form field | Template field | Portal input | Notes |
 | --- | --- | --- | --- |
 | Name of Payee | payee_name | Text | |
-| PTA Position | pta_position | Text, e.g. "Teacher, Room 12" | |
-| Check delivery | — | Choice: mail or staff mailbox | Not on the form; printed in the form's margin and in the email to AP |
-| Address, City/Zip | address, city_zip | Text | Required only when the check is mailed |
+| PTA Position | pta_position | Teachers: grade and room, written as "Teacher - 2nd - Room 106". Everyone else: free text, optional; blank becomes "Volunteer" | The grade starts from the Users row |
+| Check delivery | — | Choice: pickup from the PTA or staff mailbox | Not on the form; printed in the form's margin and in the email to AP |
+| Address, City/Zip | address, city_zip | — | No longer collected; the template fields stay blank |
 | Telephone | phone_area_code, phone_number | Text, required | |
 | Email | email | Prefilled | From the sign-in link |
 | Expenditure was for | — (drawn; the template's purpose field stays empty) | Text | Purpose, e.g. "2nd grade art supplies" |
@@ -239,7 +239,7 @@ Success measures: share of requests submitted online, requests returned for miss
 | Uploads | Browser to Drive directly; HEIC converted in the browser |
 | Request-log Sheet | AP may edit it directly; status changes go through the dashboard |
 | Environments | No separate pilot environment |
-| Check delivery | Teacher chooses: mailed or left in the staff mailbox |
+| Check delivery | Teacher chooses: picked up from the PTA or left in the staff mailbox |
 | Treasurer-use block | Left blank on the PDF for AP |
 | Advances | None; advance and refund fields hidden and set to $0 |
 | Retention | Keep records forever |

@@ -52,7 +52,9 @@ export interface RequestRow {
   payee_name: string;
   pta_position: string;
   phone: string;
-  check_delivery: "mail" | "mailbox";
+  /** "mail" is only on rows from before pickup replaced mailing the check. */
+  check_delivery: "pickup" | "mailbox" | "mail";
+  /** Only filled on "mail" rows; new rows leave both empty so the Sheet columns keep their places. */
   address: string;
   city_zip: string;
   purpose: string;
