@@ -2,7 +2,8 @@ import { z } from "zod";
 
 /** Shared between the form (client) and the submit/preview handlers (server). */
 
-export const DESCRIPTION_MAX = 30;
+/** Long enough for a vendor and a few items; the form wraps it over several lines. */
+export const DESCRIPTION_MAX = 200;
 export const ALLOWED_RECEIPT_TYPES = ["image/jpeg", "image/png", "application/pdf"] as const;
 /** The upload route and the browser both refuse larger receipts. */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;

@@ -21,7 +21,7 @@ export default async function SignInPage(props: PageProps<"/">) {
       <h1 className="mb-2 text-center text-2xl font-semibold">Get reimbursed by the PTA</h1>
       <p className="mb-6 text-center text-neutral-600">
         Enter your email and we&apos;ll send you a sign-in link. No password needed. Then photograph your receipts,
-        fill in a few details, and sign from your phone. First time here? The PTA approves new addresses once, usually
+        fill in a few details, and sign from your phone. First time here? The PTA approves new emails once, usually
         within a day.
       </p>
       {session && (

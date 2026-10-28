@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { buildPacket } from "@/server/pdf/build-packet";
-import { formLines, SCHEDULE_LINE_TEXT } from "@/server/pdf/fill-form";
 import { CONSENT_TEXT, type ReceiptFile } from "@/server/pdf/types";
 import { winAnsi } from "@/server/pdf/text";
 import type { RequestInput } from "@/lib/request-schema";
@@ -40,20 +39,6 @@ function request(itemCount: number, receiptsPerItem: (i: number) => string[]): R
   };
 }
 
-describe("formLines", () => {
-  it("itemizes up to four lines", () => {
-    const lines = formLines(request(4, (i) => [`f${i}`]).items);
-    expect(lines).toHaveLength(4);
-    expect(lines[3].description).toBe("Item 4 supplies");
-  });
-  it("rolls items 4+ into a schedule subtotal on line 4", () => {
-    const lines = formLines(request(6, (i) => [`f${i}`]).items);
-    expect(lines).toHaveLength(4);
-    expect(lines[3].description).toBe(SCHEDULE_LINE_TEXT);
-    expect(lines[3].amountCents).toBe(4025 + 5025 + 6025);
-  });
-});
-
 describe("winAnsi", () => {
   it("keeps Latin text and typographic punctuation, replaces the rest", () => {
     expect(winAnsi("Café – “quotes” … ok")).toBe("Café – “quotes” ... ok");
@@ -73,7 +58,7 @@ describe("buildPacket", () => {
     expect(doc.getTitle()).toBe("PTA reimbursement request PREVIEW");
   }, 30_000);
 
-  it("adds a schedule page for 5+ items, copies PDF receipt pages, and ends with the audit page when signed", async () => {
+  it("keeps five items on one form page, copies PDF receipt pages, and ends with the audit page when signed", async () => {
     const input = request(5, (i) => (i === 4 ? ["pdf1"] : [`r${i}`]));
     const files = new Map<string, ReceiptFile>();
     for (let i = 0; i < 4; i++) files.set(`r${i}`, await jpegReceipt(`r${i}`, 600, 800));
@@ -87,9 +72,21 @@ describe("buildPacket", () => {
       signature: { type: "typed", name: "Jane Doe" },
       audit: { requesterEmail: "jane@example.org", signInMethod: "One-time email link", signedInAt: new Date(), ip: "127.0.0.1", userAgent: "vitest", consentText: CONSENT_TEXT },
     });
-    // 1 form + 1 schedule + 4 images + 2 pdf pages + 1 audit
-    expect(packet.pageCount).toBe(9);
+    // 1 form + 4 images + 2 pdf pages + 1 audit
+    expect(packet.pageCount).toBe(8);
   }, 30_000);
+
+  it("lets the expenditures run over several form pages when there are many long items", async () => {
+    const input = request(40, () => ["r0"]);
+    input.items.forEach((item, i) => {
+      item.description = `Item ${i + 1}: ` + "a long description of what was bought and why it was needed for the classroom ".repeat(2).trim();
+    });
+    const files = new Map([["r0", await jpegReceipt("r0", 300, 300)]]);
+    const packet = await buildPacket({ requestId: "PREVIEW", submittedAt: new Date(), request: input, requesterEmail: "jane@example.org", receiptFiles: files, signature: null, audit: null });
+    // 40 three-line items need more than one page; the receipts follow (40 pages, one per line).
+    expect(packet.pageCount).toBeGreaterThan(41);
+    expect(packet.pageCount).toBeLessThan(46);
+  }, 60_000);
 
   it("places a drawn signature image", async () => {
     const png = await sharp({ create: { width: 400, height: 120, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();

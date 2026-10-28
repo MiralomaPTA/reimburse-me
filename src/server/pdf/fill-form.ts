@@ -1,19 +1,9 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFTextField } from "pdf-lib";
+import { PDFDocument, StandardFonts, type PDFFont, type PDFTextField } from "pdf-lib";
 import { formatDateShort } from "@/lib/dates";
-import { moneyPlain } from "@/lib/money";
-import { CHECK_DELIVERY_LABEL, splitPhone, totals, type RequestInput } from "@/lib/request-schema";
+import { splitPhone, type RequestInput } from "@/lib/request-schema";
 import { fitFontSize, winAnsi } from "@/server/pdf/text";
 import { FIELDS } from "@/server/pdf/template";
 import type { PacketSignature } from "@/server/pdf/types";
-
-export const SCHEDULE_LINE_TEXT = "Additional items – see schedule";
-
-/** What goes on the form's four expenditure lines, given any number of items. */
-export function formLines(items: RequestInput["items"]): { description: string; amountCents: number }[] {
-  if (items.length <= 4) return items.map((i) => ({ description: i.description, amountCents: i.amountCents }));
-  const rest = items.slice(3).reduce((sum, i) => sum + i.amountCents, 0);
-  return [...items.slice(0, 3).map((i) => ({ description: i.description, amountCents: i.amountCents })), { description: SCHEDULE_LINE_TEXT, amountCents: rest }];
-}
 
 /**
  * The template's DA strings store the font name with an octal-escaped slash
@@ -32,6 +22,7 @@ function setFitted(field: PDFTextField, font: PDFFont, text: string, max = 10) {
 }
 
 export interface FillOptions {
+  /** The loaded template; its first page is filled in place. */
   doc: PDFDocument;
   request: RequestInput;
   requesterEmail: string;
@@ -39,7 +30,11 @@ export interface FillOptions {
   signature: PacketSignature | null;
 }
 
-/** Fills page 1 of the template in place and flattens the form. */
+/**
+ * Fills the payee details and signature on page 1 of the template and
+ * flattens the form. The purpose, expenditure and total fields stay empty:
+ * that part of the page is redrawn by form-pages.ts so the list can grow.
+ */
 export async function fillForm({ doc, request, requesterEmail, signedAt, signature }: FillOptions): Promise<void> {
   const helv = await doc.embedFont(StandardFonts.Helvetica);
   const oblique = await doc.embedFont(StandardFonts.HelveticaOblique);
@@ -57,33 +52,6 @@ export async function fillForm({ doc, request, requesterEmail, signedAt, signatu
   setFitted(text(FIELDS.phoneArea), helv, phone.area);
   setFitted(text(FIELDS.phoneNumber), helv, phone.number);
   setFitted(text(FIELDS.email), helv, requesterEmail);
-  setFitted(text(FIELDS.purpose), helv, request.purpose);
-
-  const lines = formLines(request.items);
-  ([1, 2, 3, 4] as const).forEach((n) => {
-    const line = lines[n - 1];
-    if (!line) return;
-    setFitted(text(FIELDS.itemDescription(n)), helv, line.description, 9);
-    setFitted(text(FIELDS.itemAmount(n)), helv, moneyPlain(line.amountCents), 9);
-  });
-
-  const t = totals(request);
-  setFitted(text(FIELDS.totalExpense), helv, moneyPlain(t.totalCents), 9);
-  setFitted(text(FIELDS.totalClaimed), helv, moneyPlain(t.totalCents), 9);
-  setFitted(text(FIELDS.advanceReceived), helv, "0.00", 9);
-  setFitted(text(FIELDS.reimbursementClaimed), helv, moneyPlain(t.reimbursementCents), 9);
-  setFitted(text(FIELDS.donationToPta), helv, moneyPlain(t.donationCents), 9);
-  setFitted(text(FIELDS.refundToPta), helv, "0.00", 9);
-
-  // Check delivery is not on the PTA form; note it in the free space to the
-  // right of "Expenditure was for".
-  page.drawText(winAnsi(`Check: ${CHECK_DELIVERY_LABEL[request.checkDelivery]}`), {
-    x: 412,
-    y: 511,
-    size: 7.5,
-    font: helv,
-    color: rgb(0.25, 0.25, 0.25),
-  });
 
   const sigField = text(FIELDS.requesterSignature);
   if (signature) {

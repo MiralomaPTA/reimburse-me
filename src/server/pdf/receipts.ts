@@ -2,7 +2,7 @@ import sharp from "sharp";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { formatMoney } from "@/lib/money";
 import type { RequestInput } from "@/lib/request-schema";
-import { winAnsi } from "@/server/pdf/text";
+import { truncate, winAnsi } from "@/server/pdf/text";
 import type { ReceiptFile } from "@/server/pdf/types";
 
 const LETTER = { width: 612, height: 792 } as const;
@@ -27,11 +27,15 @@ export async function appendReceipts(doc: PDFDocument, request: RequestInput, fi
   const helv = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
 
-  const drawLabel = (page: ReturnType<PDFDocument["addPage"]>, label: string, sub: string) => {
+  /** "Line 2 of 5: <description> - $12.00 (image 1 of 2)", shortening only the description when it would not fit. */
+  const drawLabel = (page: ReturnType<PDFDocument["addPage"]>, label: { before: string; description: string; after: string }, sub: string) => {
     const { width, height } = page.getSize();
     page.drawRectangle({ x: 0, y: height - LABEL_BAND, width, height: LABEL_BAND, color: rgb(1, 1, 1), opacity: 0.92 });
-    page.drawText(winAnsi(label), { x: MARGIN, y: height - 18, size: 10, font: bold, color: rgb(0, 0, 0) });
     const subWidth = helv.widthOfTextAtSize(winAnsi(sub), 8);
+    const fixed = winAnsi(label.before) + winAnsi(label.after);
+    const room = width - MARGIN * 2 - subWidth - 12 - bold.widthOfTextAtSize(fixed, 10);
+    const description = truncate(bold, winAnsi(label.description), 10, room);
+    page.drawText(winAnsi(label.before) + description + winAnsi(label.after), { x: MARGIN, y: height - 18, size: 10, font: bold, color: rgb(0, 0, 0) });
     page.drawText(winAnsi(sub), { x: width - MARGIN - subWidth, y: height - 17, size: 8, font: helv, color: rgb(0.3, 0.3, 0.3) });
   };
 
@@ -41,7 +45,7 @@ export async function appendReceipts(doc: PDFDocument, request: RequestInput, fi
       const file = files.get(receipt.fileId);
       if (!file) throw new Error(`Receipt file ${receipt.fileId} is missing`);
       const part = item.receipts.length > 1 ? ` (image ${rIndex + 1} of ${item.receipts.length})` : "";
-      const label = `Line ${lineNo} of ${request.items.length}: ${item.description} - ${formatMoney(item.amountCents)}${part}`;
+      const label = { before: `Line ${lineNo} of ${request.items.length}: `, description: item.description, after: ` - ${formatMoney(item.amountCents)}${part}` };
       const sub = `Request ${requestId}`;
 
       if (file.mimeType === "application/pdf") {
@@ -50,7 +54,7 @@ export async function appendReceipts(doc: PDFDocument, request: RequestInput, fi
         const pages = await doc.copyPages(source, indices);
         pages.forEach((page, p) => {
           doc.addPage(page);
-          drawLabel(page, pages.length > 1 ? `${label} - page ${p + 1} of ${pages.length}` : label, sub);
+          drawLabel(page, pages.length > 1 ? { ...label, after: `${label.after} - page ${p + 1} of ${pages.length}` } : label, sub);
         });
         continue;
       }

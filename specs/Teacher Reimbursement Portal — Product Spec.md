@@ -69,15 +69,15 @@ Fields map one-to-one to the PTA's *Payment Authorization / Request for Reimburs
 | Address, City/Zip | address, city_zip | Text | Required only when the check is mailed |
 | Telephone | phone_area_code, phone_number | Text, required | |
 | Email | email | Prefilled | From the sign-in link |
-| Expenditure was for | purpose | Text | Purpose, e.g. "2nd grade art supplies" |
+| Expenditure was for | — (drawn; the template's purpose field stays empty) | Text | Purpose, e.g. "2nd grade art supplies" |
 | Paid from | — | Choice, required when shown | Which stipend the request comes from. Not on the form; recorded in the Sheet and in both emails. The choices depend on the requester; see *Stipends* |
-| List Expenditures (4 lines) | item_1_description, item_1_amount … item_4_description, item_4_amount | Repeating line items: description, amount, receipt | One line item per receipt. Description capped at 30 characters to fit the form. Amount may be less than the receipt total (partial reimbursement is allowed). More than 4 lines → see *PDF generation* |
-| TOTAL EXPENSE | total_expense | Calculated | Sum of line items |
-| Total Amount Claimed From Above | total_claimed | Calculated | Equals total expense |
-| Minus Advance Received | advance_received | Hidden, always $0 | Teachers don't receive advances |
-| Reimbursement Claimed | reimbursement_claimed | Calculated | Total minus any amount donated |
-| Not claimed – donate to PTA | donation_to_pta | Number, default $0 | Lets a teacher donate part of the total |
-| Refund to PTA (Enclose Check) | refund_to_pta | Hidden, always $0 | Only applies to advances |
+| List Expenditures | — (drawn by the app; the template's item and total fields stay empty) | Repeating line items: description, amount, receipt | One line item per receipt. Description up to 200 characters; it wraps onto as many lines as it needs on the form. Amount may be less than the receipt total (partial reimbursement is allowed). Any number of lines → see *PDF generation* |
+| TOTAL EXPENSE | — (drawn) | Calculated | Sum of line items |
+| Total Amount Claimed From Above | — (drawn) | Calculated | Equals total expense |
+| Minus Advance Received | — (drawn) | Hidden, always $0 | Teachers don't receive advances |
+| Reimbursement Claimed | — (drawn) | Calculated | Total minus any amount donated |
+| Not claimed – donate to PTA | — (drawn) | Number, default $0 | Lets a teacher donate part of the total |
+| Refund to PTA (Enclose Check) | — (drawn) | Hidden, always $0 | Only applies to advances |
 | Signature, Date | requester_signature, requester_signature_date | Built-in signature step | Date filled automatically |
 | Budget category | treasurer_category | Not collected | AP assigns the budget line at review and records it in the Sheet; the form's Category box is in the treasurer block and stays blank |
 
@@ -88,6 +88,7 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 - One receipt per line item. A receipt that needs more than one photo (a long receipt, front and back) can have several images under the same line.
 - Accept JPG, PNG, HEIC (iPhone default) and PDF, up to \~10 MB each.
 - Take a photo directly from the phone camera.
+- An uploaded receipt can be opened from the form (new tab) to check it is legible before signing. Only the sign-in that uploaded it can open it.
 - HEIC is converted to JPEG in the browser before upload; the server never handles HEIC.
 - Files upload from the browser straight to the Drive folder through a resumable upload session the app creates, so receipts never pass through the app server (Vercel caps request bodies at 4.5 MB).
 - When the packet is built, images become PDF pages, auto-rotated and downscaled so the packet stays under \~10 MB.
@@ -96,14 +97,15 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 
 ### 3. PDF generation
 
-- Page 1: the official PTA form (Revised July 2022), filled through its fillable fields and then flattened, so it looks exactly like the paper version.
+- The form comes first: the official PTA form (Revised July 2022), with the payee details and signature filled through its fillable fields and flattened. The page is then reassembled from two pieces of the filled template (the header through the Telephone/Email line, and the signature and treasurer block) with the purpose line, the expenditures and the totals drawn by the app between them, so the list can be any length. The *Revised July 2022* note moves to the centre of the page-1 footer.
 - The app's template is `PaymentAuthorizationRequestforReimbursement-template.pdf` (currently in `specs/`): the official PDF with its 34 fields renamed to the names in the table above. The original had names like `undefined_7`, `Text208` and `Signature203_es_:signer:signature`; nothing else was changed, and the PTA's original file is kept alongside.
 - Three things are stamped outside the fields: the check-delivery note in the margin, the request ID and timestamp in the footer, and a drawn signature image placed on the signature line. A typed signature fills the box as italic text.
-- The description boxes fit about 20 characters at a readable size and the amount boxes about 8; the font auto-shrinks for longer values, and the form caps descriptions at 30 characters.
-- The form has 4 expenditure lines. With 5 or more items, lines 1–3 are itemized, line 4 reads "Additional items – see schedule" with their subtotal, and a schedule page lists every item.
+- The payee boxes fit about 20 characters at a readable size; the font auto-shrinks for longer values.
+- *Expenditure was for* and *List Expenditures* start at the left margin like the payee lines, and *List Expenditures* has a line of its own, so the rows below it run from the left margin to the amount column at the right edge. One row per item, with the description wrapped over as many lines as it needs (up to 200 characters) and a single amount. At least four rows are always drawn, as on the paper form. The check-delivery note sits to the right of the purpose line as before. When the rows run past the bottom of the page they continue on further form pages headed "(continued)", the totals stay together on one page, and the signature and treasurer block follows directly below them, on a new page if it has to.
+- Receipt page labels shorten a long description with an ellipsis rather than dropping the line number or amount.
 - Following pages: each receipt, labeled with its line number and amount.
 - Teacher's signature and date go in the signature fields. Fields the portal never fills: vp_chair_signature, treasurer_check_number, treasurer_category, treasurer_amount_advanced, treasurer_expenses, treasurer_amount_owed_or_due, president_signature, president_signature_date, minutes_approval_date, secretary_signature. The three treasurer checkboxes are printed, not fields.
-- Request ID and submission timestamp in the footer of every page; an audit page at the end.
+- Request ID and submission timestamp in the footer of every page; an audit page at the end, which says how many pages the form took.
 - If the PTA issues a new form revision, the field names and positions must be re-checked and the template replaced by a developer; it is not an admin setting.
 
 ### 4. Signing

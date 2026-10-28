@@ -19,7 +19,10 @@ interface Props {
   onRemove(key: string): void;
 }
 
-/** Two pickers (camera and files) plus the list of receipts for one line item. */
+/** Where a finished upload can be opened; the route only serves the uploader's own files. */
+const viewUrl = (fileId: string) => `/api/uploads/${encodeURIComponent(fileId)}`;
+
+/** Two pickers (camera and files) plus the list of receipts for one line item. Finished uploads open in a new tab. */
 export function ReceiptUpload({ receipts, onFiles, onRemove }: Props) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -54,7 +57,13 @@ export function ReceiptUpload({ receipts, onFiles, onRemove }: Props) {
           {receipts.map((r) => (
             <li key={r.key} className="flex items-center justify-between gap-3 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
               <div className="min-w-0 flex-1">
-                <div className="truncate">{r.name}</div>
+                {r.status === "done" && r.fileId ? (
+                  <a href={viewUrl(r.fileId)} target="_blank" rel="noopener" className="block truncate text-blue-700 underline hover:text-blue-900">
+                    {r.name}
+                  </a>
+                ) : (
+                  <div className="truncate">{r.name}</div>
+                )}
                 {r.status === "uploading" && (
                   <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-neutral-200">
                     <div className="h-full bg-blue-600 transition-all" style={{ width: `${Math.round(r.progress * 100)}%` }} />
@@ -63,9 +72,16 @@ export function ReceiptUpload({ receipts, onFiles, onRemove }: Props) {
                 {r.status === "error" && <div className="text-red-700">{r.error}</div>}
                 {r.status === "done" && <div className="text-neutral-500">Uploaded</div>}
               </div>
-              <button type="button" onClick={() => onRemove(r.key)} className="text-neutral-500 hover:text-red-700" aria-label={`Remove ${r.name}`}>
-                Remove
-              </button>
+              <div className="flex shrink-0 items-center gap-3">
+                {r.status === "done" && r.fileId && (
+                  <a href={viewUrl(r.fileId)} target="_blank" rel="noopener" className="text-blue-700 hover:text-blue-900" aria-label={`View ${r.name}`}>
+                    View
+                  </a>
+                )}
+                <button type="button" onClick={() => onRemove(r.key)} className="text-neutral-500 hover:text-red-700" aria-label={`Remove ${r.name}`}>
+                  Remove
+                </button>
+              </div>
             </li>
           ))}
         </ul>

@@ -85,48 +85,6 @@ async function writer(doc: PDFDocument) {
   return new Writer(doc, await doc.embedFont(StandardFonts.Helvetica), await doc.embedFont(StandardFonts.HelveticaBold));
 }
 
-/** Lists every line item when the form's four lines are not enough. */
-export async function appendSchedule(doc: PDFDocument, request: RequestInput, requestId: string): Promise<void> {
-  const w = await writer(doc);
-  const colNo = MARGIN;
-  const colDesc = MARGIN + 30;
-  const colAmt = LETTER[0] - MARGIN - 80;
-  const colReceipt = colDesc + 230;
-  w.heading("Schedule of expenditures");
-  w.paragraph(`Request ${requestId}. Lines 1-3 on the form are itemized; line 4 is the subtotal of items 4 onward, listed below.`);
-  w.row([
-    { text: "#", x: colNo, width: 26, bold: true },
-    { text: "Description", x: colDesc, width: 220, bold: true },
-    { text: "Receipt", x: colReceipt, width: colAmt - colReceipt - 10, bold: true },
-    { text: "Amount", x: colAmt, width: 80, align: "right", bold: true },
-  ]);
-  w.rule();
-  request.items.forEach((item, i) => {
-    w.row([
-      { text: String(i + 1), x: colNo, width: 26 },
-      { text: item.description, x: colDesc, width: 220 },
-      { text: item.receipts.map((r) => r.name).join(", "), x: colReceipt, width: colAmt - colReceipt - 10 },
-      { text: formatMoney(item.amountCents), x: colAmt, width: 80, align: "right" },
-    ]);
-  });
-  w.rule();
-  const t = totals(request);
-  w.row([
-    { text: "Total expense", x: colDesc, width: 300, bold: true },
-    { text: formatMoney(t.totalCents), x: colAmt, width: 80, align: "right", bold: true },
-  ]);
-  if (t.donationCents > 0) {
-    w.row([
-      { text: "Not claimed - donated to PTA", x: colDesc, width: 300 },
-      { text: formatMoney(t.donationCents), x: colAmt, width: 80, align: "right" },
-    ]);
-    w.row([
-      { text: "Reimbursement claimed", x: colDesc, width: 300, bold: true },
-      { text: formatMoney(t.reimbursementCents), x: colAmt, width: 80, align: "right", bold: true },
-    ]);
-  }
-}
-
 export interface AuditPageInput {
   requestId: string;
   request: RequestInput;
@@ -134,6 +92,8 @@ export interface AuditPageInput {
   signature: PacketSignature;
   audit: AuditInfo;
   receiptCount: number;
+  /** How many pages the form itself took. */
+  formPages: number;
   pagesBeforeAudit: number;
 }
 
@@ -162,7 +122,7 @@ export async function appendAuditPage(doc: PDFDocument, input: AuditPageInput): 
   w.field("Purpose", request.purpose);
   w.field("Line items", `${request.items.length}, total ${formatMoney(totals(request).totalCents)}`);
   w.field("Receipts", `${input.receiptCount} file${input.receiptCount === 1 ? "" : "s"}`);
-  w.field("Pages", `${input.pagesBeforeAudit} before this record: the PTA form, ${request.items.length > 4 ? "a schedule of expenditures, " : ""}then the receipts`);
+  w.field("Pages", `${input.pagesBeforeAudit} before this record: the PTA form (${input.formPages} page${input.formPages === 1 ? "" : "s"}), then the receipts`);
   w.space(6);
   w.sub("Integrity");
   const emailedTo = config.sendPacketsTo === "ap" ? `the submission email to ${config.apEmail}` : `the email sent to ${audit.requesterEmail}`;

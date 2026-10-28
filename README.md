@@ -84,12 +84,13 @@ src/app/                 pages and route handlers
   api/auth/request-link  approved address: sends a link; unknown address: asks the approver
   api/auth/approve       applies the approver's decision
   api/uploads            opens a direct upload for one receipt
+  api/uploads/[id]       shows the signed-in user one of their own uploaded receipts
   api/requests/preview   builds the unsigned packet
   api/requests           signs, stores, logs and emails
 src/server/adapters/     FileStore, RequestLog and Mailer interfaces
   local/                 filesystem versions for development
   google/                Drive, Sheets and Gmail as fs@ (service account + domain-wide delegation)
-src/server/pdf/          fills the form template, adds schedule, receipt and audit pages
+src/server/pdf/          fills the form template, lays out the expenditures, adds receipt and audit pages
 src/lib/                 shared schema, money and date helpers
 assets/form-template.pdf the official form with its fields renamed (see specs/)
 ```
@@ -101,7 +102,7 @@ Receipts never pass through the app server: the server opens an upload session (
 These follow the proposed defaults in the spec's *Open questions* and are easy to change:
 
 - Request IDs are sequential per PTA fiscal year, e.g. `FY27-042`.
-- The form draft lives in the browser's local storage until it is signed. With no draft, the "about you" fields prefill from the requester's most recent request in the log.
+- The form draft lives in the browser's local storage, keyed by the signed-in address, until it is signed or discarded with the "Discard draft" link under the form. With no draft, the "about you" fields prefill from the requester's most recent request in the log.
 - Signatures are typed or drawn fresh each time and never stored.
 - "Locked" means: SHA-256 of the signed file recorded in the log and in the emails; the app never rewrites a packet.
 - Sessions last 30 days, but every page and API call re-checks the Users tab, so denying or deleting a row locks that address out at once. Sign-in links last 15 minutes and work once.
