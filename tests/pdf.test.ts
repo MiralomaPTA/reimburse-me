@@ -30,11 +30,11 @@ function request(itemCount: number, receiptsPerItem: (i: number) => string[]): R
     cityZip: "San Francisco, CA 94127",
     purpose: "2nd grade art supplies",
     donationCents: 500,
-    funding: "none",
     items: Array.from({ length: itemCount }, (_, i) => ({
       description: `Item ${i + 1} supplies`,
       amountCents: 1000 * (i + 1) + 25,
       receipts: receiptsPerItem(i).map((fileId) => ({ fileId, name: `${fileId}.jpg`, mimeType: "image/jpeg" as const })),
+      funding: "none",
     })),
   };
 }

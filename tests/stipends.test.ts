@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RequestRow, RequestStatus, StipendRow, UserRole } from "@/server/adapters/types";
 import {
+  fundingCell,
   fundingChoice,
   fundingLabel,
   fundingOptions,
@@ -8,6 +9,7 @@ import {
   normalizeGrade,
   parseAmount,
   parseFunding,
+  parseFundingCell,
   parseFundingChoice,
   parseGrades,
   stipendGrades,
@@ -77,6 +79,29 @@ describe("parsing hand-typed Sheet values", () => {
     expect(parseFunding(fundingLabel("grade", "K"))).toEqual({ key: "grade", grade: "K" });
     expect(parseFunding(fundingLabel("grade", "TK"))).toEqual({ key: "grade", grade: "TK" });
   });
+  it("writes a single choice as its label and a split as labels with amounts, and reads both back", () => {
+    expect(fundingCell([{ key: "grade", grade: "2", cents: 9000 }])).toBe("Grade 2 stipend");
+    const split = fundingCell([
+      { key: "classroom", grade: "", cents: 4000 },
+      { key: "grade", grade: "2", cents: 5000 },
+      { key: "none", grade: "", cents: 1000 },
+    ]);
+    expect(split).toBe("Classroom stipend: 40.00; Grade 2 stipend: 50.00; Not from a stipend: 10.00");
+    expect(parseFundingCell(split, "100.00")).toEqual([
+      { key: "classroom", grade: "", cents: 4000 },
+      { key: "grade", grade: "2", cents: 5000 },
+      { key: "none", grade: "", cents: 1000 },
+    ]);
+    // A single label counts the whole claim; blank is "none".
+    expect(parseFundingCell("Grade 2 stipend", "90.00")).toEqual([{ key: "grade", grade: "2", cents: 9000 }]);
+    expect(parseFundingCell("", "90.00")).toEqual([{ key: "none", grade: "", cents: 9000 }]);
+    // Hand edits: dollar signs, and a part without an amount takes what is left.
+    expect(parseFundingCell("Classroom stipend: $1,000; Grade 2 stipend", "1,250.00")).toEqual([
+      { key: "classroom", grade: "", cents: 100000 },
+      { key: "grade", grade: "2", cents: 25000 },
+    ]);
+    expect(parseFundingCell("Classroom stipend; Grade 2 stipend", "100.00").map((p) => p.cents)).toEqual([10000, 0]);
+  });
   it("offers TK, K and 1–5 at approval, plus any other grade the tab names", () => {
     expect(stipendGrades([])).toEqual(["TK", "K", "1", "2", "3", "4", "5"]);
     expect(stipendGrades(tab)).toEqual(["TK", "K", "1", "2", "3", "4", "5"]);
@@ -144,13 +169,15 @@ describe("fundingOptions", () => {
       req(me, "Grade 2 stipend", "50.00", "Returned"),
       req(me, "Classroom stipend", "60.00", "Paid", "FY26"),
       req(me, "Not from a stipend", "45.00"),
+      req(me, "Classroom stipend: 20.00; Grade 2 stipend: 30.00; Not from a stipend: 5.00", "55.00", "Paid"), // split: each part to its own stipend
+      req("lee@example.org", "Classroom stipend: 10.00; Field trip: 15.00", "25.00"), // lee's classroom is not mine; the field trip is shared
     ];
     const { fiscalYear, stipends } = fundingOptions(teacher(me, "2nd"), tab, rows, now);
     expect(fiscalYear).toBe("FY27");
-    expect(stipends.map((s) => [s.label, s.sharedWith, s.amountCents, s.usedCents, s.remainingCents])).toEqual([
-      ["Classroom stipend", null, 25000, 10000, 15000],
-      ["Grade 2 stipend", "grade 2 teachers", 120000, 80000, 40000],
-      ["Field trip", "all teachers", 300000, 90000, 210000],
+    expect(stipends.map((s) => [s.label, s.sharedWith, s.amountCents, s.usedCents, s.paidCents, s.remainingCents])).toEqual([
+      ["Classroom stipend", null, 25000, 12000, 12000, 13000],
+      ["Grade 2 stipend", "grade 2 teachers", 120000, 83000, 3000, 37000],
+      ["Field trip", "all teachers", 300000, 91500, 0, 208500],
     ]);
   });
 

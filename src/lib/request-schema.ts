@@ -23,6 +23,8 @@ export const lineItemSchema = z.object({
   description: z.string().trim().min(1, "Describe the purchase").max(DESCRIPTION_MAX, `Keep it under ${DESCRIPTION_MAX} characters`),
   amountCents: z.number().int().positive("Enter an amount"),
   receipts: z.array(receiptSchema).min(1, "Add a receipt").max(10),
+  /** Which of the requester's stipends pays for this line, e.g. "classroom" or "grade:2"; "none" when it isn't from one (or they have none). */
+  funding: z.string().regex(FUNDING_CHOICE, "Choose which stipend this comes from").default("none"),
 });
 
 export const requestInputSchema = z
@@ -36,8 +38,6 @@ export const requestInputSchema = z
     purpose: z.string().trim().min(1, "Say what the expenditure was for").max(60),
     items: z.array(lineItemSchema).min(1, "Add at least one receipt").max(40),
     donationCents: z.number().int().min(0).default(0),
-    /** Which of the requester's stipends pays for this, e.g. "classroom" or "grade:2"; "none" when it isn't from one (or they have none). */
-    funding: z.string().regex(FUNDING_CHOICE, "Choose which stipend this comes from").default("none"),
   })
   .superRefine((value, ctx) => {
     if (value.checkDelivery === "mail") {
@@ -76,6 +76,44 @@ export interface Totals {
 export function totals(input: Pick<RequestInput, "items" | "donationCents">): Totals {
   const totalCents = input.items.reduce((sum, item) => sum + item.amountCents, 0);
   return { totalCents, donationCents: input.donationCents, reimbursementCents: totalCents - input.donationCents };
+}
+
+/** One funding choice's share of a request. */
+export interface FundingShare {
+  /** The choice as the form sends it: "classroom", "grade:2", "none". */
+  funding: string;
+  /** The lines charged to it, before any donation. */
+  expenseCents: number;
+  /** What is claimed from it: its share of the reimbursement, after the donation. */
+  claimedCents: number;
+}
+
+/**
+ * The request's lines grouped by funding choice, in the order the choices
+ * first appear. A donation to the PTA comes off every share in proportion to
+ * its expense, rounded so the claimed shares add up exactly to the
+ * reimbursement claimed (the odd cents go to the largest shares).
+ */
+export function fundingSplit(input: { items: Pick<LineItem, "amountCents" | "funding">[]; donationCents: number }): FundingShare[] {
+  const shares: FundingShare[] = [];
+  for (const item of input.items) {
+    const share = shares.find((s) => s.funding === item.funding);
+    if (share) share.expenseCents += item.amountCents;
+    else shares.push({ funding: item.funding, expenseCents: item.amountCents, claimedCents: 0 });
+  }
+  const totalCents = shares.reduce((sum, s) => sum + s.expenseCents, 0);
+  const reimbursementCents = Math.max(0, totalCents - input.donationCents);
+  if (totalCents === 0) return shares;
+  const exact = shares.map((s) => (s.expenseCents * reimbursementCents) / totalCents);
+  let left = reimbursementCents;
+  shares.forEach((s, i) => {
+    s.claimedCents = Math.floor(exact[i]);
+    left -= s.claimedCents;
+  });
+  // Largest remainder first; ties go to the earlier share.
+  const order = shares.map((_, i) => i).sort((a, b) => exact[b] - Math.floor(exact[b]) - (exact[a] - Math.floor(exact[a])) || a - b);
+  for (let i = 0; left > 0; i = (i + 1) % order.length, left--) shares[order[i]].claimedCents++;
+  return shares;
 }
 
 /** "415", "555-1234" for the form's two phone boxes; falls back to the raw string. */

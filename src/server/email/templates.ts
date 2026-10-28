@@ -18,6 +18,18 @@ export function signInEmail(link: string): { subject: string; text: string } {
   };
 }
 
+/** One funding choice's part of a request, for the emails. */
+export interface FundingShareInput {
+  /** The choice as the form sends it: "classroom", "grade:2", "none". */
+  choice: string;
+  /** "Grade 2 stipend", "Not from a stipend". */
+  label: string;
+  /** Claimed from it by this request, after any donation. */
+  claimedCents: number;
+  /** Where the stipend stands with this request counted; null for "Not from a stipend". */
+  stipend: StipendStatus | null;
+}
+
 export interface SubmissionEmailInput {
   requestId: string;
   request: RequestInput;
@@ -25,10 +37,8 @@ export interface SubmissionEmailInput {
   submittedAt: Date;
   sha256: string;
   version: number;
-  /** The `funding` cell: the stipend chosen, "Not from a stipend", or "" when there was no choice. */
-  funding: string;
-  /** Where the chosen stipend stands with this request counted; null when none was chosen. */
-  stipend: StipendStatus | null;
+  /** Each choice the request is charged to, in the order its lines appear; empty when the requester had no stipend to choose. */
+  funding: FundingShareInput[];
   /** Base URL for the links, the same one the sign-in emails use. */
   linkBase: string;
 }
@@ -46,25 +56,40 @@ function summary(input: SubmissionEmailInput): string[] {
     `Phone: ${request.phone}`,
     "",
     "Line items:",
-    ...request.items.map((item, i) => `  ${i + 1}. ${item.description} - ${formatMoney(item.amountCents)} (${item.receipts.length} receipt${item.receipts.length === 1 ? "" : "s"})`),
+    ...request.items.map((item, i) => {
+      const receipts = `${item.receipts.length} receipt${item.receipts.length === 1 ? "" : "s"}`;
+      // The stipend is named per line only when the request is split between choices.
+      const from = input.funding.length > 1 ? `, ${input.funding.find((f) => f.choice === item.funding)?.label ?? item.funding}` : "";
+      return `  ${i + 1}. ${item.description} - ${formatMoney(item.amountCents)} (${receipts}${from})`;
+    }),
     "",
     `Total expense: ${formatMoney(t.totalCents)}`,
   ];
   if (t.donationCents > 0) lines.push(`Donated to PTA: ${formatMoney(t.donationCents)}`);
   lines.push(`Reimbursement claimed: ${formatMoney(t.reimbursementCents)}`);
-  if (input.funding) lines.push(fundingLine(input.funding, input.stipend));
+  lines.push(...fundingLines(input.funding));
   lines.push("", `Signed PDF attached. SHA-256: ${sha256}`);
   return lines;
 }
 
-/** "Paid from: Grade 2 stipend (shared by grade 2 teachers): $1,200.00, $846.55 claimed including this request, $353.45 left" */
-function fundingLine(funding: string, stipend: StipendStatus | null): string {
-  if (!stipend) return `Paid from: ${funding}`;
+/**
+ * One choice: "Paid from: Grade 2 stipend (shared by grade 2 teachers): $1,200.00, $846.55 claimed including this request, $353.45 left".
+ * Split: "Paid from:" then one indented line per choice, each starting with its part of this request.
+ */
+function fundingLines(funding: SubmissionEmailInput["funding"]): string[] {
+  if (funding.length === 0) return [];
+  if (funding.length === 1) return [`Paid from: ${standing(funding[0])}`];
+  return ["Paid from:", ...funding.map((share) => `  ${formatMoney(share.claimedCents)} from ${standing(share)}`)];
+}
+
+/** "Grade 2 stipend (shared by grade 2 teachers): $1,200.00, $846.55 claimed including this request, $353.45 left" */
+function standing({ label, stipend }: FundingShareInput): string {
+  if (!stipend) return label;
   const name = stipend.sharedWith ? `${stipend.label} (shared by ${stipend.sharedWith})` : stipend.label;
   const claimed = `${formatMoney(stipend.usedCents)} claimed including this request`;
-  if (stipend.amountCents === null || stipend.remainingCents === null) return `Paid from: ${name}, no amount set, ${claimed}`;
+  if (stipend.amountCents === null || stipend.remainingCents === null) return `${name}, no amount set, ${claimed}`;
   const left = stipend.remainingCents < 0 ? `${formatMoney(-stipend.remainingCents)} over` : `${formatMoney(stipend.remainingCents)} left`;
-  return `Paid from: ${name}: ${formatMoney(stipend.amountCents)}, ${claimed}, ${left}`;
+  return `${name}: ${formatMoney(stipend.amountCents)}, ${claimed}, ${left}`;
 }
 
 export function apSubmissionEmail(input: SubmissionEmailInput): { subject: string; text: string } {

@@ -1,15 +1,16 @@
 import { getAdapters } from "@/server/adapters";
 import type { RequestRow, StipendRow, UserRecord } from "@/server/adapters/types";
 import { fiscalYearLabel, requestIdPrefix } from "@/lib/fiscal-year";
-import { parseMoney } from "@/lib/money";
+import { moneyPlain, parseMoney } from "@/lib/money";
 import type { FundingKey } from "@/lib/request-schema";
 
 /**
  * Stipends: the pots of PTA money a requester can say a reimbursement comes
- * out of. A teacher (role `teacher`) chooses between their classroom stipend,
- * the shared stipend of each grade they teach (none, one, or several for a
- * combination class), the school-wide field-trip fund, or none. Anyone else with their own stipend chooses it or
- * none. Everyone else is not asked.
+ * out of. A teacher (role `teacher`) chooses, line by line, between their
+ * classroom stipend, the shared stipend of each grade they teach (none, one,
+ * or several for a combination class), the school-wide field-trip fund, or
+ * none. Anyone else with their own stipend chooses it or none. Everyone else
+ * is not asked.
  *
  * Amounts come from the Stipends tab (classroom, field trip, each grade) and
  * the user's own `stipend` cell. Use is added up from the request log for the
@@ -117,7 +118,7 @@ export function parseFundingChoice(choice: string): { key: FundingKey; grade: st
   return { key: key as FundingKey, grade };
 }
 
-/** What goes in the request's `funding` cell. */
+/** The readable name of a choice: what the `funding` cell and the emails say. */
 export function fundingLabel(key: FundingKey, grade: string): string {
   switch (key) {
     case "classroom":
@@ -131,6 +132,50 @@ export function fundingLabel(key: FundingKey, grade: string): string {
     case "none":
       return "Not from a stipend";
   }
+}
+
+/** One stipend's part of a request, as read from or written to the `funding` cell. */
+export interface FundingPortion {
+  key: FundingKey;
+  grade: string;
+  cents: number;
+}
+
+/**
+ * What goes in the request's `funding` cell. A request charged to one choice
+ * gets its label alone ("Grade 2 stipend"), and its reimbursement claimed is
+ * what counts. A request split between choices lists each with its amount:
+ * "Classroom stipend: 40.00; Grade 2 stipend: 50.00".
+ */
+export function fundingCell(portions: FundingPortion[]): string {
+  if (portions.length === 1) return fundingLabel(portions[0].key, portions[0].grade);
+  return portions.map((p) => `${fundingLabel(p.key, p.grade)}: ${moneyPlain(p.cents)}`).join("; ");
+}
+
+/**
+ * Reads a `funding` cell back, with the row's reimbursement claimed for a
+ * single-choice cell. In a split cell, a part without an amount (AP may edit
+ * by hand: "Classroom stipend: 40.00; Grade 2 stipend") takes whatever the
+ * amounts don't account for; a second such part gets nothing.
+ */
+export function parseFundingCell(cell: string | undefined, claimed: string | undefined): FundingPortion[] {
+  const claimedCents = parseMoney(claimed ?? "") ?? 0;
+  const parts = String(cell ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) return [{ ...parseFunding(parts[0]), cents: claimedCents }];
+  const read = parts.map((part) => {
+    const match = part.match(/^(.*?)\s*:\s*\$?([\d,]+(?:\.\d+)?)$/);
+    return { ...parseFunding(match ? match[1] : part), cents: match ? (parseAmount(match[2]) ?? 0) : null };
+  });
+  let rest = claimedCents - read.reduce((sum, p) => sum + (p.cents ?? 0), 0);
+  return read.map((p) => {
+    if (p.cents !== null) return { key: p.key, grade: p.grade, cents: p.cents };
+    const cents = Math.max(0, rest);
+    rest = 0;
+    return { key: p.key, grade: p.grade, cents };
+  });
 }
 
 /** The grades offered at approval: TK, K and 1–5, then any others the Stipends tab names. */
@@ -193,17 +238,18 @@ export function fundingOptions(
   const prefix = requestIdPrefix(now);
   const email = user.email.trim().toLowerCase();
   const counted = requests.filter((row) => row.status !== "Returned" && row.request_id.startsWith(prefix));
+  const portions = counted.map((row) => ({ row, portions: parseFundingCell(row.funding, row.reimbursement_claimed) }));
   const stipends = pots.map(({ grade: potGrade, ...pot }): StipendStatus => {
     let usedCents = 0;
     let paidCents = 0;
-    for (const row of counted) {
-      const funding = parseFunding(row.funding);
-      if (funding.key !== pot.key) continue;
-      if (pot.key === "grade" && funding.grade !== potGrade) continue;
+    for (const { row, portions: rowPortions } of portions) {
       if ((pot.key === "classroom" || pot.key === "stipend") && row.requester_email.trim().toLowerCase() !== email) continue;
-      const cents = parseMoney(row.reimbursement_claimed) ?? 0;
-      usedCents += cents;
-      if (row.status === "Paid") paidCents += cents;
+      for (const portion of rowPortions) {
+        if (portion.key !== pot.key) continue;
+        if (pot.key === "grade" && portion.grade !== potGrade) continue;
+        usedCents += portion.cents;
+        if (row.status === "Paid") paidCents += portion.cents;
+      }
     }
     return { ...pot, usedCents, paidCents, remainingCents: pot.amountCents === null ? null : pot.amountCents - usedCents };
   });

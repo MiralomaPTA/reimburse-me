@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fiscalYearLabel, formatRequestId } from "@/lib/fiscal-year";
 import { formatMoney, moneyPlain, parseMoney } from "@/lib/money";
 import { safeNextPath } from "@/lib/next-path";
-import { requestInputSchema, splitPhone, submitSchema, totals } from "@/lib/request-schema";
+import { fundingSplit, requestInputSchema, splitPhone, submitSchema, totals } from "@/lib/request-schema";
 
 describe("money", () => {
   it("parses dollars and cents into integer cents", () => {
@@ -49,14 +49,34 @@ describe("request schema", () => {
     expect(totals(parsed)).toEqual({ totalCents: 1250, donationCents: 0, reimbursementCents: 1250 });
   });
 
-  it("takes a funding choice, naming the grade for a grade's stipend", () => {
-    expect(requestInputSchema.parse(base).funding).toBe("none");
+  it("takes a funding choice per line, naming the grade for a grade's stipend", () => {
+    expect(requestInputSchema.parse(base).items[0].funding).toBe("none");
+    const withFunding = (funding: string) => ({ ...base, items: [{ ...base.items[0], funding }] });
     for (const funding of ["classroom", "grade:2", "grade:TK", "field_trip", "stipend", "none"]) {
-      expect(requestInputSchema.safeParse({ ...base, funding }).success).toBe(true);
+      expect(requestInputSchema.safeParse(withFunding(funding)).success).toBe(true);
     }
     for (const funding of ["grade", "grade:", "grade:2nd grade", "budget"]) {
-      expect(requestInputSchema.safeParse({ ...base, funding }).success).toBe(false);
+      expect(requestInputSchema.safeParse(withFunding(funding)).success).toBe(false);
     }
+  });
+
+  it("splits the claim between the stipends the lines are charged to, taking a donation off each in proportion", () => {
+    const items = [
+      { amountCents: 5000, funding: "classroom" },
+      { amountCents: 5000, funding: "grade:2" },
+      { amountCents: 2500, funding: "classroom" },
+    ];
+    expect(fundingSplit({ items, donationCents: 0 })).toEqual([
+      { funding: "classroom", expenseCents: 7500, claimedCents: 7500 },
+      { funding: "grade:2", expenseCents: 5000, claimedCents: 5000 },
+    ]);
+    // $12.50 claimed of $125.00: 3/5 of 1250 is 750, 2/5 is 500.
+    expect(fundingSplit({ items, donationCents: 11250 }).map((s) => s.claimedCents)).toEqual([750, 500]);
+    // Odd cents land on the larger share, and the shares always add up to the claim.
+    const thirds = [{ amountCents: 100, funding: "classroom" }, { amountCents: 100, funding: "grade:2" }, { amountCents: 100, funding: "none" }];
+    expect(fundingSplit({ items: thirds, donationCents: 100 }).map((s) => s.claimedCents)).toEqual([67, 67, 66]);
+    expect(fundingSplit({ items: [{ amountCents: 1000, funding: "none" }], donationCents: 1000 })).toEqual([{ funding: "none", expenseCents: 1000, claimedCents: 0 }]);
+    expect(fundingSplit({ items: [], donationCents: 0 })).toEqual([]);
   });
 
   it("requires an address when the check is mailed", () => {

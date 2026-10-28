@@ -4,11 +4,11 @@ import { config } from "@/server/config";
 import { apSubmissionEmail, requesterCopyEmail, requesterPacketEmail } from "@/server/email/templates";
 import { buildPacket } from "@/server/pdf/build-packet";
 import { CONSENT_TEXT, type PacketSignature } from "@/server/pdf/types";
-import { FundingError, fundingLabel, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
+import { FundingError, fundingCell, fundingLabel, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
 import { loadReceiptFiles } from "@/server/requests/receipts";
 import { fiscalYearLabel, formatRequestId, requestIdPrefix } from "@/lib/fiscal-year";
 import { moneyPlain } from "@/lib/money";
-import { totals, type RequestInput, type SignatureInput } from "@/lib/request-schema";
+import { fundingSplit, totals, type RequestInput, type SignatureInput } from "@/lib/request-schema";
 
 export interface SubmitInput {
   request: RequestInput;
@@ -69,12 +69,14 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
   const submittedAt = new Date();
   const [receiptFiles, stipendRows, earlierRows] = await Promise.all([loadReceiptFiles(request, session.email, files), stipends.list(), log.list()]);
   const choices = fundingOptions(user, stipendRows, earlierRows, submittedAt).stipends;
-  if (request.funding !== "none" && !choices.some((s) => s.id === request.funding)) {
-    throw new FundingError("That stipend isn't one of yours. Choose another, or \"Not from a stipend\".");
+  const shares = fundingSplit(request);
+  for (const share of shares) {
+    if (share.funding !== "none" && !choices.some((s) => s.id === share.funding)) {
+      throw new FundingError("A line is charged to a stipend that isn't one of yours. Choose another, or \"Not from a stipend\".");
+    }
   }
   // Blank when there was nothing to choose; AP can tell "chose none" from "wasn't asked".
-  const chosen = parseFundingChoice(request.funding);
-  const funding = choices.length > 0 ? fundingLabel(chosen.key, chosen.grade) : "";
+  const funding = choices.length > 0 ? fundingCell(shares.map((share) => ({ ...parseFundingChoice(share.funding), cents: share.claimedCents }))) : "";
 
   const signature = toPacketSignature(input.signature);
   const build = (requestId: string) =>
@@ -165,8 +167,13 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     submittedAt,
     sha256: packet.sha256,
     version: 1,
-    funding,
-    stipend: after.stipends.find((s) => s.id === request.funding) ?? null,
+    funding:
+      choices.length > 0
+        ? shares.map((share) => {
+            const { key, grade } = parseFundingChoice(share.funding);
+            return { choice: share.funding, label: fundingLabel(key, grade), claimedCents: share.claimedCents, stipend: after.stipends.find((s) => s.id === share.funding) ?? null };
+          })
+        : [],
     linkBase: input.linkBase,
   };
   const attachment = { filename: pdfName, mimeType: "application/pdf", bytes: packet.bytes };

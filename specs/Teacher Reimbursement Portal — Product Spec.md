@@ -1,6 +1,6 @@
 # Teacher Reimbursement Portal — Product Spec
 
-Oct 16, 2026 · @Russ · Draft v0.3
+Oct 28, 2026 · @Russ · Draft v0.4
 
 ## Overview
 
@@ -70,8 +70,8 @@ Fields map one-to-one to the PTA's *Payment Authorization / Request for Reimburs
 | Telephone | phone_area_code, phone_number | Text, required | |
 | Email | email | Prefilled | From the sign-in link |
 | Expenditure was for | — (drawn; the template's purpose field stays empty) | Text | Purpose, e.g. "2nd grade art supplies" |
-| Paid from | — | Choice, required when shown | Which stipend the request comes from. Not on the form; recorded in the Sheet and in both emails. The choices depend on the requester; see *Stipends* |
-| List Expenditures | — (drawn by the app; the template's item and total fields stay empty) | Repeating line items: description, amount, receipt | One line item per receipt. Description up to 200 characters; it wraps onto as many lines as it needs on the form. Amount may be less than the receipt total (partial reimbursement is allowed). Any number of lines → see *PDF generation* |
+| List Expenditures | — (drawn by the app; the template's item and total fields stay empty) | Repeating line items: description, amount, receipt, paid from | One line item per receipt. Description up to 200 characters; it wraps onto as many lines as it needs on the form. Amount may be less than the receipt total (partial reimbursement is allowed). Any number of lines → see *PDF generation* |
+| Paid from | — | Choice per line item, required when shown | Which stipend the line comes from. Not on the form; recorded in the Sheet and in both emails. A new line starts with the previous line's choice. The choices depend on the requester; see *Stipends* |
 | TOTAL EXPENSE | — (drawn) | Calculated | Sum of line items |
 | Total Amount Claimed From Above | — (drawn) | Calculated | Equals total expense |
 | Minus Advance Received | — (drawn) | Hidden, always $0 | Teachers don't receive advances |
@@ -85,7 +85,7 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 
 ### 2. Receipt upload
 
-- One receipt per line item. A receipt that needs more than one photo (a long receipt, front and back) can have several images under the same line.
+- One receipt per line item. A receipt that needs more than one photo (a long receipt, front and back) can have several images under the same line. A receipt split between stipends gets one line per stipend, each with that stipend's share, and the form attaches the uploaded receipt to the other line without a second upload; the packet then shows it under each line.
 - Accept JPG, PNG, HEIC (iPhone default) and PDF, up to \~10 MB each.
 - Take a photo directly from the phone camera.
 - An uploaded receipt can be opened from the form (new tab) to check it is legible before signing. Only the sign-in that uploaded it can open it.
@@ -133,7 +133,7 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 
 ### 7. Stipends
 
-Some requesters spend against PTA stipends that reset each fiscal year (July to June). Every request records which stipend it comes from, and the portal shows how much of each is left.
+Some requesters spend against PTA stipends that reset each fiscal year (July to June). Every line of a request records which stipend it comes from, so one request (or one receipt) can be split between stipends, and the portal shows how much of each is left.
 
 | Stipend | Who can choose it | Amount comes from | Shared |
 | --- | --- | --- | --- |
@@ -144,12 +144,12 @@ Some requesters spend against PTA stipends that reset each fiscal year (July to 
 | Not from a stipend | Everyone who is asked | — | — |
 
 - **Who is asked.** Teachers (`role` = teacher) choose among their classroom stipend, the stipend of each grade they teach (one per grade for a combination class, none if their row has no grade), the field-trip fund, or not from a stipend. Anyone else with their own stipend chooses it or not. Everyone else is not asked, and the request's *funding* cell stays blank.
-- **Required.** When the choice is shown, the requester must pick one. The server rejects a stipend the requester doesn't have.
-- **What counts.** The reimbursement claimed (after any donation to the PTA) on this fiscal year's requests charged to the stipend, by everyone who shares it. A request belongs to the fiscal year in its ID, the year it was first submitted. Returned requests don't count until they are re-signed. Paid and unpaid requests both count; the portal says how much is not paid yet.
-- **Where it shows.** *My requests*: a bar for each stipend with what has been claimed and what is left, and the stipend beside each request. The form: what is left on each choice, then what will be left after this request. The confirmation screen, the request's page, and both submission emails.
+- **Required.** When the choice is shown, every line must have one. The server rejects a stipend the requester doesn't have.
+- **What counts.** Each stipend's share of the reimbursement claimed on this fiscal year's requests, by everyone who shares it. A request charged to one stipend counts whole; a request split between stipends counts each stipend's lines, with any donation to the PTA taken off every share in proportion to its lines, rounded so the shares add up to the claim. A request belongs to the fiscal year in its ID, the year it was first submitted. Returned requests don't count until they are re-signed. Paid and unpaid requests both count; the portal says how much is not paid yet.
+- **Where it shows.** *My requests*: a bar for each stipend with what has been claimed and what is left, and the stipend beside each request. The form: what is left on each choice, then, for each stipend the request draws on, its share and what will be left after. The confirmation screen, the request's page, and both submission emails.
 - **Going over.** A warning, never a block. The requester can still submit; AP decides what to reimburse.
 - **Where amounts live.** A Stipends tab in the request-log Sheet with columns *name*, *amount* and *note*, and rows *Classroom*, *Field trip*, *Grade TK* (transitional kindergarten), *Grade K*, *Grade 1*, and so on. The treasurer updates it each fiscal year; the amounts always apply to the current year. A stipend with no amount is still offered and recorded, and shows "No amount set".
-- **In the Sheet.** The choice is stored as a readable label in the Requests tab's *funding* column ("Grade 2 stipend", "Field trip", "Not from a stipend"). AP may correct it there, and the totals follow.
+- **In the Sheet.** The choice is stored as a readable label in the Requests tab's *funding* column ("Grade 2 stipend", "Field trip", "Not from a stipend"). A request split between stipends lists each with its share of the claim: "Classroom stipend: 40.00; Grade 2 stipend: 50.00". AP may correct the cell there, and the totals follow; in a split cell, a part written without an amount takes whatever the other amounts leave of the claim.
 - **Not the budget category.** AP's budget category stays separate and is still assigned at review. The stipend is not printed on the signed PDF.
 
 ## E-signature options
@@ -262,6 +262,10 @@ Each has a proposed default. The build follows the default unless it is changed 
 | Weekly digest | Monday morning; lists anything not Paid seven days after submission |
 | Request ID | Sequential per PTA fiscal year, e.g. FY27-042 |
 | Signatures | Drawn or typed fresh each time; never stored for reuse |
+
+## Changes since v0.3
+
+- Stipends: the stipend is chosen per line item rather than per request, so one request, or one receipt, can be split between stipends. A new line starts with the previous line's choice, and a receipt uploaded for one line can be attached to another without a second upload. A split request's *funding* cell lists each stipend with its share of the claim, a donation coming off each share in proportion; a single-stipend request's cell is unchanged, so existing rows still count. The emails name the stipend beside each line of a split request and give each stipend's standing.
 
 ## Changes since v0.2
 

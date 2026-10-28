@@ -99,7 +99,8 @@ async function jpeg(): Promise<Uint8Array> {
   return new Uint8Array(await sharp({ create: { width: 300, height: 400, channels: 3, background: "#eeeeee" } }).jpeg().toBuffer());
 }
 
-function request(fileIds: string[], funding = "none"): RequestInput {
+/** One line per file, $10, $20, ...; `funding` is one choice for every line, or one per line. */
+function request(fileIds: string[], funding: string | string[] = "none", donationCents = 0): RequestInput {
   return {
     payeeName: "Pat Teacher",
     ptaPosition: "Teacher, Room 12",
@@ -108,9 +109,13 @@ function request(fileIds: string[], funding = "none"): RequestInput {
     address: "",
     cityZip: "",
     purpose: "Art supplies",
-    donationCents: 0,
-    funding,
-    items: fileIds.map((fileId, i) => ({ description: `Item ${i + 1}`, amountCents: 1000 * (i + 1), receipts: [{ fileId, name: `${fileId}.jpg`, mimeType: "image/jpeg" as const }] })),
+    donationCents,
+    items: fileIds.map((fileId, i) => ({
+      description: `Item ${i + 1}`,
+      amountCents: 1000 * (i + 1),
+      receipts: [{ fileId, name: `${fileId}.jpg`, mimeType: "image/jpeg" as const }],
+      funding: Array.isArray(funding) ? funding[i] : funding,
+    })),
   };
 }
 
@@ -160,6 +165,42 @@ describe("submitRequest", () => {
     expect(mailer.sent[0].text).toContain(`https://portal.example/requests/${result.requestId}`);
     expect(mailer.sent[0].attachments?.[0].filename).toBe(`${result.requestId}.pdf`);
     expect(result.funding.stipends.find((s) => s.id === "grade:2")).toMatchObject({ usedCents: 1000, remainingCents: 119000 });
+    expect(mailer.sent[0].text).toContain("Paid from: Grade 2 stipend (shared by grade 2 teachers): $1,200.00, $10.00 claimed including this request, $1,190.00 left");
+  }, 30_000);
+
+  it("splits a request between stipends line by line, one receipt on two lines, and records each share", async () => {
+    config.sendPacketsTo = "ap";
+    const { files, log, mailer, adapters } = world();
+    files.add("r1", ME, await jpeg());
+    files.add("r2", ME, await jpeg());
+    // $10 classroom, $20 grade 2 and $30 unfunded, with $6 donated: $9 + $18 + $27 claimed. Lines 1 and 2 share receipt r1.
+    const result = await submit(adapters, request(["r1", "r1", "r2"], ["classroom", "grade:2", "none"], 600));
+    expect(log.rows[0]).toMatchObject({
+      funding: "Classroom stipend: 9.00; Grade 2 stipend: 18.00; Not from a stipend: 27.00",
+      reimbursement_claimed: "54.00",
+      line_count: 3,
+      receipt_count: 2,
+    });
+    expect(result.funding.stipends.map((s) => [s.id, s.usedCents])).toEqual([
+      ["classroom", 900],
+      ["grade:2", 1800],
+      ["field_trip", 0],
+    ]);
+    const text = mailer.sent[0].text;
+    expect(text).toContain("1. Item 1 - $10.00 (1 receipt, Classroom stipend)");
+    expect(text).toContain("3. Item 3 - $30.00 (1 receipt, Not from a stipend)");
+    expect(text).toContain(["Paid from:", "  $9.00 from Classroom stipend: $250.00, $9.00 claimed including this request, $241.00 left", "  $18.00 from Grade 2 stipend (shared by grade 2 teachers): $1,200.00, $18.00 claimed including this request, $1,182.00 left", "  $27.00 from Not from a stipend"].join("\n"));
+    const doc = await PDFDocument.load(files.files.get(result.pdfFileId)!.bytes);
+    expect(doc.getPageCount()).toBe(5); // form, r1 for line 1, r1 again for line 2, r2, audit
+  }, 30_000);
+
+  it("leaves the funding cell blank for a requester with no stipend to choose", async () => {
+    const { files, log, mailer, adapters } = world();
+    files.add("r1", ME, await jpeg());
+    const volunteer: UserRecord = { ...teacher, role: "requester", grade: "" };
+    await submit(adapters, request(["r1"]), volunteer);
+    expect(log.rows[0].funding).toBe("");
+    expect(mailer.sent[0].text).not.toContain("Paid from");
   }, 30_000);
 
   it("emails only the requester, with the packet to forward, when packets go to the requester", async () => {
@@ -181,6 +222,7 @@ describe("submitRequest", () => {
     const { files, log, adapters } = world();
     files.add("r1", ME, await jpeg());
     await expect(submit(adapters, request(["r1"], "grade:4"))).rejects.toBeInstanceOf(FundingError);
+    await expect(submit(adapters, request(["r1", "r1"], ["classroom", "grade:4"]))).rejects.toBeInstanceOf(FundingError);
     expect(log.rows).toEqual([]);
     expect(files.files.get("r1")?.attachedTo).toBe("");
   });

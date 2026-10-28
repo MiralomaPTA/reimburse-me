@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { formatMoney, parseMoney } from "@/lib/money";
-import { DESCRIPTION_MAX, type RequestInput } from "@/lib/request-schema";
+import { DESCRIPTION_MAX, fundingSplit, type FundingShare, type RequestInput } from "@/lib/request-schema";
 import { uploadReceipt } from "@/lib/upload-client";
 import type { PacketRecipient } from "@/server/config";
 import type { FundingOptions, StipendStatus } from "@/server/requests/stipends";
@@ -18,6 +18,8 @@ interface ItemState {
   description: string;
   amount: string;
   receipts: ReceiptState[];
+  /** A choice's id ("classroom", "grade:2", "none"), or "" until the requester picks; only asked when they have stipends. */
+  funding: string;
 }
 
 interface FormState {
@@ -30,9 +32,10 @@ interface FormState {
   purpose: string;
   items: ItemState[];
   donation: string;
-  /** A choice's id ("classroom", "grade:2", "none"), or "" until the requester picks; only asked when they have stipends. */
-  funding: string;
 }
+
+/** Drafts saved before the stipend was chosen per line kept one choice for the whole request. */
+type SavedForm = FormState & { funding?: string; items: (Omit<ItemState, "funding"> & { funding?: string })[] };
 
 /** Drafts before v2 were keyed per device, so one signed-in address could resume another's. */
 const LEGACY_DRAFT_KEY = "rm:draft:v1";
@@ -41,7 +44,8 @@ const draftKey = (email: string) => `rm:draft:v2:${email.trim().toLowerCase()}`;
 const CONSENT_LABEL = "I agree to sign this reimbursement request electronically and certify the expenses and receipts are accurate.";
 
 const newKey = () => Math.random().toString(36).slice(2, 10);
-const newItem = (): ItemState => ({ key: newKey(), description: "", amount: "", receipts: [] });
+/** A new line takes the stipend of the line before it, so a request from one stipend is chosen once. */
+const newItem = (funding = ""): ItemState => ({ key: newKey(), description: "", amount: "", receipts: [], funding });
 const emptyForm = (profile: Profile | null): FormState => ({
   payeeName: profile?.payeeName ?? "",
   ptaPosition: profile?.ptaPosition ?? "",
@@ -52,7 +56,6 @@ const emptyForm = (profile: Profile | null): FormState => ({
   purpose: "",
   items: [newItem()],
   donation: "",
-  funding: "",
 });
 
 function loadDraft(email: string): FormState | null {
@@ -61,12 +64,14 @@ function loadDraft(email: string): FormState | null {
     localStorage.removeItem(LEGACY_DRAFT_KEY);
     const raw = localStorage.getItem(draftKey(email));
     if (!raw) return null;
-    const draft = JSON.parse(raw) as FormState;
+    const { funding: legacyFunding, ...draft } = JSON.parse(raw) as SavedForm;
     // Only finished uploads survive a reload; anything mid-flight is dropped.
-    draft.items = draft.items.map((item) => ({ ...item, receipts: item.receipts.filter((r) => r.status === "done" && r.fileId) }));
-    if (draft.items.length === 0) draft.items = [newItem()];
-    draft.funding ??= "";
-    return draft;
+    const items: ItemState[] = draft.items.map((item) => ({
+      ...item,
+      receipts: item.receipts.filter((r) => r.status === "done" && r.fileId),
+      funding: item.funding ?? legacyFunding ?? "",
+    }));
+    return { ...draft, items: items.length > 0 ? items : [newItem()] };
   } catch {
     return null;
   }
@@ -102,10 +107,14 @@ function toRequestInput(form: FormState, stipends: StipendStatus[]): { input: Re
     const done = item.receipts.filter((r) => r.status === "done" && r.fileId && r.mimeType);
     if (uploading) problems.push(`Line ${n}: wait for the receipt to finish uploading.`);
     else if (done.length === 0) problems.push(`Line ${n}: add a photo or PDF of the receipt.`);
+    // A draft may name a stipend the requester no longer has; make them choose again.
+    const funding = item.funding === "none" || stipends.some((s) => s.id === item.funding) ? item.funding : "";
+    if (stipends.length > 0 && !funding) problems.push(`Line ${n}: choose which stipend it comes from, or "Not from a stipend".`);
     items.push({
       description: item.description.trim(),
       amountCents: amountCents ?? 0,
       receipts: done.map((r) => ({ fileId: r.fileId!, name: r.name, mimeType: r.mimeType! })),
+      funding: stipends.length > 0 ? funding : "none",
     });
   });
   const donationCents = form.donation.trim() ? parseMoney(form.donation) : 0;
@@ -115,9 +124,6 @@ function toRequestInput(form: FormState, stipends: StipendStatus[]): { input: Re
   if (form.phone.replace(/\D/g, "").length < 7) problems.push("Enter a phone number.");
   if (!form.purpose.trim()) problems.push("Say what the expenditure was for.");
   if (form.checkDelivery === "mail" && (!form.address.trim() || !form.cityZip.trim())) problems.push("Enter the address to mail the check to.");
-  // A draft may name a stipend the requester no longer has; make them choose again.
-  const funding = form.funding === "none" || stipends.some((s) => s.id === form.funding) ? form.funding : "";
-  if (stipends.length > 0 && !funding) problems.push("Choose which stipend this comes from, or \"Not from a stipend\".");
   if (problems.length) return { input: null, problems };
   return {
     input: {
@@ -130,7 +136,6 @@ function toRequestInput(form: FormState, stipends: StipendStatus[]): { input: Re
       purpose: form.purpose.trim(),
       items,
       donationCents: donationCents ?? 0,
-      funding: funding || "none",
     },
     problems,
   };
@@ -214,7 +219,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
   const [consent, setConsent] = useState(false);
   const [signMode, setSignMode] = useState<"typed" | "drawn">("typed");
   const [typedName, setTypedName] = useState("");
-  const [result, setResult] = useState<{ requestId: string; emailed: boolean; funding: string } | null>(null);
+  const [result, setResult] = useState<{ requestId: string; emailed: boolean; shares: FundingShare[] } | null>(null);
   const padRef = useRef<SignaturePadHandle>(null);
 
   useEffect(() => {
@@ -271,11 +276,29 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
     }));
   }, []);
 
+  /** Puts a receipt already uploaded for another line on this one too: one receipt split between stipends. */
+  const shareReceipt = useCallback((itemKey: string, receipt: ReceiptState) => {
+    setForm((f) => ({
+      ...f,
+      items: f.items.map((item) => (item.key === itemKey ? { ...item, receipts: [...item.receipts, { ...receipt, key: newKey() }] } : item)),
+    }));
+  }, []);
+
   const totals = useMemo(() => {
     const total = form.items.reduce((sum, item) => sum + (parseMoney(item.amount) ?? 0), 0);
     const donation = parseMoney(form.donation) ?? 0;
     return { total, donation, claimed: Math.max(0, total - donation) };
   }, [form.items, form.donation]);
+
+  // What this request takes from each stipend, as the form stands.
+  const shares = useMemo(
+    () =>
+      fundingSplit({
+        items: form.items.map((item) => ({ amountCents: parseMoney(item.amount) ?? 0, funding: item.funding })),
+        donationCents: parseMoney(form.donation) ?? 0,
+      }).filter((share) => share.funding),
+    [form.items, form.donation],
+  );
 
   async function preview() {
     const { input, problems: found } = toRequestInput(form, funding.stipends);
@@ -344,7 +367,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
         cityZip: requestInput.cityZip,
       };
       if (body.funding) setFunding(body.funding);
-      setResult({ requestId: body.requestId, emailed: body.emailed, funding: requestInput.funding });
+      setResult({ requestId: body.requestId, emailed: body.emailed, shares: fundingSplit(requestInput) });
       setStep("done");
       window.scrollTo({ top: 0 });
     } catch {
@@ -373,11 +396,20 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
     window.scrollTo({ top: 0 });
   }
 
-  // The stipend picked on the form, or the one just submitted against.
-  const chosen = funding.stipends.find((s) => s.id === (step === "done" ? result?.funding : form.funding)) ?? null;
+  /** The stipends `shares` draws on, with each share, in the form's order. */
+  const drawnOn = (from: FundingShare[]) =>
+    from.flatMap((share) => {
+      const stipend = funding.stipends.find((s) => s.id === share.funding);
+      return stipend ? [{ stipend, share }] : [];
+    });
+  /** "Classroom stipend $40.00, Grade 2 stipend $50.00", or just the label when one choice covers the request. */
+  const fundingSummary = (from: FundingShare[]) => {
+    const label = (id: string) => (id === "none" ? "Not from a stipend" : (funding.stipends.find((s) => s.id === id)?.label ?? id));
+    if (from.length === 1) return label(from[0].funding);
+    return from.map((share) => `${label(share.funding)} ${formatMoney(share.claimedCents)}`).join(", ");
+  };
 
   if (step === "done" && result) {
-    const left = chosen && stipendLeft(chosen);
     const toAp = sendPacketsTo === "ap";
     return (
       <div className="mx-auto max-w-lg space-y-4">
@@ -394,11 +426,14 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
             with the PDF attached, to <MailtoLink email={apEmail} />.
           </p>
         )}
-        {chosen && left && (
-          <p className="text-neutral-700">
-            {chosen.label}: {left}.
-          </p>
-        )}
+        {drawnOn(result.shares).map(({ stipend }) => {
+          const left = stipendLeft(stipend);
+          return left ? (
+            <p key={stipend.id} className="text-neutral-700">
+              {stipend.label}: {left}.
+            </p>
+          ) : null;
+        })}
         {!result.emailed && toAp && (
           <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             The request was recorded, but the email to the AP team didn&apos;t go through. Please let <MailtoLink email={apEmail} /> know your
@@ -449,7 +484,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
             </a>
             <span className="text-neutral-500">
               Reimbursement claimed: {formatMoney(totals.claimed)}
-              {chosen ? ` · ${chosen.label}` : form.funding === "none" && funding.stipends.length > 0 ? " · Not from a stipend" : ""}
+              {funding.stipends.length > 0 && shares.length > 0 ? ` · ${fundingSummary(shares)}` : ""}
             </span>
           </div>
         </div>
@@ -501,7 +536,10 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
     >
       <div>
         <h1 className="text-2xl font-semibold">New reimbursement request</h1>
-        <p className="text-neutral-600">One line per receipt. Photograph each receipt as you go.</p>
+        <p className="text-neutral-600">
+          One line per receipt. Photograph each receipt as you go.
+          {funding.stipends.length > 0 ? " To split one receipt between stipends, add a line for each stipend's share and attach the receipt to both." : ""}
+        </p>
       </div>
       {problemBox}
 
@@ -571,17 +609,6 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
           </label>
           <input id="purpose" className="field" placeholder="2nd grade art supplies" maxLength={60} value={form.purpose} onChange={(e) => update("purpose", e.target.value)} />
         </div>
-        {funding.stipends.length > 0 && (
-          <fieldset>
-            <legend className="label">Which stipend is this from?</legend>
-            <div className="space-y-2">
-              {funding.stipends.map((stipend) => (
-                <FundingChoice key={stipend.id} checked={form.funding === stipend.id} onChange={() => update("funding", stipend.id)} label={stipend.label} detail={stipend.sharedWith && `Shared with ${stipend.sharedWith}`} left={stipendLeft(stipend)} />
-              ))}
-              <FundingChoice checked={form.funding === "none"} onChange={() => update("funding", "none")} label="Not from a stipend" />
-            </div>
-          </fieldset>
-        )}
       </section>
 
       <section className="space-y-4">
@@ -627,16 +654,37 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
                 </div>
               </div>
             </div>
+            {funding.stipends.length > 0 && (
+              <div>
+                <label htmlFor={`funding-${item.key}`} className="label">
+                  Paid from
+                </label>
+                <select id={`funding-${item.key}`} className="field" value={item.funding} onChange={(e) => updateItem(item.key, { funding: e.target.value })}>
+                  <option value="" disabled>
+                    Choose a stipend…
+                  </option>
+                  {funding.stipends.map((stipend) => (
+                    <option key={stipend.id} value={stipend.id}>
+                      {stipend.label}
+                      {stipend.sharedWith ? ` (shared with ${stipend.sharedWith})` : ""}
+                      {stipendLeft(stipend) ? ` · ${stipendLeft(stipend)}` : ""}
+                    </option>
+                  ))}
+                  <option value="none">Not from a stipend</option>
+                </select>
+              </div>
+            )}
             <div>
               <div className="label">Receipt</div>
               <ReceiptUpload receipts={item.receipts} onFiles={(files) => addFiles(item.key, files)} onRemove={(key) => removeReceipt(item.key, key)} />
+              <ShareReceipt items={form.items} item={item} onShare={(receipt) => shareReceipt(item.key, receipt)} />
               <p className="mt-2 text-xs text-neutral-500">
                 Tip: cover or crop card numbers and home addresses before you upload. A long receipt can be several photos.
               </p>
             </div>
           </div>
         ))}
-        <button type="button" className="btn-secondary" onClick={() => update("items", [...form.items, newItem()])}>
+        <button type="button" className="btn-secondary" onClick={() => update("items", [...form.items, newItem(form.items[form.items.length - 1]?.funding ?? "")])}>
           + Add another receipt
         </button>
       </section>
@@ -655,7 +703,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
           <dt className="font-medium">Reimbursement claimed</dt>
           <dd className="text-right text-lg font-semibold">{formatMoney(totals.claimed)}</dd>
         </dl>
-        {chosen && chosen.remainingCents !== null && <StipendAfter stipend={chosen} claimedCents={totals.claimed} />}
+        {drawnOn(shares).map(({ stipend, share }) => stipend.remainingCents !== null && <StipendAfter key={stipend.id} stipend={stipend} claimedCents={share.claimedCents} />)}
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -671,16 +719,41 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, funding: initialF
   );
 }
 
-function FundingChoice({ checked, onChange, label, detail, left }: { checked: boolean; onChange: () => void; label: string; detail?: string | null; left?: string | null }) {
+/**
+ * Offers the finished uploads of the other lines, so one receipt split between
+ * stipends is uploaded once and attached to each line. Nothing is shown when
+ * there is nothing to offer.
+ */
+function ShareReceipt({ items, item, onShare }: { items: ItemState[]; item: ItemState; onShare: (receipt: ReceiptState) => void }) {
+  // Each file once, under the first line that has it, and never one this line already has.
+  const seen = new Set(item.receipts.map((r) => r.fileId).filter(Boolean));
+  const offered: { line: number; receipt: ReceiptState }[] = [];
+  items.forEach((other, index) => {
+    if (other.key === item.key) return;
+    for (const receipt of other.receipts) {
+      if (receipt.status !== "done" || !receipt.fileId || seen.has(receipt.fileId)) continue;
+      seen.add(receipt.fileId);
+      offered.push({ line: index + 1, receipt });
+    }
+  });
+  if (offered.length === 0) return null;
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-md border border-neutral-200 bg-white p-3 text-sm has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
-      <input type="radio" name="funding" className="mt-0.5" checked={checked} onChange={onChange} />
-      <span className="flex-1">
-        <span className="font-medium">{label}</span>
-        {detail && <span className="block text-neutral-500">{detail}</span>}
-      </span>
-      {left && <span className="text-neutral-600">{left}</span>}
-    </label>
+    <select
+      className="field mt-2 text-sm"
+      value=""
+      aria-label="Attach a receipt from another line"
+      onChange={(e) => {
+        const found = offered.find(({ receipt }) => receipt.key === e.target.value);
+        if (found) onShare(found.receipt);
+      }}
+    >
+      <option value="">Same receipt as another line…</option>
+      {offered.map(({ line, receipt }) => (
+        <option key={receipt.key} value={receipt.key}>
+          Line {line}: {receipt.name}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -693,6 +766,8 @@ function StipendAfter({ stipend, claimedCents }: { stipend: StipendStatus; claim
       <dl className="grid grid-cols-2 gap-y-2 text-sm">
         <dt className="text-neutral-600">Left in {stipend.label.toLowerCase()}</dt>
         <dd className="text-right">{formatMoney(before)}</dd>
+        <dt className="text-neutral-600">From it in this request</dt>
+        <dd className="text-right">{formatMoney(claimedCents)}</dd>
         <dt className="text-neutral-600">Left after this request</dt>
         <dd className={`text-right font-medium ${afterCents < 0 ? "text-amber-800" : ""}`}>{formatMoney(afterCents)}</dd>
       </dl>
