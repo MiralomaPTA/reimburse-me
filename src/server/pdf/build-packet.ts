@@ -22,8 +22,8 @@ export async function buildPacket(input: PacketInput): Promise<Packet> {
   doc.setModificationDate(submittedAt);
 
   const template = await PDFDocument.load(await templateBytes());
-  await fillForm({ doc: template, request, requesterEmail: input.requesterEmail, signedAt: submittedAt, signature });
-  const formPages = await appendFormPages(doc, template, request);
+  const { chairField } = await fillForm({ doc: template, request, requesterEmail: input.requesterEmail, signedAt: submittedAt, signature });
+  const { pageCount: formPages, chairLine } = await appendFormPages(doc, template, request, chairField);
   await appendReceipts(doc, request, input.receiptFiles, requestId);
 
   const receiptCount = new Set(request.items.flatMap((item) => item.receipts.map((r) => r.fileId))).size;
@@ -42,5 +42,5 @@ export async function buildPacket(input: PacketInput): Promise<Packet> {
   await stampFooters(doc, requestId, submittedAt, !signature);
 
   const bytes = await doc.save({ useObjectStreams: true });
-  return { bytes, sha256: createHash("sha256").update(bytes).digest("hex"), pageCount: doc.getPageCount() };
+  return { bytes, sha256: createHash("sha256").update(bytes).digest("hex"), pageCount: doc.getPageCount(), chairLine };
 }

@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { REQUEST_COLUMNS, STIPEND_COLUMNS, USER_COLUMNS, type StipendRow, type UserRecord } from "@/server/adapters/types";
+import { EVENT_COLUMNS, REQUEST_COLUMNS, STIPEND_COLUMNS, USER_COLUMNS, type EventRow, type StipendRow, type UserRecord } from "@/server/adapters/types";
+import { chairRouting, parseEvents } from "@/lib/events";
 import { fundingOptions, GRADES, parseAmount, parseFunding, parseGrades } from "@/server/requests/stipends";
 
 /**
@@ -12,6 +13,7 @@ import { fundingOptions, GRADES, parseAmount, parseFunding, parseGrades } from "
 const load = <T>(name: string): T[] => JSON.parse(readFileSync(path.join(process.cwd(), "examples/local-data", name), "utf8"));
 const users = load<UserRecord>("users.json");
 const stipends = load<StipendRow>("stipends.json");
+const events = load<EventRow>("events.json");
 const options = (email: string) => fundingOptions(users.find((u) => u.email === email)!, stipends, [], new Date()).stipends.map((s) => s.label);
 
 describe("examples/local-data", () => {
@@ -33,6 +35,20 @@ describe("examples/local-data", () => {
     const names = stipends.map((row) => parseFunding(row.name));
     expect(names.map((n) => n.key)).toEqual(expect.arrayContaining(["classroom", "field_trip"]));
     expect(names.filter((n) => n.key === "grade").map((n) => n.grade)).toEqual(GRADES);
+  });
+
+  it("events.json has every Events column, and each event behaves as its note says", () => {
+    for (const row of events) expect(Object.keys(row).sort()).toEqual([...EVENT_COLUMNS].sort());
+    const parsed = parseEvents(events);
+    const byName = (name: string) => parsed.find((e) => e.name === name)!;
+    expect(parsed.filter((e) => e.active).map((e) => e.name)).toEqual(["Fun Run", "Fall Festival", "Book Fair"]);
+    expect(chairRouting(byName("Fun Run"), "grade2.teacher@example.org").chairs).toHaveLength(2);
+    expect(byName("Fun Run").budgetCents).toBe(150000);
+    // The sample volunteer's Fall Festival request goes to its chair (the help screenshots show this); they chair the Book Fair themselves.
+    expect(users.some((u) => u.email === "volunteer@example.org")).toBe(true);
+    expect(chairRouting(byName("Fall Festival"), "volunteer@example.org").step).toBe("Waiting");
+    expect(chairRouting(byName("Book Fair"), "volunteer@example.org").step).toBe("Skipped: requester is a chair");
+    expect(byName("Book Fair").budgetCents).toBeNull();
   });
 
   it("shows each kind of requester the choices its note describes", () => {
@@ -85,6 +101,7 @@ describe("examples/google-sheet", () => {
   it("has each tab's headers in the app's column order", () => {
     expect(csv("Users.csv").header).toEqual(USER_COLUMNS);
     expect(csv("Stipends.csv").header).toEqual(STIPEND_COLUMNS);
+    expect(csv("Events.csv").header).toEqual(EVENT_COLUMNS);
     expect(csv("Requests.csv")).toEqual({ header: REQUEST_COLUMNS, rows: [] });
   });
 
@@ -95,5 +112,6 @@ describe("examples/google-sheet", () => {
     );
     for (const row of sheetUsers) expect([row.requested_at, row.approved_at, row.last_link_at, row.signed_in_at]).toEqual(["", "", "", ""]);
     expect(csv("Stipends.csv").rows).toEqual(stipends);
+    expect(csv("Events.csv").rows).toEqual(events);
   });
 });

@@ -4,12 +4,12 @@ import { clientIp } from "@/server/auth/rate-limit";
 import { getApprovedSession } from "@/server/auth/session";
 import { ReceiptError } from "@/server/requests/receipts";
 import { FundingError } from "@/server/requests/stipends";
-import { submitRequest } from "@/server/requests/submit";
+import { EventError, submitRequest } from "@/server/requests/submit";
 import { submitSchema } from "@/lib/request-schema";
 
 export const maxDuration = 60;
 
-/** Signs and submits a request: builds the PDF, stores it, logs it, emails it (see config.sendPacketsTo). */
+/** Signs and submits a request: builds the PDF, stores it, logs it, and emails it to the event chair or on (see config.sendPacketsTo). */
 export async function POST(request: Request) {
   const session = await getApprovedSession();
   if (!session) return Response.json({ error: "Please sign in again" }, { status: 401 });
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     );
     return Response.json(result);
   } catch (error) {
-    if (error instanceof ReceiptError || error instanceof FundingError) return Response.json({ error: error.message }, { status: 400 });
+    if (error instanceof ReceiptError || error instanceof FundingError || error instanceof EventError) return Response.json({ error: error.message }, { status: 400 });
     console.error("[submit]", error);
     return Response.json({ error: "Something went wrong while submitting. Nothing was sent; please try again." }, { status: 500 });
   }

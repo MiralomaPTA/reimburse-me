@@ -29,4 +29,6 @@ export const FIELDS = {
   refundToPta: "refund_to_pta",
   requesterSignature: "requester_signature",
   requesterSignatureDate: "requester_signature_date",
+  /** Never filled as a field: the event chair's signature is stamped on the line after the requester has signed. */
+  vpChairSignature: "vp_chair_signature",
 } as const;

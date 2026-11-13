@@ -189,6 +189,15 @@ export class SheetTable<T extends object> {
     await this.writeRow(cols, found.rowNumber, this.toValues(cols, patch, found.raw));
   }
 
+  /** As `update`, but only when the found row passes `condition` as read; says whether it wrote. */
+  async updateIf(keyValue: string, condition: (row: T) => boolean, patch: Partial<T>): Promise<boolean> {
+    const { cols, rows } = await this.snapshot();
+    const found = this.findIn(rows, keyValue);
+    if (!found || !condition(found.row)) return false;
+    await this.writeRow(cols, found.rowNumber, this.toValues(cols, patch, found.raw));
+    return true;
+  }
+
   async upsert(row: T): Promise<void> {
     const { cols, rows } = await this.snapshot();
     const found = this.findIn(rows, this.keyOf(row));

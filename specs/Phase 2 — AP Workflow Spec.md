@@ -1,6 +1,6 @@
 # Phase 2 — AP Workflow Spec
 
-Oct 15, 2026 · Draft v0.1 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.2), which stays the source of truth for decisions already made.
+Oct 15, 2026, updated Nov 12, 2026 · Draft v0.2 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Event Chair Signature — Spec*, which stay the source of truth for decisions already made.
 
 ## Overview
 
@@ -48,7 +48,8 @@ A request is always in exactly one status. *Draft* from the main spec lives only
 
 | Status | Meaning | Set by | Sheet columns written | Email sent |
 | --- | --- | --- | --- | --- |
-| Submitted | Signed and sent to AP | The app, on submit or resubmit | `submitted_at`, `version`, `pdf_file_id`, `pdf_sha256` | Packet to ap@, copy to the teacher |
+| Awaiting chair | A request for a PTA event, signed by the requester and waiting for the event's chair. Built with the event chair step | The app, on submit or resubmit | `submitted_at`, `version`, `pdf_file_id`, `pdf_sha256`, `event`, `chair_step`, `chair_sent_to`, `chair_sent_at` | Signing link to each chair; copy to the teacher. Nothing to ap@ yet |
+| Submitted | Signed and sent to AP | The app, on submit or resubmit, or when the event chair signs | `submitted_at`, `version`, `pdf_file_id`, `pdf_sha256`; after a chair signs, the `chair_*` columns | Packet to ap@ (co-signed, for an event), copy to the teacher |
 | Approved | AP has reviewed it and will pay | AP | `approved_at`, `approved_by` | None *(default)* |
 | Returned | AP needs a change before paying | AP, note required | `returned_at`, `returned_by`, `returned_note` | Teacher: the note and a link to fix it |
 | Check written | The treasurer has written the check; it is waiting for the second signature | AP, check number and date required | `check_number`, `check_date`, `check_written_by` | None. The teacher's request page shows "Check written, awaiting second signature" |
@@ -65,7 +66,7 @@ A request is always in exactly one status. *Draft* from the main spec lives only
 | Approved | Returned | AP | Note required |
 | Check written | Paid | AP or co-signer | Date defaults to today. The Record check form has an "already signed and sent" box for when both signers are in the room, which does both steps in one go |
 | Check written | Returned | AP | Note required; the voided check number stays in the Actions tab |
-| Returned | Submitted | Teacher | Re-signs; `version` increments, new PDF |
+| Returned | Submitted, or Awaiting chair | Teacher | Re-signs; `version` increments, new PDF. A request for an event with a chair goes back to the chair |
 | Paid | anything | Admin, by editing the Sheet | Paid is final in the portal. Fixing a mistake is a Sheet edit plus a note in `notes` |
 
 Every action also appends a row to an **Actions** tab: `request_id`, `action`, `by`, `at`, `note`. That is the audit trail; the Requests row holds only the latest state.
@@ -79,24 +80,24 @@ When a request is returned:
 1. The teacher gets an email with the AP note and a link to the request.
 2. Opening the request shows the note at the top and a **Fix and re-sign** button. The form opens filled in exactly as last submitted: details, line items and receipts.
 3. The teacher may change anything: edit lines, remove or add receipts, change the amount. *(default)*
-4. They preview and sign again. The app builds a new packet, stores it as `FY27-042-v2.pdf` beside the earlier one, sets `version` to 2, points `pdf_file_id` and `pdf_sha256` at the new file, keeps the previous file ids in `previous_pdf_file_ids`, and sets status back to Submitted.
+4. They preview and sign again. The app builds a new packet, stores it as `FY27-042-v2.pdf` beside the earlier one, sets `version` to 2, points `pdf_file_id` and `pdf_sha256` at the new file, keeps the previous file ids in `previous_pdf_file_ids`, and sets status back to Submitted. A request for an event with a chair goes back to *Awaiting chair* instead, the chair signs version 2, and it reaches AP from there.
 5. AP receives a new packet email marked *version 2* that includes the return note it answers.
 
-To refill the form, the app saves the exact request content as `request.json` in the request's Drive folder at every submission (`request_file_id` on the row). Receipts already in Drive are reused by id; nothing is re-uploaded unless the teacher adds a new one.
+To refill the form, the app saves the exact request content as JSON in the request's Drive folder at every submission (`FY27-042.json`, `FY27-042-v2.json`; `request_file_id` on the row). This part is already built, with the event chair step. Receipts already in Drive are reused by id; nothing is re-uploaded unless the teacher adds a new one.
 
 ## AP dashboard
 
 **/ap** — the list. Requires role `ap` or `admin`; everyone else gets the normal teacher pages.
 
-- Columns: request ID, submitted, requester, purpose, reimbursement claimed, category, status, age, version.
-- Age is days since submission for Submitted and Approved, days since return for Returned, and days since the check was written for Check written. It is blank for Paid.
-- Default view: everything not Paid, oldest first. Filters: status, fiscal year, and a search box over name, email and purpose. A toggle shows Paid requests.
+- Columns: request ID, submitted, requester, purpose, event, reimbursement claimed, category, status, age, version.
+- Age is days since the request reached AP for Submitted and Approved (the chair's signature, for an event), days since return for Returned, and days since the check was written for Check written. For Awaiting chair it is days since the chair was emailed. It is blank for Paid.
+- Default view: everything not Paid and not Awaiting chair, oldest first. Filters: status, fiscal year, and a search box over name, email and purpose. A toggle shows Paid requests. The status filter shows requests awaiting a chair, so AP can see what's coming and chase a slow chair.
 - An **Awaiting signature** filter shows only Check written requests with their check numbers and amounts, oldest first. It is the co-signer's to-do list.
 - Export CSV applies the current filters.
 
 **/ap/[id]** — one request.
 
-- Everything on the row, the AP note history from the Actions tab, and links to the current signed PDF and any previous versions.
+- Everything on the row, the AP note history from the Actions tab, and links to the current signed PDF (the co-signed one, for an event) and any previous versions.
 - The action panel: a category dropdown, and the buttons **Approve**, **Return with a note**, **Record check**, **Mark sent**. Return opens a note field. Record check asks for the check number and date (defaults to today) and has an "already signed by both and sent" box. Mark sent asks only for the date (defaults to today) and reminds whether the check goes to the staff mailbox or is picked up from the PTA.
 - After an action the page reloads from the Sheet. Two AP members acting on the same request at the same moment is last-write-wins; at this volume that is acceptable, and the Actions tab shows both.
 - The buttons are disabled on your own request.
@@ -111,7 +112,7 @@ The pages are responsive so the treasurer can clear requests from a phone.
 | Check written | Nobody | The status is visible on the teacher's request page, but no email: the check is not in their hands yet |
 | Paid | Teacher | Check number, the date it went out, and "in your staff mailbox" or "ready for pickup from the PTA" |
 | Resubmitted | ap@ | The new packet, marked with the version and the note it answers |
-| Weekly digest | ap@ | Every request not Paid that was submitted more than 7 days ago: ID, requester, amount, status, age, with checks awaiting signature in their own section. Sent Monday at 8 AM Pacific. Not sent when the list is empty *(defaults)* |
+| Weekly digest | ap@ | Every request not Paid that was submitted more than 7 days ago: ID, requester, amount, status, age, with checks awaiting signature in their own section, and requests awaiting an event chair in another. Sent Monday at 8 AM Pacific. Not sent when the list is empty *(defaults)* |
 
 Approved sends nothing *(default)*. The digest runs as a Vercel cron job, which the Hobby plan supports at this frequency, protected by a secret so only Vercel can trigger it.
 
@@ -119,7 +120,7 @@ Approved sends nothing *(default)*. The digest runs as a Vercel cron job, which 
 
 One row per request, latest version only, UTF-8 with a byte-order mark so Excel opens it cleanly.
 
-Columns: `request_id`, `status`, `submitted_at`, `check_date`, `check_number`, `paid_date`, `budget_category`, `payee_name`, `pta_position`, `requester_email`, `purpose`, `total_expense`, `donation_to_pta`, `reimbursement_claimed`, `check_delivery`, `line_count`, `receipt_count`, `version`, `approved_by`, `paid_by`, `pdf_sha256`.
+Columns: `request_id`, `status`, `submitted_at`, `check_date`, `check_number`, `paid_date`, `budget_category`, `payee_name`, `pta_position`, `requester_email`, `purpose`, `event`, `chair_signed_by`, `total_expense`, `donation_to_pta`, `reimbursement_claimed`, `check_delivery`, `line_count`, `receipt_count`, `version`, `approved_by`, `paid_by`, `pdf_sha256`.
 
 If the treasurer's bookkeeping software has an import format, the export should match it instead. *(Open question 6)*
 
@@ -129,11 +130,11 @@ A **Categories** tab in the Sheet: `name`, `active` (yes/no), `order`. The treas
 
 ## Data changes
 
-Requests tab, new columns: `approved_at`, `approved_by`, `returned_at`, `returned_by`, `check_date`, `check_written_by`, `paid_by`, `request_file_id`, `previous_pdf_file_ids`. The existing `paid_date` now means the date the signed check went out. The app appends any missing header to the end of the header row on first use, so the existing tab does not need to be rebuilt.
+Requests tab, new columns: `approved_at`, `approved_by`, `returned_at`, `returned_by`, `check_date`, `check_written_by`, `paid_by`, `previous_pdf_file_ids`. (`request_file_id`, `lock` and the event and `chair_*` columns already exist, from the event chair step. AP's actions should take the row's `lock` too, the way chair signing and resend do, so an AP action and a chair signature at the same moment can't both go through.) The existing `paid_date` now means the date the signed check went out. The app appends any missing header to the end of the header row on first use, so the existing tab does not need to be rebuilt.
 
 New tabs: `Actions` and `Categories`, created with headers on first use.
 
-Drive: each request folder gains `request.json` and, after a return, additional PDF versions. Nothing is deleted.
+Drive: after a return, a request folder gains additional PDF and JSON versions. Nothing is deleted.
 
 ## Security and privacy
 
@@ -170,4 +171,4 @@ Each has a default. The build follows it unless changed here.
 | 10 | Undoing Paid | Admin edits the Sheet and writes a note; no Reopen button |
 | 12 | Who marks a check sent | Whoever puts it in the mailbox or hands it over at pickup. The co-signer may be given the `ap` role to do it right after signing |
 | 13 | Voiding a written check | Return it with a note; the check number stays in the Actions tab and the new check gets a new Record check entry |
-| 11 | VP/Chairman signature line | Still blank on the PDF (carried from the main spec). Does AP collect it on paper, or skip it? |
+| 11 | VP/Chairman signature line | Answered: for a request for a PTA event, the event's chair signs it in the portal before the request reaches AP (*Event Chair Signature — Spec*). Otherwise it stays blank |

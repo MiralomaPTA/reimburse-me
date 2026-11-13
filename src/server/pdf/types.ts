@@ -32,12 +32,33 @@ export interface PacketInput {
   audit: AuditInfo | null;
 }
 
+/** A rectangle on one page of a packet: where a line of the form ended up after the expenditures were laid out. */
+export interface LineBox {
+  /** Zero-based page index in the packet. */
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface Packet {
   bytes: Uint8Array;
   sha256: string;
   pageCount: number;
+  /**
+   * Where the form's VP/Chairman line landed. It moves with the length of the
+   * expenditure list, so it is recorded with the request and the event chair's
+   * signature can be stamped there later without rebuilding the packet.
+   */
+  chairLine: LineBox;
 }
 
 export const CONSENT_TEXT =
   "I agree to sign this reimbursement request electronically. I certify that the expenses listed were " +
   "made on behalf of the Miraloma Elementary PTA and that the attached receipts are accurate.";
+
+/** What an event chair agrees to by signing the VP/Chairman line. */
+export const chairConsentText = (event: string) =>
+  `I agree to sign this reimbursement request electronically as chair of ${event}. ` +
+  `I confirm that, to my knowledge, the expenses listed were made for ${event}.`;

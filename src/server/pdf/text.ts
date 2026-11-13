@@ -11,6 +11,15 @@ export function winAnsi(text: string): string {
     .replace(/[^\x20-\x7e\xa0-\xff–—‘’“”•…]/gu, "?");
 }
 
+/** `text` (made WinAnsi-safe) cut short with an ellipsis so it fits in `width` at `size`; unchanged when it already fits. */
+export function fitText(font: PDFFont, text: string, size: number, width: number): string {
+  const clean = winAnsi(text);
+  if (font.widthOfTextAtSize(clean, size) <= width) return clean;
+  let cut = clean;
+  while (cut.length > 0 && font.widthOfTextAtSize(`${cut.trimEnd()}…`, size) > width) cut = cut.slice(0, -1);
+  return cut ? `${cut.trimEnd()}…` : "";
+}
+
 /** Largest size in [min, max] at which `text` fits in `width`. */
 export function fitFontSize(font: PDFFont, text: string, width: number, max = 10, min = 5): number {
   let size = max;

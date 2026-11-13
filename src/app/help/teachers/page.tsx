@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { config } from "@/server/config";
 import { MailtoLink } from "@/components/MailtoLink";
 import { Guide, Questions, Section, Shot } from "@/components/help/Guide";
-import { CheckAndSignSection, SignInSection, WhatHappensNext, commonQuestions } from "@/components/help/Shared";
+import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions } from "@/components/help/Shared";
 import signIn from "@/images/help/teacher/sign-in.png";
 import checkEmail from "@/images/help/teacher/check-email.png";
 import almostThere from "@/images/help/teacher/almost-there.png";
@@ -91,7 +91,8 @@ export default function TeacherGuidePage() {
         </p>
         <Shot src={aboutYou} alt="The About you section, filled in with a name, grade, room, phone number and check choice" wide />
         <p>Next, say what the spending was for in a few words. This is the headline the PTA sees for the whole request, so keep one request to one purpose.</p>
-        <Shot src={whatFor} alt="The What was it for section" wide />
+        <EventQuestion />
+        <Shot src={whatFor} alt="The What was it for section, with the event left on Not for an event" wide />
         <p>The portal remembers these details from your last request, so next time this part is already filled in.</p>
       </Section>
 
@@ -138,7 +139,7 @@ export default function TeacherGuidePage() {
           paid, and what&apos;s left. A shared stipend counts everyone in your grade, so the number can move even when you haven&apos;t sent anything.
         </p>
         <Shot src={stipends} alt="The stipends box on the My requests page, with a bar for each stipend and what is left" wide />
-        <p>Below that is every request you&apos;ve sent, with its amount, which stipend it came from, and its status: Submitted, Approved, Returned or Paid.</p>
+        <p>Below that is every request you&apos;ve sent, with its amount, which stipend it came from, and its status: Awaiting chair, Submitted, Approved, Returned or Paid.</p>
         <Shot src={myRequests} alt="The My requests page" />
         <p>Tap a request to see its details and open the signed PDF again at any time.</p>
         <Shot src={toAp ? requestAp : requestRequester} alt="A request's details page, with an Open signed PDF button" />
@@ -160,6 +161,8 @@ export default function TeacherGuidePage() {
             q.mistake,
             q.lostReceipt,
             q.computer,
+            q.event,
+            q.chairSlow,
             { q: "Who do I ask for help?", a: <>Email {ap} for anything about a payment or a stipend.</> },
           ]}
         />

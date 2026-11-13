@@ -14,7 +14,8 @@ export const localMailer: Mailer = {
     await fs.mkdir(outbox, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const slug = message.subject.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
-    const base = `${stamp}-${slug}`;
+    // Emails sent together (one per event chair) share a millisecond and a subject; keep each one.
+    const base = `${stamp}-${slug}-${crypto.randomUUID().slice(0, 6)}`;
     const attachments = [];
     for (const [i, a] of (message.attachments ?? []).entries()) {
       const file = `${base}-${i + 1}-${a.filename}`;

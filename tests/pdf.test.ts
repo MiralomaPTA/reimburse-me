@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { buildPacket } from "@/server/pdf/build-packet";
+import { countersignPacket } from "@/server/pdf/countersign";
 import { CONSENT_TEXT, type ReceiptFile } from "@/server/pdf/types";
-import { winAnsi } from "@/server/pdf/text";
+import { fitText, winAnsi } from "@/server/pdf/text";
+import { CHAIR_TEXT_SIZE, chairCaption, signatureArea } from "@/server/pdf/chair-line";
+import { eventLabel } from "@/lib/events";
 import type { RequestInput } from "@/lib/request-schema";
 
 async function jpegReceipt(fileId: string, width = 1200, height = 1800): Promise<ReceiptFile> {
@@ -27,6 +30,7 @@ function request(itemCount: number, receiptsPerItem: (i: number) => string[]): R
     phone: "(415) 555-1234",
     checkDelivery: "pickup",
     purpose: "2nd grade art supplies",
+    event: "",
     donationCents: 500,
     items: Array.from({ length: itemCount }, (_, i) => ({
       description: `Item ${i + 1} supplies`,
@@ -101,4 +105,70 @@ describe("buildPacket", () => {
     });
     expect(packet.pageCount).toBe(3);
   }, 30_000);
+
+  it("records where the VP/Chairman line landed, on the last form page", async () => {
+    const files = new Map([["r0", await jpegReceipt("r0", 300, 300)]]);
+    const short = await buildPacket({ requestId: "PREVIEW", submittedAt: new Date(), request: request(1, () => ["r0"]), requesterEmail: "jane@example.org", receiptFiles: files, signature: null, audit: null });
+    expect(short.chairLine).toMatchObject({ page: 0, x: expect.closeTo(238.08, 1), width: expect.closeTo(300, 1) });
+    const long = request(40, () => ["r0"]);
+    long.items.forEach((item) => (item.description = "a long description of what was bought and why it was needed ".repeat(3).trim()));
+    const many = await buildPacket({ requestId: "PREVIEW", submittedAt: new Date(), request: long, requesterEmail: "jane@example.org", receiptFiles: files, signature: null, audit: null });
+    expect(many.chairLine.page).toBeGreaterThan(0);
+    expect(many.chairLine.page).toBe(many.pageCount - 41); // the form pages, then 40 receipt pages
+  }, 60_000);
+});
+
+describe("countersignPacket", () => {
+  it("adds the chair's signature and a countersignature page to a copy, leaving the requester's file as it was", async () => {
+    const files = new Map([["r0", await jpegReceipt("r0", 300, 300)]]);
+    const input = { ...request(1, () => ["r0"]), event: "Fun Run" };
+    const signed = await buildPacket({
+      requestId: "FY27-042",
+      submittedAt: new Date("2026-11-12T20:00:00Z"),
+      request: input,
+      requesterEmail: "jane@example.org",
+      receiptFiles: files,
+      signature: { type: "typed", name: "Jane Doe" },
+      audit: { requesterEmail: "jane@example.org", signInMethod: "One-time email link", signedInAt: new Date(), ip: "", userAgent: "", consentText: CONSENT_TEXT },
+    });
+    const original = signed.bytes.slice();
+    const base = {
+      packet: signed.bytes,
+      requesterSha256: signed.sha256,
+      requestId: "FY27-042",
+      chairLine: signed.chairLine,
+      event: "Fun Run",
+      payeeName: "Jane Doe",
+      name: "Lillie Coit",
+      signedAt: new Date("2026-11-14T18:00:00Z"),
+      chairEmail: "lillie@example.org",
+      linkSentAt: new Date("2026-11-12T20:00:00Z"),
+      consentText: "I agree",
+      note: "Water station",
+    };
+    const typed = await countersignPacket({ ...base, signature: { type: "typed", name: "Lillie Coit" } });
+    expect(typed.pageCount).toBe(signed.pageCount + 1);
+    expect(typed.sha256).not.toBe(signed.sha256);
+    expect(signed.bytes).toEqual(original);
+    expect((await PDFDocument.load(typed.bytes)).getPageCount()).toBe(signed.pageCount + 1);
+
+    const png = await sharp({ create: { width: 400, height: 120, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
+    const drawn = await countersignPacket({ ...base, signature: { type: "drawn", png: new Uint8Array(png) } });
+    expect(drawn.pageCount).toBe(signed.pageCount + 1);
+  }, 30_000);
+
+  it("keeps a long name and event within the line, leaving the signature room", async () => {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const line = { page: 0, x: 238, y: 100, width: 300, height: 20 };
+    const name = "Christopher Alexander Montgomery-Wellington the Third of San Francisco";
+    const event = "The Annual Miraloma Elementary Spring Carnival, Silent Auction and Community Picnic Fundraiser";
+    const caption = chairCaption(font, line, name, "11/14/2026");
+    expect(caption.endsWith("…, 11/14/2026")).toBe(true);
+    for (const text of [caption, eventLabel(event)]) expect(font.widthOfTextAtSize(fitText(font, text, CHAIR_TEXT_SIZE, line.width * 0.45), CHAIR_TEXT_SIZE)).toBeLessThanOrEqual(line.width * 0.45);
+    const area = signatureArea(font, line, [eventLabel(event), caption]);
+    expect(area.width).toBeGreaterThan(line.width / 2 - 20);
+    expect(area.x + area.width).toBeLessThanOrEqual(line.x + line.width * 0.55);
+    expect(fitText(font, "Short", 7, 100)).toBe("Short");
+  });
 });

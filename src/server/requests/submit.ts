@@ -1,11 +1,15 @@
 import type { Adapters, RequestRow } from "@/server/adapters/types";
 import type { ApprovedSession } from "@/server/auth/session";
-import { config } from "@/server/config";
-import { apSubmissionEmail, requesterCopyEmail, requesterPacketEmail } from "@/server/email/templates";
+import { requesterSentToChairEmail } from "@/server/email/templates";
 import { buildPacket } from "@/server/pdf/build-packet";
-import { CONSENT_TEXT, type PacketSignature } from "@/server/pdf/types";
-import { FundingError, fundingCell, fundingLabel, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
+import { CONSENT_TEXT } from "@/server/pdf/types";
+import { sendChairRequests } from "@/server/requests/chair";
 import { loadReceiptFiles } from "@/server/requests/receipts";
+import { sendPacketOn } from "@/server/requests/send-on";
+import { toPacketSignature } from "@/server/requests/signature";
+import { FundingError, fundingCell, fundingEmailShares, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
+import { saveStoredRequest } from "@/server/requests/stored";
+import { chairRouting, eventBudget, findEvent, parseEvents } from "@/lib/events";
 import { fiscalYearLabel, formatRequestId, requestIdPrefix } from "@/lib/fiscal-year";
 import { moneyPlain } from "@/lib/money";
 import { fundingSplit, totals, type RequestInput, type SignatureInput } from "@/lib/request-schema";
@@ -28,16 +32,15 @@ export interface SubmitResult {
   pageCount: number;
   /** The requester's stipends with this request counted. */
   funding: FundingOptions;
-  /** false when the row was written but the email could not be sent. */
+  /** Set when the request went to its event's chairs to sign before going on to AP: who the email reached, and who it didn't. */
+  chair: { event: string; sentTo: string[]; notReached: string[] } | null;
+  /** false when the row was written but an email could not be sent. */
   emailed: boolean;
   emailError?: string;
 }
 
-function toPacketSignature(signature: SignatureInput): PacketSignature {
-  if (signature.type === "typed") return { type: "typed", name: signature.name };
-  const base64 = signature.pngDataUrl.slice("data:image/png;base64,".length);
-  return { type: "drawn", png: new Uint8Array(Buffer.from(base64, "base64")) };
-}
+/** The request names an event that isn't on the Events tab's active list (removed while the form was open, say). */
+export class EventError extends Error {}
 
 /** Highest sequence number among `rows` whose ID starts with `prefix` (0 if none). */
 export function maxSequenceIn(rows: Pick<RequestRow, "request_id">[], prefix: string): number {
@@ -53,23 +56,33 @@ export function maxSequenceIn(rows: Pick<RequestRow, "request_id">[], prefix: st
 /**
  * Signs, stores, logs and emails a new request.
  *
- * Where the packet goes depends on `config.sendPacketsTo`: to AP with a copy
- * to the requester, or only to the requester, who forwards it to AP by hand.
+ * A request for a PTA event whose chair isn't the requester goes to that
+ * event's chairs first, as "Awaiting chair"; one of them signs the form's
+ * VP/Chairman line and the co-signed packet goes on from there (see
+ * chair.ts). Every other request goes on now, to wherever
+ * `config.sendPacketsTo` sends packets: to AP with a copy to the requester,
+ * or only to the requester, who forwards it to AP by hand.
  *
- * The order decides what a failure leaves behind. The PDF is stored, then the
- * row is written, and only then are the receipts moved and the emails sent.
- * Failing in the first two steps leaves at most an orphan PDF in Drive and the
- * requester simply tries again. Trouble in the last two is noted on the row
- * and reported, never retried, so no request is ever logged twice.
+ * The order decides what a failure leaves behind. The PDF and the request's
+ * JSON are stored, then the row is written, and only then are the receipts
+ * moved and the emails sent. Failing in the first steps leaves at most an
+ * orphan file in Drive and the requester simply tries again. Trouble in the
+ * last two is noted on the row and reported, never retried, so no request is
+ * ever logged twice.
  */
 export async function submitRequest(input: SubmitInput, adapters: Adapters): Promise<SubmitResult> {
-  const { request, session, ip, userAgent } = input;
-  const { files, log, mailer, stipends } = adapters;
+  const { session, ip, userAgent } = input;
+  const { files, log, mailer, stipends, events } = adapters;
   const { user } = session;
   const submittedAt = new Date();
-  const [receiptFiles, stipendRows, earlierRows] = await Promise.all([loadReceiptFiles(request, session.email, files), stipends.list(), log.list()]);
+  const [receiptFiles, stipendRows, earlierRows, eventRows] = await Promise.all([
+    loadReceiptFiles(input.request, session.email, files),
+    stipends.list(),
+    log.list(),
+    events.list(),
+  ]);
   const choices = fundingOptions(user, stipendRows, earlierRows, submittedAt).stipends;
-  const shares = fundingSplit(request);
+  const shares = fundingSplit(input.request);
   for (const share of shares) {
     if (share.funding !== "none" && !choices.some((s) => s.id === share.funding)) {
       throw new FundingError("A line is charged to a stipend that isn't one of yours. Choose another, or \"Not from a stipend\".");
@@ -77,6 +90,15 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
   }
   // Blank when there was nothing to choose; AP can tell "chose none" from "wasn't asked".
   const funding = choices.length > 0 ? fundingCell(shares.map((share) => ({ ...parseFundingChoice(share.funding), cents: share.claimedCents }))) : "";
+
+  // The event must be on the tab's active list; it is recorded under the tab's own spelling.
+  const event = input.request.event ? findEvent(parseEvents(eventRows).filter((e) => e.active), input.request.event) : null;
+  if (input.request.event && !event) {
+    throw new EventError(`"${input.request.event}" isn't on the PTA's list of events any more. Choose another event, or "Not for an event".`);
+  }
+  const request: RequestInput = { ...input.request, event: event?.name ?? "" };
+  const routing = chairRouting(event, session.email);
+  const toChair = routing.step === "Waiting";
 
   const signature = toPacketSignature(input.signature);
   const build = (requestId: string) =>
@@ -116,11 +138,19 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
   const folderPath = ["requests", fiscalYearLabel(submittedAt), requestId];
   const pdfName = `${requestId}.pdf`;
   const stored = await files.putFile({ name: pdfName, mimeType: "application/pdf", bytes: packet.bytes, folderPath });
+  const requestFileId = await saveStoredRequest(files, folderPath, {
+    requestId,
+    version: 1,
+    submittedAt: submittedAt.toISOString(),
+    requesterEmail: session.email,
+    request,
+    packet: { sha256: packet.sha256, pageCount: packet.pageCount, chairLine: packet.chairLine },
+  });
 
   const t = totals(request);
   const row: RequestRow = {
     request_id: requestId,
-    status: "Submitted",
+    status: toChair ? "Awaiting chair" : "Submitted",
     submitted_at: submittedAt.toISOString(),
     requester_email: session.email,
     payee_name: request.payeeName,
@@ -146,12 +176,28 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     updated_at: submittedAt.toISOString(),
     notes: "",
     funding,
+    event: request.event,
+    chair_step: routing.step,
+    // Narrowed below to the chairs the email reached; cleared if it reached none, so the requester can resend at once.
+    chair_sent_to: routing.chairs.join(", "),
+    chair_sent_at: toChair ? submittedAt.toISOString() : "",
+    chair_signed_by: "",
+    chair_name: "",
+    chair_signed_at: "",
+    chair_note: "",
+    chair_ip: "",
+    chair_user_agent: "",
+    chair_pdf_file_id: "",
+    chair_pdf_sha256: "",
+    request_file_id: requestFileId,
+    lock: "",
   };
   await log.append(row);
   const after = fundingOptions(user, stipendRows, [...earlierRows, row], submittedAt);
 
   // From here on the request exists; anything that goes wrong is noted on the row rather than failing the submission.
   const problems: string[] = [];
+  const patch: Partial<RequestRow> = {};
   try {
     await Promise.all([...receiptFiles.keys()].map((id) => files.moveFile(id, folderPath)));
   } catch (error) {
@@ -167,34 +213,47 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     submittedAt,
     sha256: packet.sha256,
     version: 1,
-    funding:
-      choices.length > 0
-        ? shares.map((share) => {
-            const { key, grade } = parseFundingChoice(share.funding);
-            return { choice: share.funding, label: fundingLabel(key, grade), claimedCents: share.claimedCents, stipend: after.stipends.find((s) => s.id === share.funding) ?? null };
-          })
-        : [],
+    funding: fundingEmailShares(after, request),
     linkBase: input.linkBase,
   };
   const attachment = { filename: pdfName, mimeType: "application/pdf", bytes: packet.bytes };
   let emailError: string | undefined;
+  let chairs: { sent: string[]; failed: string[] } | null = null;
+  if (toChair) {
+    const budget = event ? eventBudget(event, [...earlierRows, row], { requestId, claimedCents: t.reimbursementCents }) : null;
+    const sent = await sendChairRequests({ ...emailInput, chairs: routing.chairs, attachment, budget }, mailer);
+    chairs = sent;
+    if (sent.error) {
+      emailError = sent.error;
+      console.error(`[submit] email to the ${request.event} chair failed for ${requestId}: ${sent.error}`);
+      problems.push(`Email to the chair (${sent.failed.join(", ")}) failed at submission: ${sent.error}`);
+      // Only who it reached, so the request page offers to send it to the rest at once.
+      patch.chair_sent_to = sent.sent.join(", ");
+      if (sent.sent.length === 0) patch.chair_sent_at = "";
+    }
+  }
   try {
-    if (config.sendPacketsTo === "ap") {
-      const ap = apSubmissionEmail(emailInput);
-      await mailer.send({ to: [config.apEmail], replyTo: session.email, subject: ap.subject, text: ap.text, attachments: [attachment] });
-      const copy = requesterCopyEmail(emailInput);
-      await mailer.send({ to: [session.email], subject: copy.subject, text: copy.text, attachments: [attachment] });
+    if (chairs) {
+      const mail = requesterSentToChairEmail(emailInput, chairs.sent, chairs.failed);
+      await mailer.send({ to: [session.email], subject: mail.subject, text: mail.text, attachments: [attachment] });
     } else {
-      const packet = requesterPacketEmail(emailInput);
-      await mailer.send({ to: [session.email], subject: packet.subject, text: packet.text, attachments: [attachment] });
+      await sendPacketOn(emailInput, attachment, mailer);
     }
   } catch (error) {
-    emailError = error instanceof Error ? error.message : String(error);
+    emailError ??= error instanceof Error ? error.message : String(error);
     console.error(`[submit] email failed for ${requestId}: ${emailError}`);
-    problems.push(`Email failed at submission: ${emailError}`);
+    problems.push(`Email failed at submission: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (problems.length > 0) await log.update(requestId, { notes: problems.join(" | ") }).catch(() => undefined);
+  if (problems.length > 0) await log.update(requestId, { ...patch, notes: problems.join(" | ") }).catch(() => undefined);
 
-  const result: SubmitResult = { requestId, pdfFileId: stored.id, sha256: packet.sha256, pageCount: packet.pageCount, funding: after, emailed: !emailError };
+  const result: SubmitResult = {
+    requestId,
+    pdfFileId: stored.id,
+    sha256: packet.sha256,
+    pageCount: packet.pageCount,
+    funding: after,
+    chair: chairs ? { event: request.event, sentTo: chairs.sent, notReached: chairs.failed } : null,
+    emailed: !emailError,
+  };
   return emailError ? { ...result, emailError } : result;
 }

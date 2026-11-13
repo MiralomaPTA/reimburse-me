@@ -1,0 +1,5 @@
+name,chair_email,aliases,budget,active,note
+Fun Run,"funrun.chair@example.org, funrun.cochair@example.org","fun-run, jog-a-thon",1500,yes,"Two co-chairs: both are emailed, either can sign. Chairs don't need a Users row."
+Fall Festival,festival.chair@example.org,harvest festival,800,yes,"One chair, with a budget: the chair sees what's left before and after each request."
+Book Fair,volunteer@example.org,,,yes,"Chaired by the sample volunteer, so their own Book Fair requests skip the chair step. No budget set."
+Spring Gala,gala.chair@example.org,,2000,no,Inactive: not offered on the form until active is yes again.

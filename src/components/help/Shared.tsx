@@ -41,7 +41,42 @@ export function SignInSection({ shots, newcomers }: { shots: { signIn: StaticIma
   );
 }
 
-export function CheckAndSignSection({ shots, afterSigning }: { shots: { checkAndSign: StaticImageData; done: StaticImageData }; afterSigning?: string }) {
+/** Step 2's note on the event question, under "What was it for?". */
+export function EventQuestion() {
+  return (
+    <p>
+      If the spending was for a PTA event, like the Fun Run or the Fall Festival, choose it under <strong>Which PTA event was this for?</strong> The portal
+      picks it for you when your description names the event; change it if that&apos;s wrong. The event&apos;s chair then signs the form too, before it goes
+      on to the PTA. For classroom supplies and anything else, leave it on &quot;Not for an event&quot;.
+    </p>
+  );
+}
+
+/** What a request for an event does before it reaches the PTA, in the words that match where the portal sends packets. */
+function ChairStep() {
+  return (
+    <p>
+      <strong>For a PTA event,</strong> your request goes to the event&apos;s chair first, to sign the form&apos;s VP/Chairman line. <strong>My requests</strong>{" "}
+      shows it as &quot;Awaiting chair&quot; until they do.{" "}
+      {config.sendPacketsTo === "ap"
+        ? "Then it goes on to the accounts payable team by itself, and you get a copy of the co-signed form."
+        : "Then you get the co-signed form by email; that's the one to forward."}{" "}
+      If the chair hasn&apos;t signed after a day, open the request and tap <strong>Resend to the chair</strong>. If you chair the event yourself, this step is
+      skipped.
+    </p>
+  );
+}
+
+export function CheckAndSignSection({
+  shots,
+  afterSigning,
+  doneAlt,
+}: {
+  shots: { checkAndSign: StaticImageData; done: StaticImageData };
+  afterSigning?: string;
+  /** Describes the done screenshot when it isn't the plain "Sent to the PTA" page. */
+  doneAlt?: string;
+}) {
   const toAp = config.sendPacketsTo === "ap";
   return (
     <Section title="Step 4: Check it over and sign">
@@ -54,7 +89,7 @@ export function CheckAndSignSection({ shots, afterSigning }: { shots: { checkAnd
         To sign, type your full name, or tap <strong>Draw</strong> and sign with your finger. Tick the box to confirm the expenses are accurate, then tap{" "}
         <strong>Sign and submit</strong>. That&apos;s the form done.{afterSigning ? ` ${afterSigning}` : ""}
       </p>
-      <Shot src={shots.done} alt={toAp ? "The Sent to the PTA page" : "The Signed and ready to send page"} />
+      <Shot src={shots.done} alt={doneAlt ?? (toAp ? "The Sent to the PTA page" : "The Signed and ready to send page")} />
     </Section>
   );
 }
@@ -66,12 +101,13 @@ export function WhatHappensNext({ check, stipendNote = false, children }: { chec
     return (
       <Section title="Step 5: What happens next">
         <p>
-          Your signed request goes straight to the PTA&apos;s accounts payable team, and a copy lands in your inbox with the signed PDF attached.{" "}
+          Your signed request goes to the PTA&apos;s accounts payable team, and a copy lands in your inbox with the signed PDF attached.{" "}
           {stipendNote ? "The copy also spells out which stipend each line came from and what's left in it, so you have a record." : "Keep it for your records."}
         </p>
         <p>
           The team checks the request and pays by check, {check}. If anything is missing, they&apos;ll send it back with a note so you can fix it.
         </p>
+        <ChairStep />
         {children}
       </Section>
     );
@@ -79,9 +115,11 @@ export function WhatHappensNext({ check, stipendNote = false, children }: { chec
   return (
     <Section title="Step 5: Send it to the PTA, and get paid">
       <p>
-        Right away, you&apos;ll get an email with your signed request attached as a PDF. <strong>Forward that email, with the PDF still attached, to {ap}.</strong>{" "}
+        Right away (for a PTA event, once its chair has signed too; see below), you&apos;ll get an email with your signed request attached as a PDF.{" "}
+        <strong>Forward that email, with the PDF still attached, to {ap}.</strong>{" "}
         That&apos;s the PTA&apos;s accounts payable team. While the portal is new, this one forwarding step is how your request reaches them.
       </p>
+      <ChairStep />
       {stipendNote && <p>The email also spells out which stipend each line came from and what&apos;s left in it, so you have a record.</p>}
       <p>
         The team checks the request and pays by check, {check}. If anything is missing, they&apos;ll email you.
@@ -118,5 +156,19 @@ export function commonQuestions(exampleId: string) {
       ),
     },
     help: { q: "Who do I ask for help?", a: <>Email {ap} for anything about a payment.</> },
+    event: {
+      q: "It asks which PTA event this was for.",
+      a: "That's for spending on a PTA event, like the Fun Run. Pick the event and its chair signs the form before it goes to the PTA. For anything else, leave it on \"Not for an event\".",
+    },
+    chairSlow: {
+      q: "The event chair hasn't signed yet.",
+      a: (
+        <>
+          Open the request from <strong>My requests</strong>. It says who it was sent to and when, and once a day has passed you can tap{" "}
+          <strong>Resend to the chair</strong> to send them a fresh link. If the email didn&apos;t reach one of the chairs, you can send it to them
+          right away.
+        </>
+      ),
+    },
   };
 }

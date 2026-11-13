@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { config } from "@/server/config";
-import type { RequestLog, RequestRow } from "@/server/adapters/types";
+import { REQUEST_COLUMNS, type RequestLog, type RequestRow } from "@/server/adapters/types";
 
 /** Development stand-in for the request-log Sheet: a JSON array in .data/requests.json. */
 
@@ -9,9 +9,16 @@ function logPath() {
   return path.join(process.cwd(), config.localDataDir, "requests.json");
 }
 
+/** Rows written before a column existed read it as blank, the way the Sheet does. */
+function withEveryColumn(row: RequestRow): RequestRow {
+  const filled = { ...row } as Record<string, unknown>;
+  for (const col of REQUEST_COLUMNS) filled[col] ??= "";
+  return filled as unknown as RequestRow;
+}
+
 async function readAll(): Promise<RequestRow[]> {
   try {
-    return JSON.parse(await fs.readFile(logPath(), "utf8")) as RequestRow[];
+    return (JSON.parse(await fs.readFile(logPath(), "utf8")) as RequestRow[]).map(withEveryColumn);
   } catch {
     return [];
   }
@@ -54,5 +61,13 @@ export const localRequestLog: RequestLog = {
     if (index === -1) throw new Error(`Unknown request ${requestId}`);
     rows[index] = { ...rows[index], ...patch, updated_at: new Date().toISOString() };
     await writeAll(rows);
+  },
+  async updateIf(requestId, condition, patch) {
+    const rows = await readAll();
+    const index = rows.findIndex((r) => r.request_id === requestId);
+    if (index === -1 || !condition(rows[index])) return false;
+    rows[index] = { ...rows[index], ...patch, updated_at: new Date().toISOString() };
+    await writeAll(rows);
+    return true;
   },
 };

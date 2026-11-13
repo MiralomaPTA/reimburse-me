@@ -1,6 +1,7 @@
 import type { RequestStatus } from "@/server/adapters/types";
 
 const styles: Record<RequestStatus, string> = {
+  "Awaiting chair": "bg-violet-50 text-violet-800 border-violet-200",
   Submitted: "bg-blue-50 text-blue-800 border-blue-200",
   Approved: "bg-emerald-50 text-emerald-800 border-emerald-200",
   Returned: "bg-amber-50 text-amber-900 border-amber-200",
@@ -9,5 +10,5 @@ const styles: Record<RequestStatus, string> = {
 
 export function StatusBadge({ status }: { status: RequestStatus }) {
   const style = styles[status] ?? styles.Submitted;
-  return <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${style}`}>{status}</span>;
+  return <span className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${style}`}>{status}</span>;
 }

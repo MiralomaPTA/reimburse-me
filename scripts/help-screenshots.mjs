@@ -5,8 +5,11 @@
 // Starts `next dev` on its own port with the local adapters and a throwaway
 // data folder (.data/help-screenshots, seeded from examples/local-data), walks
 // through a request as a volunteer and as a teacher on a phone-sized browser,
-// and crops the pages the guides show. The done and request pages are captured
-// in both SEND_PACKETS_TO modes so the guide can show whichever is configured.
+// and crops the pages the guides show. The volunteer's request is for the Fall
+// Festival, so it goes to that event's chair, whose signing page is captured
+// for the chairs' guide. The done and request pages, and the chair's
+// "Signed" message, are captured in both SEND_PACKETS_TO modes so the guides
+// can show whichever is configured.
 //
 // Needs Playwright's Chromium (`npx playwright install chromium`). The "Check
 // and sign" page shows the preview PDF in a frame that headless Chromium
@@ -59,6 +62,9 @@ const personas = {
   },
 };
 
+/** Chairs the Fall Festival in examples/local-data/events.json. */
+const chair = { email: "festival.chair@example.org", name: "Maya Angelou", note: "Decorations for the main stage" };
+
 const receipts = {
   party: { store: "PARTY TOWN", addr: "2675 Geary Blvd, San Francisco", date: "10/18/2026  2:41 PM", rows: [["CREPE STREAMERS x6", "17.94"], ["LATEX BALLOONS 50PK", "12.99"], ["BALLOON RIBBON", "3.49"], ["TABLE COVERS x2", "4.40"]], sub: "38.82", tax: "3.36", total: "42.18" },
   poster: { store: "CORNER DRUG", addr: "1189 Portola Dr, San Francisco", date: "10/19/2026  9:12 AM", rows: [["POSTER BOARD WHITE x4", "9.96"], ["GLUE STICKS 4PK", "4.55"]], sub: "14.51", tax: "1.25", total: "15.76" },
@@ -76,20 +82,18 @@ const crop = {
   "receipt-line": 0,
   "totals": 0,
   "check-and-sign": -240,
-  "done-ap": 760,
-  "done-requester": 1000,
   "request-ap": -240,
   "request-requester": -240,
   "my-requests": 1080,
   "stipends": 0,
 };
-// The teacher's pages run longer: stipend lines on the done page, stipend bars above the list.
-const teacherCrop = { "done-ap": 1000, "done-requester": 1200, "my-requests": -330 };
+// The teacher's list runs longer: stipend bars above it.
+const teacherCrop = { "my-requests": -330 };
 
 async function seedData() {
   await fs.rm(path.join(ROOT, DATA_DIR), { recursive: true, force: true });
   await fs.mkdir(path.join(ROOT, DATA_DIR), { recursive: true });
-  for (const f of ["users.json", "stipends.json"]) {
+  for (const f of ["users.json", "stipends.json", "events.json"]) {
     await fs.copyFile(path.join(ROOT, "examples/local-data", f), path.join(ROOT, DATA_DIR, f));
   }
 }
@@ -148,6 +152,42 @@ async function latestLinkFor(email, since) {
   return null;
 }
 
+async function latestMailTo(email, subject) {
+  const files = (await fs.readdir(OUTBOX).catch(() => [])).filter((f) => f.endsWith(".json")).sort().reverse();
+  for (const f of files) {
+    const mail = JSON.parse(await fs.readFile(path.join(OUTBOX, f), "utf8"));
+    if (mail.to.includes(email) && subject.test(mail.subject)) return mail;
+  }
+  return null;
+}
+
+/** The Fall Festival chair opens their link, checks the request and signs it: the chairs' guide. The page and form only on the capturing pass; the "Signed" message in each mode. */
+async function chairShots(browser, mode, capture) {
+  let mail = null;
+  for (let i = 0; i < 20 && !mail; i++) {
+    mail = await latestMailTo(chair.email, /^Please sign/);
+    if (!mail) await sleep(500);
+  }
+  if (!mail) throw new Error("no signing email for " + chair.email);
+  const ctx = await newContext(browser);
+  const page = await ctx.newPage();
+  await page.goto(mail.text.match(/https?:\/\/\S+\/chair\/\S+/)[0]);
+  await page.waitForSelector("text=Please sign as");
+  await sleep(500);
+  // Down to the end of the request's details; the PDF frame below is blank in headless Chromium.
+  if (capture) await shotUntil(page, "chair", "page", page.locator("section.card", { hasText: "The request" }).first());
+  const card = page.locator("div.card", { has: page.locator("h2", { hasText: "Sign as" }) }).first();
+  await page.fill("#chairName", chair.name);
+  await page.fill("#chairNote", chair.note);
+  await card.locator("input[type=checkbox]").check();
+  if (capture) await shot(page, "chair", "sign", { element: card });
+  await card.locator("button", { hasText: /^Sign$/ }).click();
+  await page.waitForSelector("text=Signed. Thank you!", { timeout: 60000 });
+  await sleep(500);
+  await shot(page, "chair", `signed-${mode}`, { element: page.locator("div", { has: page.locator("h2", { hasText: "Signed. Thank you!" }) }).last() });
+  await ctx.close();
+}
+
 async function makeReceipt(browser, file, r) {
   const page = await browser.newPage({ viewport: { width: 520, height: 820 }, deviceScaleFactor: 2 });
   const rows = r.rows.map(([d, a]) => `<tr><td>${d}</td><td class="r">${a}</td></tr>`).join("");
@@ -190,6 +230,17 @@ async function shot(page, persona, name, { element, fullPage = true } = {}) {
   const m = await img.metadata();
   const height = keep === 0 ? m.height : keep < 0 ? m.height + keep : Math.min(keep, m.height);
   await img.extract({ left: 0, top: 0, width: m.width, height }).resize({ width: WIDTH }).png({ compressionLevel: 9 }).toFile(path.join(OUT, persona, `${name}.png`));
+}
+
+/** Full-page screenshot from the top down to just below `until`, scaled for the guide. */
+async function shotUntil(page, persona, name, until) {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const box = await until.boundingBox();
+  const dpr = await page.evaluate(() => window.devicePixelRatio);
+  const full = await page.screenshot({ fullPage: true });
+  const meta = await sharp(full).metadata();
+  const height = Math.min(meta.height, Math.round((box.y + box.height + 24) * dpr));
+  await sharp(full).extract({ left: 0, top: 0, width: meta.width, height }).resize({ width: WIDTH }).png({ compressionLevel: 9 }).toFile(path.join(OUT, persona, `${name}.png`));
 }
 
 /** Draws the first page of the preview PDF where the (blank) frame is. */
@@ -300,7 +351,8 @@ async function submitRequest(page, persona, p, { mode, capture, tmp }) {
   await page.click("text=Sign and submit");
   await page.waitForSelector("text=View request", { timeout: 60000 });
   await sleep(500);
-  await shot(page, persona, `done-${mode}`);
+  // Down to the buttons: how much text sits above them depends on the persona, the event and the packet mode.
+  await shotUntil(page, persona, `done-${mode}`, page.locator("button", { hasText: "Start another" }));
   await page.click("text=View request");
   await page.waitForSelector("text=Open signed PDF");
   await sleep(500);
@@ -324,6 +376,7 @@ async function pass(browser, mode, capture, tmp) {
       const page = await signIn(ctx, persona, p, capture);
       await submitRequest(page, persona, p, { mode, capture, tmp });
       await ctx.close();
+      if (persona === "volunteer") await chairShots(browser, mode, capture);
       console.log(`${mode}: ${persona} done`);
     }
   } finally {
@@ -332,7 +385,7 @@ async function pass(browser, mode, capture, tmp) {
 }
 
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "help-shots-"));
-for (const persona of Object.keys(personas)) await fs.mkdir(path.join(OUT, persona), { recursive: true });
+for (const persona of [...Object.keys(personas), "chair"]) await fs.mkdir(path.join(OUT, persona), { recursive: true });
 const browser = await chromium.launch();
 try {
   for (const [name, r] of Object.entries(receipts)) await makeReceipt(browser, path.join(tmp, `receipt-${name}.jpg`), r);
