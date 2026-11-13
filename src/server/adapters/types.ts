@@ -41,7 +41,14 @@ export interface FileStore {
   moveFile(id: string, folderPath: string[]): Promise<void>;
 }
 
-export type RequestStatus = "Submitted" | "Approved" | "Returned" | "Paid";
+/** "Awaiting chair": signed by the requester, waiting for the event chair's signature before it goes on to AP. */
+export type RequestStatus = "Awaiting chair" | "Submitted" | "Approved" | "Returned" | "Paid";
+
+/**
+ * Where a request stands with its event chair. Blank when it isn't for an
+ * event. The skips say why the VP/Chairman line stayed blank.
+ */
+export type ChairStep = "" | "Waiting" | "Signed" | "Sent back" | "Skipped: requester is a chair" | "Skipped: no chair listed" | "Timed out";
 
 /** One row in the request log. Keys double as the Sheet's header names. */
 export interface RequestRow {
@@ -79,6 +86,24 @@ export interface RequestRow {
    * when they had none to choose from. AP may correct it in the Sheet.
    */
   funding: string;
+  /** The PTA event the request is for, as named in the Events tab; blank when it isn't for one. */
+  event: string;
+  chair_step: ChairStep;
+  /** The chair addresses the signature request went to, comma-separated. */
+  chair_sent_to: string;
+  /** When the chair email last went out (at submit or on resend); blank if it never did. */
+  chair_sent_at: string;
+  /** The address that signed as chair, the name they signed under, and when. */
+  chair_signed_by: string;
+  chair_name: string;
+  chair_signed_at: string;
+  /** The chair's optional note to AP, sent with the co-signed packet. */
+  chair_note: string;
+  /** The co-signed packet: the requester-signed one with the chair's signature and a countersignature page. */
+  chair_pdf_file_id: string;
+  chair_pdf_sha256: string;
+  /** The request's content as JSON, saved beside the packet at every submission (`FY27-042.json`). */
+  request_file_id: string;
 }
 
 export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
@@ -109,6 +134,17 @@ export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
   "updated_at",
   "notes",
   "funding",
+  "event",
+  "chair_step",
+  "chair_sent_to",
+  "chair_sent_at",
+  "chair_signed_by",
+  "chair_name",
+  "chair_signed_at",
+  "chair_note",
+  "chair_pdf_file_id",
+  "chair_pdf_sha256",
+  "request_file_id",
 ];
 
 export interface RequestLog {
@@ -217,10 +253,40 @@ export interface StipendTable {
   list(): Promise<StipendRow[]>;
 }
 
+/**
+ * One row in the Events tab: a PTA event and its chair, kept current by the
+ * admin. A request for the event goes to the chair to sign the form's
+ * VP/Chairman line before it goes on to AP.
+ */
+export interface EventRow {
+  /** "Fun Run": shown in the form's event list and printed beside the VP/Chairman line. */
+  name: string;
+  /** One or more addresses, comma-separated; any one of them may sign. */
+  chair_email: string;
+  /** Optional other words for the event, comma-separated, used to guess it from a request's description. */
+  aliases: string;
+  /**
+   * Optional: this fiscal year's budget in dollars, e.g. "500". The chair sees
+   * what's left of it before and after the request they're signing. Shown,
+   * never enforced.
+   */
+  budget: string;
+  /** "no" hides the event from the form; blank or anything else keeps it. */
+  active: string;
+  note: string;
+}
+
+export const EVENT_COLUMNS: (keyof EventRow)[] = ["name", "chair_email", "aliases", "budget", "active", "note"];
+
+export interface EventTable {
+  list(): Promise<EventRow[]>;
+}
+
 export interface Adapters {
   files: FileStore;
   log: RequestLog;
   users: UserDirectory;
   stipends: StipendTable;
+  events: EventTable;
   mailer: Mailer;
 }

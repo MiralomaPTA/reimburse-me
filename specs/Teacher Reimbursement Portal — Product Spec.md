@@ -1,6 +1,6 @@
 # Teacher Reimbursement Portal — Product Spec
 
-Oct 28, 2026 · @Russ · Draft v0.4
+Nov 12, 2026 · @Russ · Draft v0.5
 
 ## Overview
 
@@ -8,7 +8,7 @@ A web form on miralomasf.com where a teacher uploads receipts, fills in a few de
 
 **Problem today:** teachers fill out a paper or emailed form, photocopy or photograph receipts, sign by hand, and get it to the treasurer. Packets arrive incomplete (missing receipts, budget line, or signature), the treasurer chases details, and there is no single place to see what is pending or paid.
 
-**What the portal does:** collects the request in a structured form, assembles a standard PDF with the receipts attached, captures the teacher's signature electronically, notifies the treasurer, and tracks the request through approval and payment. Each request also says which stipend it comes from, and teachers and staff can see how much of each stipend is left.
+**What the portal does:** collects the request in a structured form, assembles a standard PDF with the receipts attached, captures the teacher's signature electronically, gets the event chair's signature when the money was spent on a PTA event, notifies the treasurer, and tracks the request through approval and payment. Each request also says which stipend it comes from, and teachers and staff can see how much of each stipend is left.
 
 ## Goals and non-goals
 
@@ -35,9 +35,10 @@ A web form on miralomasf.com where a teacher uploads receipts, fills in a few de
 | Teacher | Classroom teachers, each approved once by email address; `role` = teacher in the Users tab | Submit requests, choose which stipend each comes from, sign, see their own requests and their stipends |
 | Staff or volunteer | Other staff and approved volunteers, approved the same way; `role` = requester | Submit requests, sign, see their own requests. Staff with their own stipend also choose whether each request comes from it |
 | AP team | Everyone on ap@miralomasf.com, including the treasurer | Approve new requester addresses and mark each as teacher or staff, receive every signed packet, review, assign the budget category, return with a note, mark paid with check number. The treasurer keeps the Stipends tab's amounts current each fiscal year |
-| Admin | PTA tech volunteer | Maintain the Users and Stipends tabs of the request-log Sheet: pre-approve addresses, set roles, grades and stipends, fix mistakes |
+| Event chair | The chair of a PTA event, listed in the Events tab; no Users row or sign-in | Opens a request for their event from an emailed link, sees what's left of the event's budget, and signs the form's VP/Chairman line |
+| Admin | PTA tech volunteer | Maintain the Users, Stipends and Events tabs of the request-log Sheet: pre-approve addresses, set roles, grades and stipends, list events and their chairs, fix mistakes |
 
-Only the requester signs; no second signature is collected in the portal. The form's *Signature of VP/Chairman for Program/Event* line and the *For PTA treasurer use* block stay blank for AP to handle outside the portal.
+The requester signs every request. A request for a PTA event is also signed by that event's chair, on the form's *Signature of VP/Chairman for Program/Event* line, before it goes on to AP; see *Event Chair Signature — Spec* (same folder). For any other request, and when the requester chairs the event, that line stays blank. The *For PTA treasurer use* block always stays blank for AP to handle outside the portal.
 
 Sign-in uses one-time links emailed to the requester: no passwords and no Google account. Links expire after 15 minutes and work once. Who may sign in is the *Users* tab of the request-log Sheet:
 
@@ -53,13 +54,13 @@ The reply to a sign-in request says whether a link was sent or the address was q
 
 &#91;embedded content: request flow · teacher and treasurer, 1 decision\]
 
-The teacher's whole job ends at signing; the PDF is built and sent automatically. A returned request reopens at the details step with the AP team's note, and the teacher re-signs.
+The teacher's whole job ends at signing; the PDF is built and sent automatically. A request for a PTA event goes to the event's chair to sign first (not shown in the diagram). A returned request reopens at the details step with the AP team's note, and the teacher re-signs.
 
 ## Functional requirements
 
 ### 1. Request form
 
-Fields map one-to-one to the PTA's *Payment Authorization / Request for Reimbursement* form (Revised July 2022), which is a fillable PDF. The portal fills the requester's half through the form's own fields; the *Signature of VP/Chairman* line and the *For PTA treasurer use* block are left blank for AP to complete outside the portal. The *Template field* column is the field name in the app's copy of the form (see *PDF generation*).
+Fields map one-to-one to the PTA's *Payment Authorization / Request for Reimbursement* form (Revised July 2022), which is a fillable PDF. The portal fills the requester's half through the form's own fields. The *Signature of VP/Chairman* line is signed by the event's chair for a request for a PTA event and left blank otherwise; the *For PTA treasurer use* block is left blank for AP to complete outside the portal. The *Template field* column is the field name in the app's copy of the form (see *PDF generation*).
 
 | Form field | Template field | Portal input | Notes |
 | --- | --- | --- | --- |
@@ -70,6 +71,7 @@ Fields map one-to-one to the PTA's *Payment Authorization / Request for Reimburs
 | Telephone | phone_area_code, phone_number | Text, required | |
 | Email | email | Prefilled | From the sign-in link |
 | Expenditure was for | — (drawn; the template's purpose field stays empty) | Text | Purpose, e.g. "2nd grade art supplies" |
+| PTA event | — (drawn) | Choice: the active events in the Events tab, or "Not for an event" | Not a form field. Pre-selected when the description names one event. Printed in small type at the right end of the VP/Chairman line; its chair signs that line. Not asked when the tab lists no events |
 | List Expenditures | — (drawn by the app; the template's item and total fields stay empty) | Repeating line items: description, amount, receipt, paid from | One line item per receipt. Description up to 200 characters; it wraps onto as many lines as it needs on the form. Amount may be less than the receipt total (partial reimbursement is allowed). Any number of lines → see *PDF generation* |
 | Paid from | — | Choice per line item, required when shown | Which stipend the line comes from. Not on the form; recorded in the Sheet and in both emails. A new line starts with the previous line's choice. The choices depend on the requester; see *Stipends* |
 | TOTAL EXPENSE | — (drawn) | Calculated | Sum of line items |
@@ -104,7 +106,7 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 - *Expenditure was for* and *List Expenditures* start at the left margin like the payee lines, and *List Expenditures* has a line of its own, so the rows below it run from the left margin to the amount column at the right edge. One row per item, with the description wrapped over as many lines as it needs (up to 200 characters) and a single amount. At least four rows are always drawn, as on the paper form. The check-delivery note sits to the right of the purpose line as before. When the rows run past the bottom of the page they continue on further form pages headed "(continued)", the totals stay together on one page, and the signature and treasurer block follows directly below them, on a new page if it has to.
 - Receipt page labels shorten a long description with an ellipsis rather than dropping the line number or amount.
 - Following pages: each receipt, labeled with its line number and amount.
-- Teacher's signature and date go in the signature fields. Fields the portal never fills: vp_chair_signature, treasurer_check_number, treasurer_category, treasurer_amount_advanced, treasurer_expenses, treasurer_amount_owed_or_due, president_signature, president_signature_date, minutes_approval_date, secretary_signature. The three treasurer checkboxes are printed, not fields.
+- Teacher's signature and date go in the signature fields. The event chair's signature is stamped on the vp_chair_signature line later, on a copy of the packet, at the position recorded when the packet was built (see *Event Chair Signature — Spec*). Fields the portal never fills: treasurer_check_number, treasurer_category, treasurer_amount_advanced, treasurer_expenses, treasurer_amount_owed_or_due, president_signature, president_signature_date, minutes_approval_date, secretary_signature. The three treasurer checkboxes are printed, not fields.
 - Request ID and submission timestamp in the footer of every page; an audit page at the end, which says how many pages the form took.
 - If the PTA issues a new form revision, the field names and positions must be re-checked and the template replaced by a developer; it is not an admin setting.
 
@@ -119,7 +121,7 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 
 - AP dashboard: list of requests with status, amount, category, age; filter by status.
 - AP assigns the budget category at review. It lives in the Sheet and the CSV export, not on the teacher's form.
-- Statuses: Draft → Submitted → Approved / Returned → Check written → Paid. *Check written* covers the gap while a check waits for the PTA's required second signature; the teacher is emailed only at Paid, when it has gone out.
+- Statuses: Draft → (Awaiting chair, for a request for a PTA event) → Submitted → Approved / Returned → Check written → Paid. *Check written* covers the gap while a check waits for the PTA's required second signature; the teacher is emailed only at Paid, when it has gone out.
 - Returned requests go back to the teacher with a note; they edit and re-sign.
 - AP records the check number and date when the check is written, and marks it Paid once both signatures are on it and it has gone out.
 - The request-log Sheet may be edited directly. The app finds rows by request ID and columns by header name, so sorting, filtering and adding columns are safe; renaming a header breaks it. Status changes should still be made in the dashboard, because that is what sends the teacher's email and writes the audit trail; a status typed into the Sheet sends nothing.
@@ -128,6 +130,7 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 ### 6. Notifications
 
 - Every completed request: signed PDF emailed to ap@miralomasf.com, with a copy to the requester. Both say which stipend the request comes from and where that stipend stands after it, e.g. "Paid from: Grade 2 stipend (shared by grade 2 teachers): $1,200.00, $529.15 claimed including this request, $670.85 left".
+- A request for a PTA event goes first to the event's chairs, each with their own signing link; the requester's copy says it's with the chair. Once a chair signs, the co-signed packet goes on as above and the chair gets a copy. See *Event Chair Signature — Spec*.
 - Requester emailed when a request is returned (with the note) and when it is paid (check number and date).
 - Weekly digest to ap@miralomasf.com of anything not marked paid after 7 days.
 
@@ -179,7 +182,7 @@ Recommendation: a small custom web app (option C) that keeps all data in the PTA
 
 The app holds no data of its own: receipts and signed PDFs go to a Workspace Drive folder (the backup and the archive are the same place), each request is a row in a Sheet, and sign-in links and packets go out through Gmail. The fs@miralomasf.com account owns the folder and Sheet and sends all email.
 
-**The Sheet.** Three tabs: *Requests* (one row per request), *Users* (who may sign in, their role, grade and stipend) and *Stipends* (the year's amounts). The app writes each header row on first use and creates a tab that is missing. When the app gains a column, it adds the header to the end of the existing row, widening the tab first if needed, so the Sheet never needs rebuilding.
+**The Sheet.** Four tabs: *Requests* (one row per request), *Users* (who may sign in, their role, grade and stipend), *Stipends* (the year's amounts) and *Events* (each PTA event, its chairs and optional budget). The app writes each header row on first use and creates a tab that is missing. When the app gains a column, it adds the header to the end of the existing row, widening the tab first if needed, so the Sheet never needs rebuilding.
 
 **Workspace access.** The PTA is on Google Workspace for Nonprofits. The app acts as fs@miralomasf.com through a service account with domain-wide delegation for the Drive, Sheets and Gmail scopes, which the super admin authorizes once in the Admin console. Service accounts no longer have Drive storage of their own, so everything is written into fs@'s Drive.
 
@@ -191,7 +194,7 @@ The app holds no data of its own: receipts and signed PDFs go to a Workspace Dri
 
 ## Data, privacy and retention
 
-- **What we store:** name, PTA position, mailing address (only if the check is mailed), phone, email, purchase details, receipt images, signed PDFs, audit log, each requester's role, grade and stipend amount, and which stipend each request comes from. No bank or card numbers; payment stays by check.
+- **What we store:** name, PTA position, mailing address (only if the check is mailed), phone, email, purchase details, receipt images, signed PDFs, audit log, each requester's role, grade and stipend amount, which stipend each request comes from, and for event requests the event, the chair addresses asked, and who signed as chair and when. No bank or card numbers; payment stays by check.
 - **Where:** a Google Workspace Drive folder and Sheet owned by fs@miralomasf.com, shared only with the AP team and the admin. The app keeps nothing after it writes there.
 - **Receipts can contain personal data** (partial card numbers, home addresses on online orders). Show a tip to crop or cover these before upload.
 - **Access:** requesters see only their own requests in the app; files are never public links. A shared stipend shows only the total claimed by everyone sharing it, never who claimed what.
@@ -201,8 +204,9 @@ The app holds no data of its own: receipts and signed PDFs go to a Workspace Dri
 
 1. **Phase 0 — Setup.** The Workspace super admin creates a Google Cloud project under the miralomasf.com organization, enables the Drive, Sheets and Gmail APIs, creates the service account and authorizes its domain-wide delegation. Under fs@miralomasf.com: create the Drive folder and the request-log Sheet with Requests, Users and Stipends tabs (the app creates any that are missing), have the treasurer enter the year's stipend amounts, create the Vercel project, and point the hostname at it. Create the PTA GitHub organization.
 2. **Phase 1 — MVP.** Sign in, form matching the PTA form, receipt upload with camera, PDF packet, built-in signature, email to ap@miralomasf.com, row in the Sheet, and the stipend choice with what's left in each stipend. Pilot with 3–5 teachers on the live app.
-3. **Phase 2 — AP workflow.** Return with a note, mark paid with check number, paid/returned emails to teachers, weekly digest. Detailed in *Phase 2 — AP Workflow Spec* (same folder).
-4. **Phase 3 — Nice to have.** Receipt OCR to prefill line items.
+3. **Phase 1b — Event chair signature.** The Events tab, the event question on the form, and the chair's signature on the VP/Chairman line, with the event's budget shown to the chair. Detailed in *Event Chair Signature — Spec* (same folder). Its first step is built.
+4. **Phase 2 — AP workflow.** Return with a note, mark paid with check number, paid/returned emails to teachers, weekly digest. Detailed in *Phase 2 — AP Workflow Spec* (same folder).
+5. **Phase 3 — Nice to have.** Receipt OCR to prefill line items.
 
 Success measures: share of requests submitted online, requests returned for missing info, and days from submission to payment.
 
@@ -211,7 +215,8 @@ Success measures: share of requests submitted online, requests returned for miss
 | Topic | Decision |
 | --- | --- |
 | Form | The PTA's Payment Authorization / Request for Reimbursement form, Revised July 2022 (fillable PDF); the app fills a copy with renamed fields |
-| Signatures | Requester only; the VP/Chairman line and the treasurer block stay blank |
+| Signatures | Requester on every request; the event's chair too, on the VP/Chairman line, for a request for a PTA event. The treasurer block stays blank |
+| Events | An Events tab lists each PTA event, its chairs (comma-separated for co-chairs, any one signs), aliases and an optional budget. Chairs need no Users row |
 | Signing method | Built-in electronic signature; no DocuSign or other paid service |
 | Routing | Every completed request goes to ap@miralomasf.com (includes the treasurer) |
 | Payment | Paper check, unchanged |
@@ -252,7 +257,6 @@ Each has a proposed default. The build follows the default unless it is changed 
 | --- | --- |
 | Hostname | reimburse.miralomasf.com. Who can add the DNS record? |
 | Admin screens | None in the MVP; the Users tab in the Sheet is the allow-list, the teacher list and the AP list, and the Stipends tab holds the amounts |
-| VP/Chairman signature line | Left blank by the portal. Does AP collect it on paper afterward, or skip it? |
 | Approved step | Optional; AP can go from Submitted straight to Paid. No email to the teacher on Approved |
 | Resubmission after Return | Keeps the request ID, produces a new PDF version, sends a fresh email to AP; the earlier signed PDF stays in Drive |
 | Drafts | Built: form state lives in the browser until signing; receipts upload to a pending folder as they are added; signed packets are kept forever. Not built yet: deleting pending uploads with no signed packet after 30 days |
@@ -262,6 +266,12 @@ Each has a proposed default. The build follows the default unless it is changed 
 | Weekly digest | Monday morning; lists anything not Paid seven days after submission |
 | Request ID | Sequential per PTA fiscal year, e.g. FY27-042 |
 | Signatures | Drawn or typed fresh each time; never stored for reuse |
+
+## Changes since v0.4
+
+- Event chairs: a request for a PTA event goes to the event's chair to sign the form's VP/Chairman line before it goes to AP, as *Awaiting chair*. New *Events* tab (name, chairs, aliases, optional budget, active). The form asks which event a request was for and guesses it from the description. The chair signs from an emailed link with no account, and sees what's left of the event's budget. The signature goes on a co-signed copy of the packet; the requester's file is never changed. A requester who chairs the event skips the step. Detailed in the new *Event Chair Signature — Spec*.
+- Every request's content is now saved as JSON beside its PDF (`FY27-042.json`), which Phase 2's resubmission will also use.
+- Open questions: the VP/Chairman line is answered for event requests and removed.
 
 ## Changes since v0.3
 

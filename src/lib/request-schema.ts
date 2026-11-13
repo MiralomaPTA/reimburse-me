@@ -34,6 +34,8 @@ export const requestInputSchema = z
     phone: z.string().trim().min(7, "Enter a phone number").max(30),
     checkDelivery: z.enum(["pickup", "mailbox"]),
     purpose: z.string().trim().min(1, "Say what the expenditure was for").max(60),
+    /** The PTA event it was for, by its name in the Events tab; "" when it wasn't for one. Its chair signs the VP/Chairman line. */
+    event: z.string().trim().max(80).default(""),
     items: z.array(lineItemSchema).min(1, "Add at least one receipt").max(40),
     donationCents: z.number().int().min(0).default(0),
   })

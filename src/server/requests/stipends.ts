@@ -2,7 +2,8 @@ import { getAdapters } from "@/server/adapters";
 import type { RequestRow, StipendRow, UserRecord } from "@/server/adapters/types";
 import { fiscalYearLabel, requestIdPrefix } from "@/lib/fiscal-year";
 import { moneyPlain, parseMoney } from "@/lib/money";
-import type { FundingKey } from "@/lib/request-schema";
+import { fundingSplit, type FundingKey, type RequestInput } from "@/lib/request-schema";
+import type { FundingShareInput } from "@/server/email/templates";
 
 /**
  * Stipends: the pots of PTA money a requester can say a reimbursement comes
@@ -261,4 +262,17 @@ export async function currentFunding(user: UserRecord | null): Promise<FundingOp
   const { stipends, log } = await getAdapters();
   const [stipendRows, requests] = await Promise.all([stipends.list(), log.list()]);
   return fundingOptions(user, stipendRows, requests, new Date());
+}
+
+/**
+ * Each funding choice of `request`, with where its stipend stands once the
+ * request is counted (`after`), for the emails. Empty when the requester had
+ * no stipend to choose from.
+ */
+export function fundingEmailShares(after: FundingOptions, request: Pick<RequestInput, "items" | "donationCents">): FundingShareInput[] {
+  if (after.stipends.length === 0) return [];
+  return fundingSplit(request).map((share) => {
+    const { key, grade } = parseFundingChoice(share.funding);
+    return { choice: share.funding, label: fundingLabel(key, grade), claimedCents: share.claimedCents, stipend: after.stipends.find((s) => s.id === share.funding) ?? null };
+  });
 }

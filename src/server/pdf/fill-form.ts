@@ -30,12 +30,22 @@ export interface FillOptions {
   signature: PacketSignature | null;
 }
 
+/** A rectangle in the template's own page coordinates. */
+export interface TemplateRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /**
  * Fills the payee details and signature on page 1 of the template and
  * flattens the form. The purpose, expenditure and total fields stay empty:
  * that part of the page is redrawn by form-pages.ts so the list can grow.
+ * Returns where the VP/Chairman signature field was, since flattening removes
+ * it and the event chair signs there later.
  */
-export async function fillForm({ doc, request, requesterEmail, signedAt, signature }: FillOptions): Promise<void> {
+export async function fillForm({ doc, request, requesterEmail, signedAt, signature }: FillOptions): Promise<{ chairField: TemplateRect }> {
   const helv = await doc.embedFont(StandardFonts.Helvetica);
   const oblique = await doc.embedFont(StandardFonts.HelveticaOblique);
   const form = doc.getForm();
@@ -77,5 +87,7 @@ export async function fillForm({ doc, request, requesterEmail, signedAt, signatu
     });
   }
 
+  const chairField = text(FIELDS.vpChairSignature).acroField.getWidgets()[0].getRectangle();
   form.flatten({ updateFieldAppearances: false });
+  return { chairField };
 }

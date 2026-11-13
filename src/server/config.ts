@@ -59,6 +59,10 @@ export const config = {
   sessionDays: 30,
   magicLinkMinutes: 15,
   approvalLinkDays: 7,
+  /** How long the link in an event chair's signature request works. */
+  chairLinkDays: 14,
+  /** The requester's "Resend to the chair" works once in this many hours. */
+  chairResendHours: 24,
   /** Durable per-address gap between sign-in emails. */
   linkCooldownSeconds: 60,
   /** New pending access requests allowed per 24 hours; bounds approver inbox and Sheet growth. */
@@ -93,5 +97,6 @@ export function googleConfig() {
     sheetName: env.GOOGLE_SHEET_NAME ?? "Requests",
     usersSheetName: env.GOOGLE_USERS_SHEET_NAME ?? "Users",
     stipendsSheetName: env.GOOGLE_STIPENDS_SHEET_NAME ?? "Stipends",
+    eventsSheetName: env.GOOGLE_EVENTS_SHEET_NAME ?? "Events",
   };
 }

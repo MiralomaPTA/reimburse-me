@@ -16,6 +16,11 @@ const guides = [
     title: "I'm a volunteer or staff member",
     blurb: "Photograph your receipts, fill in a few details and sign on your phone. About five minutes, start to finish.",
   },
+  {
+    href: "/help/chairs",
+    title: "I chair a PTA event",
+    blurb: "Got an email asking you to sign someone's reimbursement? What to check, what your event's budget shows, and how to sign.",
+  },
 ];
 
 export default function HelpPage() {

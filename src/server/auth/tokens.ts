@@ -19,8 +19,8 @@ export interface VerifiedLink {
   issuedAt: Date;
 }
 
-async function signLink(purpose: string, email: string, expiresIn: string): Promise<string> {
-  return new SignJWT({ purpose })
+async function signLink(purpose: string, email: string, expiresIn: string, claims: Record<string, string | number> = {}): Promise<string> {
+  return new SignJWT({ ...claims, purpose })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(email)
     .setJti(crypto.randomUUID())
@@ -46,6 +46,27 @@ export const verifyMagicToken = (token: string): Promise<VerifiedLink | null> =>
 /** Emailed to the approver; authorizes approving or denying one address. */
 export const createApprovalToken = (email: string): Promise<string> => signLink("approval", email, `${config.approvalLinkDays}d`);
 export const verifyApprovalToken = (token: string): Promise<VerifiedLink | null> => verifyLink(token, "approval");
+
+/** The claims of an event chair's signing link. */
+export interface ChairLink extends VerifiedLink {
+  requestId: string;
+  version: number;
+}
+
+/** Emailed to an event chair; lets that address sign or look at one version of one request, and nothing else. */
+export const createChairToken = (email: string, requestId: string, version: number): Promise<string> =>
+  signLink("chair", email, `${config.chairLinkDays}d`, { rid: requestId, ver: version });
+
+export async function verifyChairToken(token: string): Promise<ChairLink | null> {
+  try {
+    const { payload } = await jwtVerify(token, signingKey());
+    if (payload.purpose !== "chair" || typeof payload.sub !== "string" || typeof payload.iat !== "number") return null;
+    if (typeof payload.rid !== "string" || typeof payload.ver !== "number") return null;
+    return { email: payload.sub, issuedAt: new Date(payload.iat * 1000), requestId: payload.rid, version: payload.ver };
+  } catch {
+    return null;
+  }
+}
 
 /** Long-lived session token stored in the cookie after a link is used. */
 export async function createSessionToken(session: Session): Promise<string> {

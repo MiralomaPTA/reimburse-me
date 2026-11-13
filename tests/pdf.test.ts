@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { buildPacket } from "@/server/pdf/build-packet";
+import { countersignPacket } from "@/server/pdf/countersign";
 import { CONSENT_TEXT, type ReceiptFile } from "@/server/pdf/types";
 import { winAnsi } from "@/server/pdf/text";
 import type { RequestInput } from "@/lib/request-schema";
@@ -27,6 +28,7 @@ function request(itemCount: number, receiptsPerItem: (i: number) => string[]): R
     phone: "(415) 555-1234",
     checkDelivery: "pickup",
     purpose: "2nd grade art supplies",
+    event: "",
     donationCents: 500,
     items: Array.from({ length: itemCount }, (_, i) => ({
       description: `Item ${i + 1} supplies`,
@@ -100,5 +102,58 @@ describe("buildPacket", () => {
       audit: { requesterEmail: "jane@example.org", signInMethod: "One-time email link", signedInAt: new Date(), ip: "", userAgent: "", consentText: CONSENT_TEXT },
     });
     expect(packet.pageCount).toBe(3);
+  }, 30_000);
+
+  it("records where the VP/Chairman line landed, on the last form page", async () => {
+    const files = new Map([["r0", await jpegReceipt("r0", 300, 300)]]);
+    const short = await buildPacket({ requestId: "PREVIEW", submittedAt: new Date(), request: request(1, () => ["r0"]), requesterEmail: "jane@example.org", receiptFiles: files, signature: null, audit: null });
+    expect(short.chairLine).toMatchObject({ page: 0, x: expect.closeTo(238.08, 1), width: expect.closeTo(300, 1) });
+    const long = request(40, () => ["r0"]);
+    long.items.forEach((item) => (item.description = "a long description of what was bought and why it was needed ".repeat(3).trim()));
+    const many = await buildPacket({ requestId: "PREVIEW", submittedAt: new Date(), request: long, requesterEmail: "jane@example.org", receiptFiles: files, signature: null, audit: null });
+    expect(many.chairLine.page).toBeGreaterThan(0);
+    expect(many.chairLine.page).toBe(many.pageCount - 41); // the form pages, then 40 receipt pages
+  }, 60_000);
+});
+
+describe("countersignPacket", () => {
+  it("adds the chair's signature and a countersignature page to a copy, leaving the requester's file as it was", async () => {
+    const files = new Map([["r0", await jpegReceipt("r0", 300, 300)]]);
+    const input = { ...request(1, () => ["r0"]), event: "Fun Run" };
+    const signed = await buildPacket({
+      requestId: "FY27-042",
+      submittedAt: new Date("2026-11-12T20:00:00Z"),
+      request: input,
+      requesterEmail: "jane@example.org",
+      receiptFiles: files,
+      signature: { type: "typed", name: "Jane Doe" },
+      audit: { requesterEmail: "jane@example.org", signInMethod: "One-time email link", signedInAt: new Date(), ip: "", userAgent: "", consentText: CONSENT_TEXT },
+    });
+    const original = signed.bytes.slice();
+    const base = {
+      packet: signed.bytes,
+      requesterSha256: signed.sha256,
+      requestId: "FY27-042",
+      chairLine: signed.chairLine,
+      event: "Fun Run",
+      payeeName: "Jane Doe",
+      name: "Lillie Coit",
+      signedAt: new Date("2026-11-14T18:00:00Z"),
+      chairEmail: "lillie@example.org",
+      linkSentAt: new Date("2026-11-12T20:00:00Z"),
+      ip: "127.0.0.1",
+      userAgent: "vitest",
+      consentText: "I agree",
+      note: "Water station",
+    };
+    const typed = await countersignPacket({ ...base, signature: { type: "typed", name: "Lillie Coit" } });
+    expect(typed.pageCount).toBe(signed.pageCount + 1);
+    expect(typed.sha256).not.toBe(signed.sha256);
+    expect(signed.bytes).toEqual(original);
+    expect((await PDFDocument.load(typed.bytes)).getPageCount()).toBe(signed.pageCount + 1);
+
+    const png = await sharp({ create: { width: 400, height: 120, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
+    const drawn = await countersignPacket({ ...base, signature: { type: "drawn", png: new Uint8Array(png) } });
+    expect(drawn.pageCount).toBe(signed.pageCount + 1);
   }, 30_000);
 });

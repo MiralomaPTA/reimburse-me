@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { config } from "@/server/config";
 import { MailtoLink } from "@/components/MailtoLink";
 import { Guide, Questions, Section, Shot } from "@/components/help/Guide";
-import { CheckAndSignSection, SignInSection, WhatHappensNext, commonQuestions } from "@/components/help/Shared";
+import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions } from "@/components/help/Shared";
 import signIn from "@/images/help/volunteer/sign-in.png";
 import checkEmail from "@/images/help/volunteer/check-email.png";
 import almostThere from "@/images/help/volunteer/almost-there.png";
@@ -45,7 +45,7 @@ export default function VolunteerGuidePage() {
             receipt can be two or three photos.
           </li>
           <li>
-            <strong>What it was for</strong>, in a few words, like &quot;Fall Festival decorations&quot;.
+            <strong>What it was for</strong>, in a few words, like &quot;Fall Festival decorations&quot;, and which PTA event, if it was for one.
           </li>
           <li>
             <strong>How you&apos;d like your check:</strong> left in a staff mailbox at school, or picked up from the PTA.
@@ -64,7 +64,8 @@ export default function VolunteerGuidePage() {
         </p>
         <Shot src={aboutYou} alt="The About you section, filled in with a name and phone number, the PTA position left blank, and the check choice" wide />
         <p>Next, say what the spending was for in a few words. This is the headline the PTA sees for the whole request, so keep one request to one purpose.</p>
-        <Shot src={whatFor} alt="The What was it for section" wide />
+        <EventQuestion />
+        <Shot src={whatFor} alt="The What was it for section, with the Fall Festival picked from the description and a note that its chair signs next" wide />
         <p>The portal remembers these details from your last request, so next time this part is already filled in.</p>
       </Section>
 
@@ -87,15 +88,15 @@ export default function VolunteerGuidePage() {
         <p>Your work is saved on your phone as you go, so it&apos;s fine to stop and come back later.</p>
       </Section>
 
-      <CheckAndSignSection shots={{ checkAndSign, done: toAp ? doneAp : doneRequester }} />
+      <CheckAndSignSection shots={{ checkAndSign, done: toAp ? doneAp : doneRequester }} doneAlt="The Sent to the Fall Festival chair page" />
 
       <WhatHappensNext check="picked up from the PTA or left in the staff mailbox you chose">
         <p>
-          You can see every request you&apos;ve sent under <strong>My requests</strong>, with its status: Submitted, Approved, Returned or Paid.
+          You can see every request you&apos;ve sent under <strong>My requests</strong>, with its status: Awaiting chair, Submitted, Approved, Returned or Paid.
         </p>
         <Shot src={myRequests} alt="The My requests page, listing one request with its amount and status" />
         <p>Tap a request to see its details and open the signed PDF again at any time.</p>
-        <Shot src={toAp ? requestAp : requestRequester} alt="A request's details page, with an Open signed PDF button" />
+        <Shot src={toAp ? requestAp : requestRequester} alt="A request's details page, waiting for the Fall Festival chair to sign, with an Open signed PDF button" />
       </WhatHappensNext>
 
       <Section title="Common questions">
@@ -106,6 +107,8 @@ export default function VolunteerGuidePage() {
             q.mistake,
             q.lostReceipt,
             q.computer,
+            q.event,
+            q.chairSlow,
             {
               q: "Each line asks me which stipend paid for it.",
               a: "That shows up when the PTA has given you a yearly stipend of your own. Choose it for purchases that should come out of it, and \"Not from a stipend\" for anything else.",

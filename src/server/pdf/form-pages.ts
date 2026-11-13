@@ -1,7 +1,10 @@
 import { PDFDocument, StandardFonts, rgb, type PDFEmbeddedPage, type PDFFont, type PDFPage } from "pdf-lib";
 import { moneyPlain } from "@/lib/money";
 import { CHECK_DELIVERY_LABEL, totals, type RequestInput } from "@/lib/request-schema";
+import { drawEventLabel } from "@/server/pdf/chair-line";
+import type { TemplateRect } from "@/server/pdf/fill-form";
 import { fitFontSize, winAnsi, wrap } from "@/server/pdf/text";
+import type { LineBox } from "@/server/pdf/types";
 
 /**
  * The PTA form, re-flowed. Two regions of the official page are reused pixel
@@ -167,20 +170,37 @@ class FormWriter {
     this.top = top - SLOT;
   }
 
-  /** The signature lines and treasurer block, directly below the totals or on a fresh page. */
-  signatureBlock(block: PDFEmbeddedPage) {
+  /**
+   * The signature lines and treasurer block, directly below the totals or on a
+   * fresh page. Returns where `field` (in template coordinates) landed.
+   */
+  signatureBlock(block: PDFEmbeddedPage, field: TemplateRect): LineBox {
     this.ensure(SIGNATURE_GAP + SIGNATURE_HEIGHT, SIGNATURE_FLOOR);
     const y = this.top - SIGNATURE_GAP - SIGNATURE_HEIGHT;
     this.page.drawPage(block, { x: SIGNATURE_BOX.left, y });
     this.top = y;
+    return {
+      page: this.doc.getPages().indexOf(this.page),
+      x: field.x - SIGNATURE_BOX.left,
+      y: y + field.y - SIGNATURE_BOX.bottom,
+      width: field.width,
+      height: field.height,
+    };
   }
+}
+
+export interface FormPages {
+  /** How many pages the form took. */
+  pageCount: number;
+  /** Where the VP/Chairman signature line is. */
+  chairLine: LineBox;
 }
 
 /**
  * Appends the form pages to the packet from the filled, flattened template.
- * Returns how many pages the form took.
+ * `chairField` is where the template's VP/Chairman field was before flattening.
  */
-export async function appendFormPages(doc: PDFDocument, template: PDFDocument, request: RequestInput): Promise<number> {
+export async function appendFormPages(doc: PDFDocument, template: PDFDocument, request: RequestInput, chairField: TemplateRect): Promise<FormPages> {
   const fonts: Fonts = {
     helv: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
@@ -196,9 +216,11 @@ export async function appendFormPages(doc: PDFDocument, template: PDFDocument, r
   request.items.forEach((item) => w.slot(item.description, item.amountCents));
   for (let i = request.items.length; i < MIN_SLOTS; i++) w.slot(null, null);
   w.totals();
-  w.signatureBlock(signature);
+  const chairLine = w.signatureBlock(signature, chairField);
+  // Says whose signature belongs on the line, from the moment the requester signs.
+  if (request.event) drawEventLabel(w.page, fonts.helv, chairLine, request.event);
   // The form's revision note, kept in the footer line since the signature block no longer sits at its printed position.
   const note = "Revised July 2022";
   firstPage.drawText(note, { x: (PAGE_WIDTH - fonts.oblique.widthOfTextAtSize(note, 7.5)) / 2, y: 16, size: 7.5, font: fonts.oblique, color: rgb(0.35, 0.35, 0.35) });
-  return w.pageCount;
+  return { pageCount: w.pageCount, chairLine };
 }

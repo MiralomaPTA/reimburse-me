@@ -8,4 +8,4 @@ tk.teacher@example.org,teacher,approved,,,preloaded,,,Transitional kindergarten:
 jobshare.teacher@example.org,teacher,approved,,,preloaded,,,Job share: their own stipend ($125) overrides the standard classroom amount.,K,125
 music.teacher@example.org,teacher,approved,,,preloaded,,,"Teaches every grade, so no grade: chooses classroom stipend, field trip, or none.",,
 librarian@example.org,requester,approved,,,preloaded,,,Staff with their own stipend: chooses Stipend or Not from a stipend.,,300
-volunteer@example.org,requester,approved,,,preloaded,,,Approved volunteer with no stipend: never asked which stipend.,,
+volunteer@example.org,requester,approved,,,preloaded,,,Approved volunteer with no stipend: never asked which stipend. Chairs the Book Fair in the Events examples.,,

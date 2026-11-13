@@ -1,0 +1,6 @@
+[
+  { "name": "Fun Run", "chair_email": "funrun.chair@example.org, funrun.cochair@example.org", "aliases": "fun-run, jog-a-thon", "budget": "1500", "active": "yes", "note": "Two co-chairs: both are emailed, either can sign. Chairs don't need a Users row." },
+  { "name": "Fall Festival", "chair_email": "festival.chair@example.org", "aliases": "harvest festival", "budget": "800", "active": "yes", "note": "One chair, with a budget: the chair sees what's left before and after each request." },
+  { "name": "Book Fair", "chair_email": "volunteer@example.org", "aliases": "", "budget": "", "active": "yes", "note": "Chaired by the sample volunteer, so their own Book Fair requests skip the chair step. No budget set." },
+  { "name": "Spring Gala", "chair_email": "gala.chair@example.org", "aliases": "", "budget": "2000", "active": "no", "note": "Inactive: not offered on the form until active is yes again." }
+]
