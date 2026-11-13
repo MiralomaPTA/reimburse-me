@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { draftHasWork } from "@/lib/draft";
 import { fiscalYearLabel, formatRequestId } from "@/lib/fiscal-year";
 import { formatMoney, moneyPlain, parseMoney } from "@/lib/money";
 import { safeNextPath } from "@/lib/next-path";
@@ -130,5 +131,27 @@ describe("PTA position", () => {
   it("defaults everyone else to Volunteer", () => {
     expect(otherPosition("  ")).toBe("Volunteer");
     expect(otherPosition(" Librarian ")).toBe("Librarian");
+  });
+});
+
+describe("draftHasWork", () => {
+  const opened = { payeeName: "Lillie Coit", phone: "415-555-0100", purpose: "", donation: "", items: [{ description: "", amount: "", receipts: [] }] };
+  const withItem = (item: object) => JSON.stringify({ ...opened, items: [{ ...opened.items[0], ...item }] });
+
+  it("ignores a missing, unreadable or just-opened draft", () => {
+    expect(draftHasWork(null)).toBe(false);
+    expect(draftHasWork("{not json")).toBe(false);
+    expect(draftHasWork(JSON.stringify(opened))).toBe(false);
+    expect(draftHasWork(JSON.stringify({ ...opened, purpose: "   " }))).toBe(false);
+  });
+  it("counts anything entered for the request itself", () => {
+    expect(draftHasWork(JSON.stringify({ ...opened, purpose: "Art supplies" }))).toBe(true);
+    expect(draftHasWork(JSON.stringify({ ...opened, donation: "5" }))).toBe(true);
+    expect(draftHasWork(withItem({ description: "Paint" }))).toBe(true);
+    expect(draftHasWork(withItem({ amount: "12.50" }))).toBe(true);
+  });
+  it("counts finished receipts only", () => {
+    expect(draftHasWork(withItem({ receipts: [{ status: "done", fileId: "f1" }] }))).toBe(true);
+    expect(draftHasWork(withItem({ receipts: [{ status: "uploading" }] }))).toBe(false);
   });
 });

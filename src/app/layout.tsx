@@ -6,6 +6,7 @@ import logo from "@/images/miraloma-logo.png";
 import { getSession } from "@/server/auth/session";
 import { config } from "@/server/config";
 import { MailtoLink } from "@/components/MailtoLink";
+import { NewRequestLink } from "@/components/NewRequestLink";
 import "./globals.css";
 
 const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -35,9 +36,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 <Link href="/requests" className="text-neutral-700 hover:underline">
                   My requests
                 </Link>
-                <Link href="/requests/new" className="text-neutral-700 hover:underline">
-                  New
-                </Link>
+                <NewRequestLink email={session.email} label="New" draftLabel="Continue draft" className="text-neutral-700 hover:underline" />
                 <form action="/api/auth/signout" method="post">
                   <button type="submit" className="text-neutral-500 hover:underline">
                     Sign out

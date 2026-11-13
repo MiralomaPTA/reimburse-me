@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { LEGACY_DRAFT_KEY, readDraft, removeDraft, writeDraft } from "@/lib/draft";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { DEFAULT_POSITION, GRADE_LABELS, otherPosition, parseTeacherPosition, teacherPosition } from "@/lib/pta-position";
 import { DESCRIPTION_MAX, fundingSplit, type FundingShare, type RequestInput } from "@/lib/request-schema";
@@ -57,10 +58,6 @@ type SavedForm = Omit<FormState, "checkDelivery" | "grade" | "room"> & {
   items: (Omit<ItemState, "funding"> & { funding?: string })[];
 };
 
-/** Drafts before v2 were keyed per device, so one signed-in address could resume another's. */
-const LEGACY_DRAFT_KEY = "rm:draft:v1";
-/** One draft per signed-in address per device, so a shared computer doesn't hand one teacher's draft to the next. */
-const draftKey = (email: string) => `rm:draft:v2:${email.trim().toLowerCase()}`;
 const CONSENT_LABEL = "I agree to sign this reimbursement request electronically and certify the expenses and receipts are accurate.";
 
 const newKey = () => Math.random().toString(36).slice(2, 10);
@@ -91,7 +88,7 @@ function loadDraft(email: string, requester: Requester): FormState | null {
   try {
     // A pre-v2 draft can't be attributed to anyone, so it is dropped rather than resumed.
     localStorage.removeItem(LEGACY_DRAFT_KEY);
-    const raw = localStorage.getItem(draftKey(email));
+    const raw = readDraft(email);
     if (!raw) return null;
     const { funding: legacyFunding, ...draft } = JSON.parse(raw) as SavedForm;
     // Only finished uploads survive a reload; anything mid-flight is dropped.
@@ -109,22 +106,6 @@ function loadDraft(email: string, requester: Requester): FormState | null {
     };
   } catch {
     return null;
-  }
-}
-
-function saveDraft(email: string, form: FormState) {
-  try {
-    localStorage.setItem(draftKey(email), JSON.stringify(form));
-  } catch {
-    /* storage unavailable: drafts just don't persist */
-  }
-}
-
-function clearDraft(email: string) {
-  try {
-    localStorage.removeItem(draftKey(email));
-  } catch {
-    /* ignore */
   }
 }
 
@@ -262,7 +243,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
   const padRef = useRef<SignaturePadHandle>(null);
 
   useEffect(() => {
-    if (step !== "done") saveDraft(email, form);
+    if (step !== "done") writeDraft(email, form);
   }, [email, form, step]);
 
   useEffect(() => () => {
@@ -396,7 +377,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
         setProblems(body.issues ? issueText(body.issues) : [body.error ?? "Could not submit."]);
         return;
       }
-      clearDraft(email);
+      removeDraft(email);
       latestProfile.current = {
         payeeName: requestInput.payeeName,
         ptaPosition: requestInput.ptaPosition,
@@ -427,7 +408,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
   /** Throws away the in-progress draft; the "about you" fields start over from the last request. */
   function discardDraft() {
     if (!window.confirm("Discard this draft? Anything you've entered, including uploaded receipts, will be removed from the form.")) return;
-    clearDraft(email);
+    removeDraft(email);
     setForm(emptyForm(latestProfile.current, requester));
     setProblems([]);
     window.scrollTo({ top: 0 });

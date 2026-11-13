@@ -5,6 +5,7 @@ import { currentFunding } from "@/server/requests/stipends";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { StipendSummary } from "@/components/StipendSummary";
+import { NewRequestLink } from "@/components/NewRequestLink";
 import { StatusBadge } from "@/components/StatusBadge";
 
 export default async function RequestsPage() {
@@ -15,11 +16,9 @@ export default async function RequestsPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold">My requests</h1>
-        <Link href="/requests/new" className="btn-primary">
-          New request
-        </Link>
+        <NewRequestLink email={session.email} label="New request" draftLabel="Continue where I left off" className="btn-primary text-center" />
       </div>
       {funding.stipends.length > 0 && (
         <div className="mb-6">
@@ -28,7 +27,8 @@ export default async function RequestsPage() {
       )}
       {rows.length === 0 ? (
         <div className="card text-neutral-600">
-          You haven&apos;t submitted anything yet. <Link href="/requests/new" className="underline">Start a request</Link>.
+          You haven&apos;t submitted anything yet.{" "}
+          <NewRequestLink email={session.email} label="Start a request" draftLabel="Continue where you left off" className="underline" />.
         </div>
       ) : (
         <ul className="divide-y divide-neutral-200 overflow-hidden rounded-lg border border-neutral-200 bg-white">
