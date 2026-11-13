@@ -130,7 +130,7 @@ A **Categories** tab in the Sheet: `name`, `active` (yes/no), `order`. The treas
 
 ## Data changes
 
-Requests tab, new columns: `approved_at`, `approved_by`, `returned_at`, `returned_by`, `check_date`, `check_written_by`, `paid_by`, `previous_pdf_file_ids`. (`request_file_id` and the event and `chair_*` columns already exist, from the event chair step.) The existing `paid_date` now means the date the signed check went out. The app appends any missing header to the end of the header row on first use, so the existing tab does not need to be rebuilt.
+Requests tab, new columns: `approved_at`, `approved_by`, `returned_at`, `returned_by`, `check_date`, `check_written_by`, `paid_by`, `previous_pdf_file_ids`. (`request_file_id`, `lock` and the event and `chair_*` columns already exist, from the event chair step. AP's actions should take the row's `lock` too, the way chair signing and resend do, so an AP action and a chair signature at the same moment can't both go through.) The existing `paid_date` now means the date the signed check went out. The app appends any missing header to the end of the header row on first use, so the existing tab does not need to be rebuilt.
 
 New tabs: `Actions` and `Categories`, created with headers on first use.
 

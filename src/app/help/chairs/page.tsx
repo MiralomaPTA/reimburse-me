@@ -4,7 +4,8 @@ import { MailtoLink } from "@/components/MailtoLink";
 import { Guide, Questions, Section, Shot } from "@/components/help/Guide";
 import page from "@/images/help/chair/page.png";
 import sign from "@/images/help/chair/sign.png";
-import signed from "@/images/help/chair/signed.png";
+import signedAp from "@/images/help/chair/signed-ap.png";
+import signedRequester from "@/images/help/chair/signed-requester.png";
 
 const title = "Signing reimbursements: a guide for event chairs";
 
@@ -65,7 +66,7 @@ export default function ChairGuidePage() {
             ? "The request goes to the PTA's accounts payable team with your signature on it. You get a copy of the signed form by email for your records."
             : "The person who asked gets the request with your signature on it, to send to the PTA's accounts payable team. You get a copy of the signed form by email for your records."}
         </p>
-        <Shot src={signed} alt="The Signed, thank you message" />
+        <Shot src={toAp ? signedAp : signedRequester} alt="The Signed, thank you message" />
       </Section>
 
       <Section title="Common questions">

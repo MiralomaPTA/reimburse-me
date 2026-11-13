@@ -179,14 +179,26 @@ function afterChairSigns(): string {
     : "Once they sign, you'll get the co-signed PDF by email to forward to the PTA. Don't forward this copy: it doesn't have the chair's signature yet.";
 }
 
-/** To the requester when their request goes to the event chair first, with the packet as they signed it. */
-export function requesterSentToChairEmail(input: SubmissionEmailInput, chairs: string[]): { subject: string; text: string } {
+/**
+ * To the requester when their request goes to the event chair first, with the
+ * packet as they signed it. `chairs` are the chairs the email reached;
+ * `notReached`, the ones whose email failed.
+ */
+export function requesterSentToChairEmail(input: SubmissionEmailInput, chairs: string[], notReached: string[] = []): { subject: string; text: string } {
   const t = totals(input.request);
   const event = input.request.event;
+  const page = `${input.linkBase}/requests/${input.requestId}`;
+  const reached =
+    chairs.length > 0
+      ? `Thanks, ${input.request.payeeName}. Your signed request went to ${chairWho(event, chairs)} to sign on the form's VP/Chairman line.`
+      : `Thanks, ${input.request.payeeName}. Your request is signed and waits for the ${event} chair to sign on the form's VP/Chairman line.`;
+  const failed =
+    notReached.length > 0 ? [`The email to ${notReached.join(", ")} didn't go through. Use "Resend to the chair" on your request page to try again: ${page}`] : [];
   return {
     subject: `Your PTA reimbursement request ${input.requestId} (${formatMoney(t.reimbursementCents)}) is with the ${event} chair`,
     text: [
-      `Thanks, ${input.request.payeeName}. Your signed request went to ${chairWho(event, chairs)} to sign on the form's VP/Chairman line.`,
+      reached,
+      ...failed,
       afterChairSigns(),
       "",
       ...summary(input),

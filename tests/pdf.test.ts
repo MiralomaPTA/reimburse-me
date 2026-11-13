@@ -4,7 +4,9 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import { buildPacket } from "@/server/pdf/build-packet";
 import { countersignPacket } from "@/server/pdf/countersign";
 import { CONSENT_TEXT, type ReceiptFile } from "@/server/pdf/types";
-import { winAnsi } from "@/server/pdf/text";
+import { fitText, winAnsi } from "@/server/pdf/text";
+import { CHAIR_TEXT_SIZE, chairCaption, signatureArea } from "@/server/pdf/chair-line";
+import { eventLabel } from "@/lib/events";
 import type { RequestInput } from "@/lib/request-schema";
 
 async function jpegReceipt(fileId: string, width = 1200, height = 1800): Promise<ReceiptFile> {
@@ -156,4 +158,19 @@ describe("countersignPacket", () => {
     const drawn = await countersignPacket({ ...base, signature: { type: "drawn", png: new Uint8Array(png) } });
     expect(drawn.pageCount).toBe(signed.pageCount + 1);
   }, 30_000);
+
+  it("keeps a long name and event within the line, leaving the signature room", async () => {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const line = { page: 0, x: 238, y: 100, width: 300, height: 20 };
+    const name = "Christopher Alexander Montgomery-Wellington the Third of San Francisco";
+    const event = "The Annual Miraloma Elementary Spring Carnival, Silent Auction and Community Picnic Fundraiser";
+    const caption = chairCaption(font, line, name, "11/14/2026");
+    expect(caption.endsWith("…, 11/14/2026")).toBe(true);
+    for (const text of [caption, eventLabel(event)]) expect(font.widthOfTextAtSize(fitText(font, text, CHAIR_TEXT_SIZE, line.width * 0.45), CHAIR_TEXT_SIZE)).toBeLessThanOrEqual(line.width * 0.45);
+    const area = signatureArea(font, line, [eventLabel(event), caption]);
+    expect(area.width).toBeGreaterThan(line.width / 2 - 20);
+    expect(area.x + area.width).toBeLessThanOrEqual(line.x + line.width * 0.55);
+    expect(fitText(font, "Short", 7, 100)).toBe("Short");
+  });
 });

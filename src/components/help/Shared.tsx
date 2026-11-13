@@ -165,7 +165,8 @@ export function commonQuestions(exampleId: string) {
       a: (
         <>
           Open the request from <strong>My requests</strong>. It says who it was sent to and when, and once a day has passed you can tap{" "}
-          <strong>Resend to the chair</strong> to send them a fresh link.
+          <strong>Resend to the chair</strong> to send them a fresh link. If the email didn&apos;t reach one of the chairs, you can send it to them
+          right away.
         </>
       ),
     },

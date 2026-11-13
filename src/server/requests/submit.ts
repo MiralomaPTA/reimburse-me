@@ -1,11 +1,11 @@
 import type { Adapters, RequestRow } from "@/server/adapters/types";
 import type { ApprovedSession } from "@/server/auth/session";
-import { config } from "@/server/config";
-import { apSubmissionEmail, requesterCopyEmail, requesterPacketEmail, requesterSentToChairEmail } from "@/server/email/templates";
+import { requesterSentToChairEmail } from "@/server/email/templates";
 import { buildPacket } from "@/server/pdf/build-packet";
 import { CONSENT_TEXT } from "@/server/pdf/types";
 import { sendChairRequests } from "@/server/requests/chair";
 import { loadReceiptFiles } from "@/server/requests/receipts";
+import { sendPacketOn } from "@/server/requests/send-on";
 import { toPacketSignature } from "@/server/requests/signature";
 import { FundingError, fundingCell, fundingEmailShares, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
 import { saveStoredRequest } from "@/server/requests/stored";
@@ -32,8 +32,8 @@ export interface SubmitResult {
   pageCount: number;
   /** The requester's stipends with this request counted. */
   funding: FundingOptions;
-  /** Set when the request went to its event's chairs to sign before going on to AP. */
-  chair: { event: string; sentTo: string[] } | null;
+  /** Set when the request went to its event's chairs to sign before going on to AP: who the email reached, and who it didn't. */
+  chair: { event: string; sentTo: string[]; notReached: string[] } | null;
   /** false when the row was written but an email could not be sent. */
   emailed: boolean;
   emailError?: string;
@@ -178,8 +178,8 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     funding,
     event: request.event,
     chair_step: routing.step,
+    // Narrowed below to the chairs the email reached; cleared if it reached none, so the requester can resend at once.
     chair_sent_to: routing.chairs.join(", "),
-    // Cleared below if no chair could be emailed, so the requester can resend at once.
     chair_sent_at: toChair ? submittedAt.toISOString() : "",
     chair_signed_by: "",
     chair_name: "",
@@ -188,6 +188,7 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     chair_pdf_file_id: "",
     chair_pdf_sha256: "",
     request_file_id: requestFileId,
+    lock: "",
   };
   await log.append(row);
   const after = fundingOptions(user, stipendRows, [...earlierRows, row], submittedAt);
@@ -215,28 +216,26 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
   };
   const attachment = { filename: pdfName, mimeType: "application/pdf", bytes: packet.bytes };
   let emailError: string | undefined;
+  let chairs: { sent: string[]; failed: string[] } | null = null;
   if (toChair) {
     const budget = event ? eventBudget(event, [...earlierRows, row], { requestId, claimedCents: t.reimbursementCents }) : null;
-    const chairs = await sendChairRequests({ ...emailInput, chairs: routing.chairs, attachment, budget }, mailer);
-    if (chairs.error) {
-      emailError = chairs.error;
-      console.error(`[submit] email to the ${request.event} chair failed for ${requestId}: ${chairs.error}`);
-      problems.push(`Email to the chair (${chairs.failed.join(", ")}) failed at submission: ${chairs.error}`);
-      if (chairs.sent.length === 0) patch.chair_sent_at = "";
+    const sent = await sendChairRequests({ ...emailInput, chairs: routing.chairs, attachment, budget }, mailer);
+    chairs = sent;
+    if (sent.error) {
+      emailError = sent.error;
+      console.error(`[submit] email to the ${request.event} chair failed for ${requestId}: ${sent.error}`);
+      problems.push(`Email to the chair (${sent.failed.join(", ")}) failed at submission: ${sent.error}`);
+      // Only who it reached, so the request page offers to send it to the rest at once.
+      patch.chair_sent_to = sent.sent.join(", ");
+      if (sent.sent.length === 0) patch.chair_sent_at = "";
     }
   }
   try {
-    if (toChair) {
-      const mail = requesterSentToChairEmail(emailInput, routing.chairs);
+    if (chairs) {
+      const mail = requesterSentToChairEmail(emailInput, chairs.sent, chairs.failed);
       await mailer.send({ to: [session.email], subject: mail.subject, text: mail.text, attachments: [attachment] });
-    } else if (config.sendPacketsTo === "ap") {
-      const ap = apSubmissionEmail(emailInput);
-      await mailer.send({ to: [config.apEmail], replyTo: session.email, subject: ap.subject, text: ap.text, attachments: [attachment] });
-      const copy = requesterCopyEmail(emailInput);
-      await mailer.send({ to: [session.email], subject: copy.subject, text: copy.text, attachments: [attachment] });
     } else {
-      const mail = requesterPacketEmail(emailInput);
-      await mailer.send({ to: [session.email], subject: mail.subject, text: mail.text, attachments: [attachment] });
+      await sendPacketOn(emailInput, attachment, mailer);
     }
   } catch (error) {
     emailError ??= error instanceof Error ? error.message : String(error);
@@ -251,7 +250,7 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     sha256: packet.sha256,
     pageCount: packet.pageCount,
     funding: after,
-    chair: toChair ? { event: request.event, sentTo: routing.chairs } : null,
+    chair: chairs ? { event: request.event, sentTo: chairs.sent, notReached: chairs.failed } : null,
     emailed: !emailError,
   };
   return emailError ? { ...result, emailError } : result;

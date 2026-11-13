@@ -89,7 +89,7 @@ export interface RequestRow {
   /** The PTA event the request is for, as named in the Events tab; blank when it isn't for one. */
   event: string;
   chair_step: ChairStep;
-  /** The chair addresses the signature request went to, comma-separated. */
+  /** The chair addresses the signature request reached, comma-separated. A chair whose email failed isn't listed until a resend reaches them. */
   chair_sent_to: string;
   /** When the chair email last went out (at submit or on resend); blank if it never did. */
   chair_sent_at: string;
@@ -104,6 +104,13 @@ export interface RequestRow {
   chair_pdf_sha256: string;
   /** The request's content as JSON, saved beside the packet at every submission (`FY27-042.json`). */
   request_file_id: string;
+  /**
+   * Held for a few seconds while the app changes the request in a way that
+   * mustn't happen twice at once (a chair signing, a resend): "<expires ISO>
+   * <id>". Blank otherwise. One left behind by a crash expires on its own and
+   * is safe to clear by hand.
+   */
+  lock: string;
 }
 
 export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
@@ -145,6 +152,7 @@ export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
   "chair_pdf_file_id",
   "chair_pdf_sha256",
   "request_file_id",
+  "lock",
 ];
 
 export interface RequestLog {
@@ -156,6 +164,13 @@ export interface RequestLog {
   /** Every request; shared stipends add up across requesters. */
   list(): Promise<RequestRow[]>;
   update(requestId: string, patch: Partial<RequestRow>): Promise<void>;
+  /**
+   * Applies `patch` only if the row, as read just before the write, passes
+   * `condition`; says whether it did. The Sheet has no compare-and-set, so
+   * this narrows the gap between checking and writing to one write, without
+   * closing it: see server/requests/lock.ts for what closes it.
+   */
+  updateIf(requestId: string, condition: (row: RequestRow) => boolean, patch: Partial<RequestRow>): Promise<boolean>;
 }
 
 export interface MailAttachment {
@@ -259,7 +274,7 @@ export interface StipendTable {
  * VP/Chairman line before it goes on to AP.
  */
 export interface EventRow {
-  /** "Fun Run": shown in the form's event list and printed beside the VP/Chairman line. */
+  /** "Fun Run": shown in the form's event list and printed beside the VP/Chairman line. At most EVENT_NAME_MAX characters; a longer one is ignored. */
   name: string;
   /** One or more addresses, comma-separated; any one of them may sign. */
   chair_email: string;

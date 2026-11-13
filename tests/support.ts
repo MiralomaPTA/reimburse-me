@@ -70,6 +70,12 @@ export class MemoryLog implements RequestLog {
     if (i === -1) throw new Error(`no row ${id}`);
     this.rows[i] = { ...this.rows[i], ...patch };
   }
+  async updateIf(id: string, condition: (row: RequestRow) => boolean, patch: Partial<RequestRow>) {
+    const i = this.rows.findIndex((r) => r.request_id === id);
+    if (i === -1 || !condition(this.rows[i])) return false;
+    this.rows[i] = { ...this.rows[i], ...patch };
+    return true;
+  }
 }
 
 export class MemoryMailer implements Mailer {

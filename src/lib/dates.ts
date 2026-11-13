@@ -18,3 +18,10 @@ export function formatDateTime(date: Date): string {
     }).format(date) + " PT"
   );
 }
+
+/** The moment in a date cell, or null when it's blank or unreadable (a cell typed into the Sheet by hand, say). */
+export function parseDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}

@@ -1,21 +1,17 @@
+import { createHash } from "node:crypto";
 import type { Adapters, MailAttachment, Mailer, RequestRow } from "@/server/adapters/types";
 import { config } from "@/server/config";
 import { createChairToken, verifyChairToken, type ChairLink } from "@/server/auth/tokens";
-import {
-  apSubmissionEmail,
-  chairRequestEmail,
-  chairSignedEmail,
-  requesterCopyEmail,
-  requesterPacketEmail,
-  type SubmissionEmailInput,
-} from "@/server/email/templates";
+import { chairRequestEmail, chairSignedEmail } from "@/server/email/templates";
 import { countersignPacket } from "@/server/pdf/countersign";
 import { chairConsentText } from "@/server/pdf/types";
+import { BusyError, withRequestLock } from "@/server/requests/lock";
+import { sendPacketOn } from "@/server/requests/send-on";
 import { toPacketSignature } from "@/server/requests/signature";
 import { fundingEmailShares, fundingOptions } from "@/server/requests/stipends";
 import { cosignedName, loadStoredRequest, type StoredRequest } from "@/server/requests/stored";
-import { formatDateTime } from "@/lib/dates";
-import { chairRouting, eventBudget, findEvent, parseEvents, type EventBudget } from "@/lib/events";
+import { formatDateTime, parseDate } from "@/lib/dates";
+import { eventBudget, findEvent, parseEvents, type EventBudget, type PtaEvent } from "@/lib/events";
 import { fiscalYearLabel } from "@/lib/fiscal-year";
 import { parseMoney } from "@/lib/money";
 import type { RequestInput, SignatureInput } from "@/lib/request-schema";
@@ -32,6 +28,28 @@ import type { RequestInput, SignatureInput } from "@/lib/request-schema";
 export const chairLinkPath = (requestId: string, token: string) => `/chair/${encodeURIComponent(requestId)}?t=${encodeURIComponent(token)}`;
 
 const versionOf = (row: RequestRow) => Number(row.version) || 1;
+
+/** A comma-separated address cell as lower-case addresses. */
+const addresses = (cell: string) =>
+  String(cell ?? "")
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+
+/**
+ * Who may sign `row` as chair now: its event's chairs in the Events tab, or,
+ * when the event is no longer in the tab at all (renamed or deleted), the
+ * chairs the request already reached, so it isn't stranded. While the event
+ * is in the tab the tab decides, so taking a chair off it ends their access
+ * at once. Never the requester.
+ */
+export function signingChairs(row: Pick<RequestRow, "event" | "chair_sent_to" | "requester_email">, events: PtaEvent[]): string[] {
+  const event = findEvent(events, row.event);
+  const requester = row.requester_email.trim().toLowerCase();
+  return (event ? event.chairs : addresses(row.chair_sent_to)).filter((chair) => chair !== requester);
+}
+
+const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 export interface ChairRequestInput {
   requestId: string;
@@ -74,29 +92,62 @@ export type ChairLinkState =
   | { kind: "signed"; row: RequestRow; link: ChairLink }
   /** No longer waiting for a chair: sent back, timed out, or changed by hand in the Sheet. */
   | { kind: "closed"; row: RequestRow }
-  | { kind: "ready"; row: RequestRow; link: ChairLink; stored: StoredRequest; budget: EventBudget | null };
+  | {
+      kind: "ready";
+      row: RequestRow;
+      link: ChairLink;
+      stored: StoredRequest;
+      budget: EventBudget | null;
+      /** The whole log as read for the budget, so signing needn't read it again. */
+      rows: RequestRow[];
+    };
+
+type CheckedLink = Exclude<ChairLinkState, { kind: "ready" }> | { kind: "open"; row: RequestRow; link: ChairLink; rows: RequestRow[]; event: PtaEvent | null };
 
 /**
- * What a chair's link can do right now. Checked on every page view and every
- * action against the request's row and the Events tab, so a chair removed
- * from the tab loses access at once.
+ * The checks every use of a link makes, against the request's row and the
+ * Events tab as they are now, so a chair taken off the tab loses access at
+ * once, to the signed request as well as the unsigned one. `wholeLog` reads
+ * every row, which the budget needs; otherwise just this one.
  */
-export async function chairLinkState(requestId: string, token: string, adapters: Pick<Adapters, "log" | "events" | "files">): Promise<ChairLinkState> {
+async function checkLink(requestId: string, token: string, adapters: Pick<Adapters, "log" | "events">, wholeLog: boolean): Promise<CheckedLink> {
   const link = token ? await verifyChairToken(token) : null;
   if (!link || link.requestId !== requestId) return { kind: "invalid" };
-  // The whole log, not just the row: the event's budget counts its other requests.
-  const rows = await adapters.log.list();
+  const [rows, eventRows] = await Promise.all([
+    wholeLog ? adapters.log.list() : adapters.log.get(requestId).then((row) => (row ? [row] : [])),
+    adapters.events.list(),
+  ]);
   const row = rows.find((r) => r.request_id === requestId);
   if (!row) return { kind: "invalid" };
   if (link.version !== versionOf(row)) return { kind: "stale", row };
+  // An event made inactive after the request came in still has its chairs.
+  const events = parseEvents(eventRows);
+  if (!signingChairs(row, events).includes(link.email.toLowerCase())) return { kind: "not-chair", row, link };
   if (row.chair_step === "Signed") return { kind: "signed", row, link };
   // A status typed into the Sheet by hand has no stored request to sign.
   if (row.status !== "Awaiting chair" || !row.request_file_id) return { kind: "closed", row };
-  // An event made inactive after the request came in still has its chairs.
-  const event = findEvent(parseEvents(await adapters.events.list()), row.event);
-  if (!event?.chairs.includes(link.email.toLowerCase())) return { kind: "not-chair", row, link };
-  const budget = eventBudget(event, rows, { requestId, claimedCents: parseMoney(row.reimbursement_claimed) ?? 0 });
-  return { kind: "ready", row, link, stored: await loadStoredRequest(adapters.files, row.request_file_id), budget };
+  return { kind: "open", row, link, rows, event: findEvent(events, row.event) };
+}
+
+/** What a chair's link can do right now, with what the page shows: the stored request and the event's budget. */
+export async function chairLinkState(requestId: string, token: string, adapters: Pick<Adapters, "log" | "events" | "files">): Promise<ChairLinkState> {
+  const checked = await checkLink(requestId, token, adapters, true);
+  if (checked.kind !== "open") return checked;
+  const { row, link, rows, event } = checked;
+  const budget = event ? eventBudget(event, rows, { requestId, claimedCents: parseMoney(row.reimbursement_claimed) ?? 0 }) : null;
+  return { kind: "ready", row, link, rows, budget, stored: await loadStoredRequest(adapters.files, row.request_file_id) };
+}
+
+/**
+ * The packet a chair's link serves, after the same checks as the page: as the
+ * requester signed it while it waits, the co-signed one once signed. Null
+ * when the link can't open it.
+ */
+export async function chairPdfFile(requestId: string, token: string, adapters: Pick<Adapters, "log" | "events">): Promise<{ fileId: string; filename: string } | null> {
+  const checked = await checkLink(requestId, token, adapters, false);
+  if (checked.kind === "open") return { fileId: checked.row.pdf_file_id, filename: `${requestId}.pdf` };
+  if (checked.kind === "signed" && checked.row.chair_pdf_file_id) return { fileId: checked.row.chair_pdf_file_id, filename: cosignedName(requestId, versionOf(checked.row)) };
+  return null;
 }
 
 export class ChairError extends Error {}
@@ -110,8 +161,10 @@ export function chairStateMessage(state: Exclude<ChairLinkState, { kind: "ready"
       return "This request was signed again since this link was sent. Use the link in the newest email about it.";
     case "not-chair":
       return `${state.link.email} isn't listed as a ${state.row.event} chair any more. If that's a mistake, ask the PTA at ${config.apEmail}.`;
-    case "signed":
-      return `This request was already signed by ${state.row.chair_name || state.row.chair_signed_by} on ${formatDateTime(new Date(state.row.chair_signed_at))}.`;
+    case "signed": {
+      const at = parseDate(state.row.chair_signed_at);
+      return `This request was already signed by ${state.row.chair_name || state.row.chair_signed_by || "a chair"}${at ? ` on ${formatDateTime(at)}` : ""}.`;
+    }
     case "closed":
       return state.row.chair_step === "Timed out"
         ? "This request went on to the PTA without a chair signature, because it wasn't signed in time."
@@ -134,103 +187,121 @@ export interface ChairSignInput {
 
 export interface ChairSignResult {
   sha256: string;
-  /** false when the co-signed packet was saved but an email didn't go out. */
+  /** false when the co-signed packet was saved but didn't go on (to AP, or to the requester). */
   emailed: boolean;
+  /** false when the chair's own copy didn't go out. */
+  chairCopied: boolean;
 }
 
 /**
  * Signs as chair: stamps the chair's signature on a copy of the requester's
  * packet, saves it beside the original, marks the request Submitted, and
- * sends the co-signed packet on. Trouble after the row is updated is noted on
- * the row, never retried.
+ * sends the co-signed packet on. Everything up to marking it Submitted runs
+ * under the row's lock, so a co-chair signing at the same moment is refused
+ * rather than sending AP a second packet. Email trouble after that is noted
+ * on the row, never retried.
  */
 export async function signAsChair(input: ChairSignInput, adapters: Adapters): Promise<ChairSignResult> {
   const { files, log, users, stipends, mailer } = adapters;
   const state = await chairLinkState(input.requestId, input.token, adapters);
   if (state.kind !== "ready") throw new ChairError(chairStateMessage(state));
-  const { row, link, stored } = state;
-  const { request_id: requestId, event } = row;
-  const version = versionOf(row);
+  const { link, stored, rows } = state;
+  const { request_id: requestId, event } = state.row;
   const signedAt = new Date();
 
-  const packet = await countersignPacket({
-    packet: await files.getFileBytes(row.pdf_file_id),
-    requesterSha256: row.pdf_sha256,
-    requestId,
-    chairLine: stored.packet.chairLine,
-    event,
-    payeeName: row.payee_name,
-    name: input.name,
-    signature: toPacketSignature(input.signature),
-    signedAt,
-    chairEmail: link.email,
-    linkSentAt: row.chair_sent_at ? new Date(row.chair_sent_at) : null,
-    ip: input.ip,
-    userAgent: input.userAgent,
-    consentText: chairConsentText(event),
-    note: input.note,
-  });
+  const signed = await withRequestLock(log, requestId, async (row) => {
+    // Checked again under the lock: a co-chair may have signed since the page loaded.
+    if (row.chair_step === "Signed") throw new ChairError(`${row.chair_name || row.chair_signed_by || `Another ${event} chair`} signed this request a moment ago.`);
+    if (row.status !== "Awaiting chair" || versionOf(row) !== link.version) throw new ChairError("This request isn't waiting for a chair's signature any more.");
 
-  // A co-chair may have signed while this one was being built.
-  const latest = await log.get(requestId);
-  if (!latest || latest.chair_step === "Signed" || latest.status !== "Awaiting chair") {
-    throw new ChairError(latest?.chair_step === "Signed" ? `Another ${event} chair signed this request a moment ago.` : "This request isn't waiting for a chair's signature any more.");
-  }
-  const submittedAt = new Date(row.submitted_at);
-  const filename = cosignedName(requestId, version);
-  const saved = await files.putFile({ name: filename, mimeType: "application/pdf", bytes: packet.bytes, folderPath: ["requests", fiscalYearLabel(submittedAt), requestId] });
-  await log.update(requestId, {
-    status: "Submitted",
-    chair_step: "Signed",
-    chair_signed_by: link.email,
-    chair_name: input.name,
-    chair_signed_at: signedAt.toISOString(),
-    chair_note: input.note,
-    chair_pdf_file_id: saved.id,
-    chair_pdf_sha256: packet.sha256,
+    // Countersign only the exact file the requester signed.
+    const original = await files.getFileBytes(row.pdf_file_id);
+    const actual = sha256(original);
+    if (actual !== row.pdf_sha256 || actual !== stored.packet.sha256) {
+      console.error(`[chair] not co-signing ${requestId}: the file is ${actual}, the row says ${row.pdf_sha256}, the stored request ${stored.packet.sha256}`);
+      throw new ChairError(`This request's signed file doesn't match the record of what was signed, so it can't be co-signed. Please let the PTA know at ${config.apEmail}.`);
+    }
+    const packet = await countersignPacket({
+      packet: original,
+      requesterSha256: actual,
+      requestId,
+      chairLine: stored.packet.chairLine,
+      event,
+      payeeName: row.payee_name,
+      name: input.name,
+      signature: toPacketSignature(input.signature),
+      signedAt,
+      chairEmail: link.email,
+      linkSentAt: parseDate(row.chair_sent_at),
+      ip: input.ip,
+      userAgent: input.userAgent,
+      consentText: chairConsentText(event),
+      note: input.note,
+    });
+    const filename = cosignedName(requestId, versionOf(row));
+    const saved = await files.putFile({ name: filename, mimeType: "application/pdf", bytes: packet.bytes, folderPath: ["requests", fiscalYearLabel(new Date(row.submitted_at)), requestId] });
+    const patch: Partial<RequestRow> = {
+      status: "Submitted",
+      chair_step: "Signed",
+      chair_signed_by: link.email,
+      chair_name: input.name,
+      chair_signed_at: signedAt.toISOString(),
+      chair_note: input.note,
+      chair_pdf_file_id: saved.id,
+      chair_pdf_sha256: packet.sha256,
+    };
+    return { patch, result: { row, packet, filename } };
+  }).catch((error: unknown) => {
+    if (error instanceof BusyError) throw new ChairError("This request is being signed right now, perhaps by a co-chair. Reload the page in a minute to see whether it went through.");
+    throw error;
   });
 
   // From here on the signature is recorded; email trouble is noted on the row.
-  const problems: string[] = [];
+  const { row, packet, filename } = signed;
+  const submittedAt = new Date(row.submitted_at);
   const attachment = { filename, mimeType: "application/pdf", bytes: packet.bytes };
+  const problems: string[] = [];
+  let emailed = true;
   try {
-    const [user, stipendRows, rows] = await Promise.all([users.get(row.requester_email), stipends.list(), log.list()]);
-    const emailInput: SubmissionEmailInput = {
-      requestId,
-      request: stored.request,
-      requesterEmail: row.requester_email,
-      submittedAt,
-      sha256: packet.sha256,
-      version,
-      funding: fundingEmailShares(fundingOptions(user, stipendRows, rows, submittedAt), stored.request),
-      linkBase: input.linkBase,
-      chair: { event, name: input.name, email: link.email, signedAt, note: input.note, requesterSha256: row.pdf_sha256 },
-    };
-    if (config.sendPacketsTo === "ap") {
-      const ap = apSubmissionEmail(emailInput);
-      await mailer.send({ to: [config.apEmail], replyTo: row.requester_email, subject: ap.subject, text: ap.text, attachments: [attachment] });
-      const copy = requesterCopyEmail(emailInput);
-      await mailer.send({ to: [row.requester_email], subject: copy.subject, text: copy.text, attachments: [attachment] });
-    } else {
-      const mail = requesterPacketEmail(emailInput);
-      await mailer.send({ to: [row.requester_email], subject: mail.subject, text: mail.text, attachments: [attachment] });
-    }
+    const [user, stipendRows] = await Promise.all([users.get(row.requester_email), stipends.list()]);
+    // The log as read before signing: a request counts against its stipend the same while it waits for the chair.
+    const funding = fundingEmailShares(fundingOptions(user, stipendRows, rows, submittedAt), stored.request);
+    await sendPacketOn(
+      {
+        requestId,
+        request: stored.request,
+        requesterEmail: row.requester_email,
+        submittedAt,
+        sha256: packet.sha256,
+        version: versionOf(row),
+        funding,
+        linkBase: input.linkBase,
+        chair: { event, name: input.name, email: link.email, signedAt, note: input.note, requesterSha256: row.pdf_sha256 },
+      },
+      attachment,
+      mailer,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[chair] could not send ${requestId} on: ${message}`);
     problems.push(`Email failed after the chair signed: ${message}`);
+    emailed = false;
   }
+  let chairCopied = true;
   try {
     const mail = chairSignedEmail({ requestId, event, payeeName: row.payee_name, sha256: packet.sha256 });
     await mailer.send({ to: [link.email], subject: mail.subject, text: mail.text, attachments: [attachment] });
   } catch (error) {
-    console.error(`[chair] could not send the chair their copy of ${requestId}: ${error instanceof Error ? error.message : String(error)}`);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[chair] could not send the chair their copy of ${requestId}: ${message}`);
+    problems.push(`The chair's copy (to ${link.email}) failed: ${message}`);
+    chairCopied = false;
   }
   if (problems.length > 0) await log.update(requestId, { notes: [row.notes, ...problems].filter(Boolean).join(" | ") }).catch(() => undefined);
-  return { sha256: packet.sha256, emailed: problems.length === 0 };
+  return { sha256: packet.sha256, emailed, chairCopied };
 }
 
-export type ResendProblem = "not-found" | "closed" | "too-soon" | "no-chair" | "failed";
+export type ResendProblem = "not-found" | "closed" | "too-soon" | "no-chair" | "requester-chair" | "busy" | "failed";
 
 export class ResendError extends Error {
   constructor(
@@ -241,15 +312,57 @@ export class ResendError extends Error {
   }
 }
 
-/** When the requester may resend: `chairResendHours` after the last send, or now if none went out. */
+/** When the requester may resend to every chair: `chairResendHours` after the last send, or now if none went out. */
 export function nextResendAt(row: Pick<RequestRow, "chair_sent_at">): Date | null {
-  return row.chair_sent_at ? new Date(new Date(row.chair_sent_at).getTime() + config.chairResendHours * 3_600_000) : null;
+  const sentAt = parseDate(row.chair_sent_at);
+  return sentAt ? new Date(sentAt.getTime() + config.chairResendHours * 3_600_000) : null;
+}
+
+/** Where the chair email stands for a request awaiting its chair, and who a resend now would go to. */
+export interface ChairSending {
+  /** Who it has reached: who holds a link from the latest send. */
+  reached: string[];
+  /** Chairs who may sign now but haven't been reached: their email failed, or they were added to the tab since. */
+  unreached: string[];
+  /** Who a resend now goes to: every chair once the wait is over, else only the unreached ones. Empty when there's nobody to send to now. */
+  to: string[];
+  /** Whether a resend now goes to every chair (and restarts the wait). */
+  everyone: boolean;
+  /** When it can go to every chair again; null once it can. */
+  nextAt: Date | null;
+  /** The requester is now listed as a chair of the event, so it can't be sent on to the chairs. */
+  requesterIsChair: boolean;
+}
+
+export function chairSending(row: Pick<RequestRow, "event" | "chair_sent_to" | "chair_sent_at" | "requester_email">, events: PtaEvent[], now = new Date()): ChairSending {
+  const chairs = signingChairs(row, events);
+  const reached = addresses(row.chair_sent_to);
+  const unreached = chairs.filter((chair) => !reached.includes(chair));
+  const next = nextResendAt(row);
+  const everyone = !next || next <= now;
+  const requesterIsChair = Boolean(findEvent(events, row.event)?.chairs.includes(row.requester_email.trim().toLowerCase()));
+  return { reached, unreached, to: requesterIsChair ? [] : everyone ? chairs : unreached, everyone, nextAt: everyone ? null : next, requesterIsChair };
+}
+
+/** Why a resend can't go now, or null if it can. */
+function resendProblem(row: RequestRow, sending: ChairSending): ResendError | null {
+  if (row.status !== "Awaiting chair") return new ResendError("closed", "This request isn't waiting for a chair's signature any more.");
+  if (sending.requesterIsChair) {
+    return new ResendError("requester-chair", `You're listed as a ${row.event} chair now, so this can't be sent to the chairs again. Ask the PTA at ${config.apEmail} what to do.`);
+  }
+  if (sending.to.length > 0) return null;
+  if (sending.nextAt) {
+    return new ResendError("too-soon", `The chair was emailed less than ${config.chairResendHours} hours ago. You can send it again after ${formatDateTime(sending.nextAt)}.`);
+  }
+  return new ResendError("no-chair", `The PTA's list doesn't name a chair for ${row.event} right now. Ask the PTA at ${config.apEmail} what to do.`);
 }
 
 /**
- * The requester's "Resend to the chair": the signing email again, to whoever
- * the Events tab lists as the event's chairs now. At most once in
- * config.chairResendHours, unless the last send never went out.
+ * The requester's "Resend to the chair": the signing email again, with fresh
+ * links. Once the daily wait (config.chairResendHours) is over it goes to
+ * every chair the Events tab lists now; before that, only to chairs it hasn't
+ * reached, whose email failed or who were added since. Runs under the row's
+ * lock, so a double click sends it once.
  */
 export async function resendToChair(
   input: { requestId: string; requesterEmail: string; linkBase: string; now?: Date },
@@ -257,36 +370,48 @@ export async function resendToChair(
 ): Promise<{ sentTo: string[] }> {
   const { log, events, files, mailer } = adapters;
   const now = input.now ?? new Date();
-  const row = await log.get(input.requestId);
-  if (!row || row.requester_email.toLowerCase() !== input.requesterEmail.toLowerCase()) throw new ResendError("not-found", "That request wasn't found.");
-  if (row.status !== "Awaiting chair") throw new ResendError("closed", "This request isn't waiting for a chair's signature any more.");
-  const next = nextResendAt(row);
-  if (next && next > now) throw new ResendError("too-soon", `The chair was emailed less than ${config.chairResendHours} hours ago. You can send it again after ${formatDateTime(next)}.`);
-  const event = findEvent(parseEvents(await events.list()), row.event);
-  const routing = chairRouting(event, row.requester_email);
-  if (routing.step !== "Waiting") throw new ResendError("no-chair", `The PTA's list doesn't name a chair for ${row.event} right now. Ask the PTA at ${config.apEmail} what to do.`);
+  const [first, eventRows] = await Promise.all([log.get(input.requestId), events.list()]);
+  if (!first || first.requester_email.toLowerCase() !== input.requesterEmail.toLowerCase()) throw new ResendError("not-found", "That request wasn't found.");
+  const parsed = parseEvents(eventRows);
+  // Checked before taking the lock, so a refusal writes nothing, and again under it.
+  const early = resendProblem(first, chairSending(first, parsed, now));
+  if (early) throw early;
 
-  const stored = await loadStoredRequest(files, row.request_file_id);
-  const { sent, error } = await sendChairRequests(
-    {
-      requestId: row.request_id,
-      version: versionOf(row),
-      request: stored.request,
-      requesterEmail: row.requester_email,
-      submittedAt: new Date(row.submitted_at),
-      sha256: row.pdf_sha256,
-      chairs: routing.chairs,
-      linkBase: input.linkBase,
-      attachment: { filename: `${row.request_id}.pdf`, mimeType: "application/pdf", bytes: await files.getFileBytes(row.pdf_file_id) },
-      reminder: true,
-      budget: event ? eventBudget(event, await log.list(), { requestId: row.request_id, claimedCents: parseMoney(row.reimbursement_claimed) ?? 0 }) : null,
-    },
-    mailer,
-  );
-  if (sent.length === 0) {
-    console.error(`[chair] resend of ${row.request_id} failed: ${error}`);
-    throw new ResendError("failed", "The email didn't go through. Please try again in a few minutes.");
+  try {
+    return await withRequestLock(log, input.requestId, async (row) => {
+      const sending = chairSending(row, parsed, now);
+      const problem = resendProblem(row, sending);
+      if (problem) throw problem;
+      const event = findEvent(parsed, row.event);
+      const [stored, bytes, rows] = await Promise.all([loadStoredRequest(files, row.request_file_id), files.getFileBytes(row.pdf_file_id), event?.budgetCents != null ? log.list() : []]);
+      const { sent, error } = await sendChairRequests(
+        {
+          requestId: row.request_id,
+          version: versionOf(row),
+          request: stored.request,
+          requesterEmail: row.requester_email,
+          submittedAt: new Date(row.submitted_at),
+          sha256: row.pdf_sha256,
+          chairs: sending.to,
+          linkBase: input.linkBase,
+          attachment: { filename: `${row.request_id}.pdf`, mimeType: "application/pdf", bytes },
+          reminder: true,
+          budget: event ? eventBudget(event, rows, { requestId: row.request_id, claimedCents: parseMoney(row.reimbursement_claimed) ?? 0 }) : null,
+        },
+        mailer,
+      );
+      if (sent.length === 0) {
+        console.error(`[chair] resend of ${row.request_id} failed: ${error}`);
+        throw new ResendError("failed", "The email didn't go through. Please try again in a few minutes.");
+      }
+      // To everyone: whoever it reached now holds the only current links, and the wait starts over. To the rest: they join who was reached.
+      const patch: Partial<RequestRow> = sending.everyone
+        ? { chair_sent_to: sent.join(", "), chair_sent_at: now.toISOString() }
+        : { chair_sent_to: [...new Set([...sending.reached, ...sent])].join(", ") };
+      return { patch, result: { sentTo: sent } };
+    });
+  } catch (error) {
+    if (error instanceof BusyError) throw new ResendError("busy", "It's being sent right now. Reload the page in a minute to see when it went.");
+    throw error;
   }
-  await log.update(row.request_id, { chair_sent_to: sent.join(", "), chair_sent_at: now.toISOString() });
-  return { sentTo: sent };
 }

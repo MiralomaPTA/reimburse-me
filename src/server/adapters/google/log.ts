@@ -37,4 +37,7 @@ export const googleRequestLog: RequestLog = {
   async update(requestId, patch) {
     await requests().update(requestId, { ...patch, updated_at: new Date().toISOString() });
   },
+  async updateIf(requestId, condition, patch) {
+    return requests().updateIf(requestId, condition, { ...patch, updated_at: new Date().toISOString() });
+  },
 };

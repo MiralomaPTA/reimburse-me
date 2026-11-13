@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { LEGACY_DRAFT_KEY, readDraft, removeDraft, writeDraft } from "@/lib/draft";
-import { chairRouting, findEvent, guessEvents, type PtaEvent } from "@/lib/events";
+import { chairRouting, findEvent, guessEvents, type FormEvent } from "@/lib/events";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { DEFAULT_POSITION, GRADE_LABELS, otherPosition, parseTeacherPosition, teacherPosition } from "@/lib/pta-position";
 import { DESCRIPTION_MAX, fundingSplit, type FundingShare, type RequestInput } from "@/lib/request-schema";
@@ -123,14 +123,14 @@ const describedIn = (form: FormState) => [form.purpose, ...form.items.map((item)
  * the description names. Several named, or none: "Not for an event" until
  * the requester picks.
  */
-function chosenEvent(form: FormState, events: PtaEvent[]): { event: string; guessed: string[] } {
+function chosenEvent(form: FormState, events: FormEvent[]): { event: string; guessed: string[] } {
   const guessed = events.length > 0 ? guessEvents(describedIn(form), events) : [];
   if (form.event !== null) return { event: form.event, guessed };
   return { event: guessed.length === 1 ? guessed[0] : "", guessed };
 }
 
 /** What happens after signing, for the form and the preview step; null when the request isn't for an event. */
-function afterSigning(eventName: string, events: PtaEvent[], email: string): string | null {
+function afterSigning(eventName: string, events: FormEvent[], email: string): string | null {
   const event = findEvent(events, eventName);
   if (!event) return null;
   const routing = chairRouting(event, email);
@@ -141,7 +141,7 @@ function afterSigning(eventName: string, events: PtaEvent[], email: string): str
 }
 
 /** Converts form state to the API payload, collecting user-facing problems. */
-function toRequestInput(form: FormState, stipends: StipendStatus[], requester: Requester, events: PtaEvent[]): { input: RequestInput | null; problems: string[] } {
+function toRequestInput(form: FormState, stipends: StipendStatus[], requester: Requester, events: FormEvent[]): { input: RequestInput | null; problems: string[] } {
   const problems: string[] = [];
   const items: RequestInput["items"] = [];
   form.items.forEach((item, i) => {
@@ -230,7 +230,7 @@ export function NewRequestForm({
   requester: Requester;
   funding: FundingOptions;
   /** The active PTA events; none means the form doesn't ask. */
-  events: PtaEvent[];
+  events: FormEvent[];
 }) {
   const mounted = useSyncExternalStore(noop, () => true, () => false);
   if (!mounted) return <p className="text-neutral-500">Loading…</p>;
@@ -259,7 +259,7 @@ interface RequestFormProps {
   requester: Requester;
   /** The requester's stipends before this request; none means the form doesn't ask. */
   funding: FundingOptions;
-  events: PtaEvent[];
+  events: FormEvent[];
   initialForm: FormState;
   /** True when the "about you" fields came from the last request rather than a draft. */
   prefilled: boolean;
@@ -279,7 +279,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
   const [consent, setConsent] = useState(false);
   const [signMode, setSignMode] = useState<"typed" | "drawn">("typed");
   const [typedName, setTypedName] = useState("");
-  const [result, setResult] = useState<{ requestId: string; emailed: boolean; shares: FundingShare[]; chair: { event: string; sentTo: string[] } | null } | null>(null);
+  const [result, setResult] = useState<{ requestId: string; emailed: boolean; shares: FundingShare[]; chair: { event: string; sentTo: string[]; notReached: string[] } | null } | null>(null);
   const padRef = useRef<SignaturePadHandle>(null);
 
   useEffect(() => {
@@ -475,8 +475,9 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
         <h1 className="text-2xl font-semibold">{chair ? `Sent to the ${chair.event} chair` : toAp ? "Sent to the PTA" : "Signed and ready to send"}</h1>
         {chair ? (
           <p className="text-neutral-700">
-            Your request <strong>{result.requestId}</strong> is signed and on its way to the {chair.event} chair ({chair.sentTo.join(", ")}) to sign on the
-            form&apos;s VP/Chairman line.{" "}
+            Your request <strong>{result.requestId}</strong> is signed and{" "}
+            {chair.sentTo.length > 0 ? `on its way to the ${chair.event} chair (${chair.sentTo.join(", ")})` : `waits for the ${chair.event} chair`} to sign on
+            the form&apos;s VP/Chairman line.{" "}
             {toAp
               ? "Once they sign, it goes to the PTA's accounts payable team by itself."
               : "Once they sign, you'll get the co-signed PDF by email to forward to the PTA."}
@@ -504,8 +505,14 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
         })}
         {!result.emailed && chair && (
           <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-            The request was recorded, but an email didn&apos;t go through. Open the request below to see whether the chair was reached; if not, use
-            &quot;Resend to the chair&quot; there.
+            {chair.notReached.length > 0 ? (
+              <>
+                The request was recorded, but the email to {chair.notReached.join(", ")} didn&apos;t go through. Open the request below and use &quot;Resend
+                to the chair&quot; there.
+              </>
+            ) : (
+              <>The request was recorded and sent to the chair, but the copy to you didn&apos;t go through. The signed PDF is on the request below.</>
+            )}
           </p>
         )}
         {!result.emailed && !chair && toAp && (
@@ -700,7 +707,8 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
           </label>
           <input id="purpose" className="field" placeholder="2nd grade art supplies" maxLength={60} value={form.purpose} onChange={(e) => update("purpose", e.target.value)} />
         </div>
-        {events.length > 0 && <EventChoice form={form} events={events} email={email} onChange={(event) => update("event", event)} />}
+        {/* Also shown with no events listed when a draft names one that has gone, so it can be cleared. */}
+        {(events.length > 0 || form.event) && <EventChoice form={form} events={events} email={email} onChange={(event) => update("event", event)} />}
       </section>
 
       <section className="space-y-4">
@@ -816,10 +824,12 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
  * the one event the description names; once the requester picks, the guess
  * stops changing it.
  */
-function EventChoice({ form, events, email, onChange }: { form: FormState; events: PtaEvent[]; email: string; onChange: (event: string) => void }) {
+function EventChoice({ form, events, email, onChange }: { form: FormState; events: FormEvent[]; email: string; onChange: (event: string) => void }) {
   const { event, guessed } = chosenEvent(form, events);
   const next = afterSigning(event, events, email);
   const list = new Intl.ListFormat("en", { type: "disjunction" });
+  // A draft's event that has come off the list stays shown, so the select matches the form and choosing another changes it.
+  const gone = event && !findEvent(events, event) ? event : null;
   return (
     <div>
       <label htmlFor="event" className="label">
@@ -827,6 +837,11 @@ function EventChoice({ form, events, email, onChange }: { form: FormState; event
       </label>
       <select id="event" className="field" value={event} onChange={(e) => onChange(e.target.value)} aria-describedby="event_help">
         <option value="">Not for an event</option>
+        {gone && (
+          <option value={gone} disabled>
+            {gone} (no longer on the list)
+          </option>
+        )}
         {events.map((e) => (
           <option key={e.name} value={e.name}>
             {e.name}
@@ -834,6 +849,7 @@ function EventChoice({ form, events, email, onChange }: { form: FormState; event
         ))}
       </select>
       <div id="event_help" className="mt-1 space-y-1 text-xs text-neutral-500">
+        {gone && <p className="text-amber-800">&quot;{gone}&quot; isn&apos;t on the PTA&apos;s list of events any more. Choose another, or &quot;Not for an event&quot;.</p>}
         {form.event === null && guessed.length === 1 && <p>Picked from your description. Change it if that&apos;s wrong.</p>}
         {form.event === null && guessed.length > 1 && <p>Your description mentions {list.format(guessed)}. Pick the one this was for.</p>}
         <p>{next ?? "Classroom supplies and anything else not for a PTA event: leave it on \"Not for an event\"."}</p>

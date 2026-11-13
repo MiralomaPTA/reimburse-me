@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { formatDateShort } from "@/lib/dates";
 import { eventLabel } from "@/lib/events";
-import { drawChairCaption, signatureArea } from "@/server/pdf/chair-line";
+import { chairCaption, drawChairCaption, signatureArea } from "@/server/pdf/chair-line";
 import { appendCountersignaturePage, stampAddedFooters } from "@/server/pdf/pages";
-import { fitFontSize, winAnsi } from "@/server/pdf/text";
+import { fitFontSize, fitText, winAnsi } from "@/server/pdf/text";
 import type { LineBox, PacketSignature } from "@/server/pdf/types";
 
 /** A drawn signature may rise this far above the line, short of the requester's signature line above it. */
@@ -52,12 +52,14 @@ export async function countersignPacket(input: CountersignInput): Promise<Counte
   const line = input.chairLine;
   const page = doc.getPage(line.page);
 
-  const caption = `${input.name}, ${formatDateShort(input.signedAt)}`;
+  const caption = chairCaption(helv, line, input.name, formatDateShort(input.signedAt));
   drawChairCaption(page, helv, line, caption);
   const area = signatureArea(helv, line, [eventLabel(input.event), caption]);
   if (input.signature.type === "typed") {
+    // Shrunk to fit; a name too long even at the smallest size is cut short rather than run into the text beside it.
     const text = winAnsi(input.signature.name);
-    page.drawText(text, { x: area.x, y: area.y, size: fitFontSize(oblique, text, area.width, 13, 7), font: oblique });
+    const size = fitFontSize(oblique, text, area.width, 13, 6);
+    page.drawText(fitText(oblique, text, size, area.width), { x: area.x, y: area.y, size, font: oblique });
   } else {
     const png = await doc.embedPng(input.signature.png);
     const scale = Math.min(MAX_DRAWN_HEIGHT / png.height, area.width / png.width);

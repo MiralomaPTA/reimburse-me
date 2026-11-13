@@ -7,8 +7,9 @@
 // through a request as a volunteer and as a teacher on a phone-sized browser,
 // and crops the pages the guides show. The volunteer's request is for the Fall
 // Festival, so it goes to that event's chair, whose signing page is captured
-// for the chairs' guide. The done and request pages are captured
-// in both SEND_PACKETS_TO modes so the guide can show whichever is configured.
+// for the chairs' guide. The done and request pages, and the chair's
+// "Signed" message, are captured in both SEND_PACKETS_TO modes so the guides
+// can show whichever is configured.
 //
 // Needs Playwright's Chromium (`npx playwright install chromium`). The "Check
 // and sign" page shows the preview PDF in a frame that headless Chromium
@@ -160,8 +161,8 @@ async function latestMailTo(email, subject) {
   return null;
 }
 
-/** The Fall Festival chair opens their link, checks the request and signs it: the chairs' guide. */
-async function chairShots(browser) {
+/** The Fall Festival chair opens their link, checks the request and signs it: the chairs' guide. The page and form only on the capturing pass; the "Signed" message in each mode. */
+async function chairShots(browser, mode, capture) {
   let mail = null;
   for (let i = 0; i < 20 && !mail; i++) {
     mail = await latestMailTo(chair.email, /^Please sign/);
@@ -174,16 +175,16 @@ async function chairShots(browser) {
   await page.waitForSelector("text=Please sign as");
   await sleep(500);
   // Down to the end of the request's details; the PDF frame below is blank in headless Chromium.
-  await shotUntil(page, "chair", "page", page.locator("section.card", { hasText: "The request" }).first());
+  if (capture) await shotUntil(page, "chair", "page", page.locator("section.card", { hasText: "The request" }).first());
   const card = page.locator("div.card", { has: page.locator("h2", { hasText: "Sign as" }) }).first();
   await page.fill("#chairName", chair.name);
   await page.fill("#chairNote", chair.note);
   await card.locator("input[type=checkbox]").check();
-  await shot(page, "chair", "sign", { element: card });
+  if (capture) await shot(page, "chair", "sign", { element: card });
   await card.locator("button", { hasText: /^Sign$/ }).click();
   await page.waitForSelector("text=Signed. Thank you!", { timeout: 60000 });
   await sleep(500);
-  await shot(page, "chair", "signed", { element: page.locator("div", { has: page.locator("h2", { hasText: "Signed. Thank you!" }) }).last() });
+  await shot(page, "chair", `signed-${mode}`, { element: page.locator("div", { has: page.locator("h2", { hasText: "Signed. Thank you!" }) }).last() });
   await ctx.close();
 }
 
@@ -375,7 +376,7 @@ async function pass(browser, mode, capture, tmp) {
       const page = await signIn(ctx, persona, p, capture);
       await submitRequest(page, persona, p, { mode, capture, tmp });
       await ctx.close();
-      if (capture && persona === "volunteer") await chairShots(browser);
+      if (persona === "volunteer") await chairShots(browser, mode, capture);
       console.log(`${mode}: ${persona} done`);
     }
   } finally {

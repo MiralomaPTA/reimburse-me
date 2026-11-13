@@ -64,14 +64,16 @@ A new tab in the request-log Sheet. The app creates it with its header row the f
 
 | Column | Example | Meaning |
 | --- | --- | --- |
-| `name` | Fun Run | Shown in the form's event list and printed beside the VP/Chairman line |
+| `name` | Fun Run | Shown in the form's event list and printed beside the VP/Chairman line. Up to 200 characters; a longer name is ignored |
 | `chair_email` | lillie@example.com, norton@example.com | One or more addresses, separated by commas. Every co-chair gets the email, and any one of them may sign |
 | `aliases` | fun-run, jog-a-thon | Optional. Other words for this event, used to guess the event from the description |
 | `budget` | 1500 | Optional. The event's budget for this fiscal year, in dollars. The chair sees what's left of it |
 | `active` | yes | `no` hides the event from the form. Requests that already name it keep it |
 | `note` | | For the admin. The app ignores it |
 
-The tab lists the current chairs. Each request records the addresses its email went to, so changing a chair later doesn't change who signed an older request. When the tab has no active rows, the form doesn't show the event question and every request goes through as today.
+The tab lists the current chairs. Each request records the addresses its email reached, so changing a chair later doesn't change who signed an older request. When the tab has no active rows, the form doesn't show the event question and every request goes through as today.
+
+Two rows with the same name are read as one event, with all their chairs and aliases and the first budget given. When some of those rows are active, the inactive ones are left out, so last year's row kept beside this year's adds neither last year's chair nor its budget.
 
 ## The form
 
@@ -152,7 +154,9 @@ The page then offers two choices:
 
 **How long the link works.** The link works for 14 days, for that one request and version, and only while the request is awaiting the chair.
 
-**Checks on every visit.** Each time the page opens or the chair presses a button, the app re-reads the request's row and the Events tab. An address that has been removed from the event stops working right away.
+**Checks on every visit.** Each time the page opens or the chair presses a button, the app re-reads the request's row and the Events tab. An address that has been removed from the event stops working right away, for the signed request as well as the unsigned one. If the event has gone from the tab altogether (renamed or deleted), the chairs the request already reached can still sign it, and a resend goes to them, so the request isn't stranded.
+
+**One signature.** Signing holds a short lock on the request's row (see *Data changes*), so two co-chairs pressing **Sign** at the same moment can't both go through: one signs, and the other is told the request is being signed.
 
 **Link scanners.** Opening the link only shows the page, and nothing happens until the chair presses a button. Email security scanners that open links therefore can't sign anything.
 
@@ -160,9 +164,9 @@ The page then offers two choices:
 
 ## The co-signed packet
 
-The requester's signed PDF is never changed. When the chair signs, the app makes a second file next to it:
+The requester's signed PDF is never changed. Before co-signing, the app checks that the file's SHA-256 still matches the one recorded when the requester signed; if it doesn't, it refuses and asks the chair to tell the PTA. When the chair signs, the app makes a second file next to it:
 
-- The chair's signature, typed or drawn, is stamped on the left part of the VP/Chairman line. At the right end of the line, above the event's name, the app prints the chair's name and the date ("Lillie Coit, 11/14/2026"), because the form has no date box for that line.
+- The chair's signature, typed or drawn, is stamped on the left part of the VP/Chairman line. At the right end of the line, above the event's name, the app prints the chair's name and the date ("Lillie Coit, 11/14/2026"), because the form has no date box for that line. That text takes at most 45% of the line; a longer name or event is cut short with an ellipsis (the date always shows), and a typed signature too long for the rest is shrunk and then cut short.
 - A countersignature page goes after the requester's audit page. It lists:
   - the event and the chair's name
   - the address the link was sent to
@@ -192,7 +196,7 @@ The requester-signed packet already prints the event's name in small type at the
 
 ## The requester's side
 
-The request page shows *Waiting for the Fun Run chair to sign*, who the email went to and when, and a **Resend to the chair** button that works at most once a day. Until then it says when it can be used. If no chair could be emailed at submission, the page says so and the button works at once. Resend sends to whoever the Events tab lists as chairs at that moment, so a chair the admin has just added gets it. Once the chair signs, the page shows who signed and when, and links the co-signed packet. *My requests* shows the same status in the list.
+The request page shows *Waiting for the Fun Run chair to sign*, who the email reached and when, and a **Resend to the chair** button that works at most once a day. Until then it says when it can be used. If the email didn't reach a chair (at submission or on a resend), or the admin has added a chair since, the page says so and the button works at once, for those chairs only. The button can't send twice for one press. Resend sends to whoever the Events tab lists as chairs at that moment, so a chair the admin has just added gets it. Once the chair signs, the page shows who signed and when, and links the co-signed packet. *My requests* shows the same status in the list.
 
 ## Data changes
 
@@ -202,7 +206,7 @@ The request page shows *Waiting for the Fun Run chair to sign*, who the email we
 | --- | --- |
 | `event` | The event's name, as chosen on the form |
 | `chair_step` | Blank, Waiting, Signed, Sent back, Skipped: requester is a chair, Skipped: no chair listed, or Timed out |
-| `chair_sent_to` | The addresses the chair email went to |
+| `chair_sent_to` | The addresses the chair email reached. A chair whose email failed isn't listed until a resend reaches them |
 | `chair_sent_at` | When the email last went out, at submit or on resend |
 | `chair_signed_by` | The address that signed |
 | `chair_name` | The name the chair signed under |
@@ -210,6 +214,7 @@ The request page shows *Waiting for the Fun Run chair to sign*, who the email we
 | `chair_note` | The chair's note to AP |
 | `chair_pdf_file_id`, `chair_pdf_sha256` | The co-signed packet and its hash |
 | `request_file_id` | The request's JSON file (`FY27-042.json`), written for every request. Phase 2 calls it `request.json` |
+| `lock` | Held for a few seconds while the app signs or resends, so two of them at once can't both go through: the lock's expiry and a random ID. Blank otherwise. One left behind by a crash expires after 3 minutes, and is safe to clear by hand |
 
 `pdf_file_id` and `pdf_sha256` still mean the requester-signed packet. Wherever the app links a packet (the request page, and the Phase 2 dashboard), it uses the co-signed one when there is one. `RequestStatus` gains *Awaiting chair*.
 

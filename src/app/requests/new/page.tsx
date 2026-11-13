@@ -1,5 +1,5 @@
 import { gradeLabel } from "@/lib/pta-position";
-import { parseEvents } from "@/lib/events";
+import { parseEvents, toFormEvent } from "@/lib/events";
 import { getAdapters } from "@/server/adapters";
 import { requireApprovedSession } from "@/server/auth/session";
 import { config } from "@/server/config";
@@ -20,7 +20,10 @@ export default async function NewRequestPage() {
       profile={profile}
       requester={requester}
       funding={funding}
-      events={parseEvents(eventRows).filter((e) => e.active)}
+      // Only what the form needs: the budgets stay on the server.
+      events={parseEvents(eventRows)
+        .filter((e) => e.active)
+        .map(toFormEvent)}
     />
   );
 }

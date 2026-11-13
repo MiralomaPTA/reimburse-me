@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EventRow, RequestRow } from "@/server/adapters/types";
-import { chairRouting, eventBudget, findEvent, guessEvents, mentions, parseEvents, type PtaEvent } from "@/lib/events";
+import { chairRouting, EVENT_NAME_MAX, eventBudget, findEvent, guessEvents, mentions, parseEvents, type PtaEvent } from "@/lib/events";
 
 const row = (name: string, extra: Partial<EventRow> = {}): EventRow => ({ name, chair_email: "", aliases: "", budget: "", active: "", note: "", ...extra });
 
@@ -22,6 +22,21 @@ describe("parseEvents", () => {
   it("reads two rows with the same name as one event", () => {
     const [event] = parseEvents([row("Fun Run", { chair_email: "a@example.org", budget: "500" }), row("fun run", { chair_email: "b@example.org", aliases: "5k" })]);
     expect(event).toMatchObject({ name: "Fun Run", chairs: ["a@example.org", "b@example.org"], aliases: ["5k"], budgetCents: 50000 });
+  });
+
+  it("leaves out inactive rows when a row of the same name is active, so last year's chair and budget don't carry over", () => {
+    const [event] = parseEvents([
+      row("Fun Run", { chair_email: "old.chair@example.org", budget: "1500", active: "no" }),
+      row("Fun Run", { chair_email: "new.chair@example.org", budget: "2000" }),
+    ]);
+    expect(event).toMatchObject({ chairs: ["new.chair@example.org"], budgetCents: 200000, active: true });
+    // With every row inactive, the event keeps its chairs, so requests already waiting on them can still be signed.
+    const [retired] = parseEvents([row("Fun Run", { chair_email: "a@example.org", active: "no" }), row("Fun Run", { chair_email: "b@example.org", active: "no" })]);
+    expect(retired).toMatchObject({ chairs: ["a@example.org", "b@example.org"], active: false });
+  });
+
+  it("ignores a name longer than the form accepts", () => {
+    expect(parseEvents([row("x".repeat(EVENT_NAME_MAX)), row("y".repeat(EVENT_NAME_MAX + 1))]).map((e) => e.name.length)).toEqual([EVENT_NAME_MAX]);
   });
 
   it("finds an event by name, ignoring case and spacing", () => {

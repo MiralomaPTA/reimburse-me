@@ -29,38 +29,54 @@ function cellList(cell: string | undefined): string[] {
 const INACTIVE = new Set(["no", "n", "false", "0", "inactive"]);
 const sameName = (a: string, b: string) => a.trim().replace(/\s+/g, " ").toLowerCase() === b.trim().replace(/\s+/g, " ").toLowerCase();
 
+/** The longest event name the form accepts; the Events tab's longer ones are ignored, so the form never offers one it can't submit. */
+export const EVENT_NAME_MAX = 200;
+
+/** What the request form needs of an event. The budget stays on the server: requesters don't see it. */
+export type FormEvent = Pick<PtaEvent, "name" | "aliases" | "chairs">;
+
+export const toFormEvent = ({ name, aliases, chairs }: PtaEvent): FormEvent => ({ name, aliases, chairs });
+
 /**
  * The Events tab as events. Blank `active` counts as active, so a row needs
- * only a name and a chair. Two rows with the same name are read as one event
- * with both rows' chairs and aliases.
+ * only a name and a chair. Rows with the same name are read as one event
+ * with all their chairs and aliases and the first budget given. When some of
+ * those rows are active, the inactive ones are left out, so last year's row
+ * kept beside this year's adds neither last year's chair nor its budget.
  */
 export function parseEvents(rows: EventRow[]): PtaEvent[] {
-  const events: PtaEvent[] = [];
+  const groups: { name: string; rows: { chairs: string[]; aliases: string[]; budgetCents: number | null; active: boolean }[] }[] = [];
   for (const row of rows) {
     const name = String(row.name ?? "").trim().replace(/\s+/g, " ");
-    if (!name) continue;
-    const chairs = cellList(row.chair_email)
-      .map((email) => email.toLowerCase())
-      .filter((email) => email.includes("@"));
-    const aliases = cellList(row.aliases);
-    // The Sheet may hand back a bare number; anything unreadable means no budget.
-    const budgetCents = parseMoney(String(row.budget ?? ""));
-    const active = !INACTIVE.has(String(row.active ?? "").trim().toLowerCase());
-    const existing = events.find((e) => sameName(e.name, name));
-    if (existing) {
-      existing.chairs = [...new Set([...existing.chairs, ...chairs])];
-      existing.aliases = [...new Set([...existing.aliases, ...aliases])];
-      existing.budgetCents ??= budgetCents;
-      existing.active ||= active;
-    } else {
-      events.push({ name, chairs, aliases, budgetCents, active });
-    }
+    if (!name || name.length > EVENT_NAME_MAX) continue;
+    const parsed = {
+      chairs: cellList(row.chair_email)
+        .map((email) => email.toLowerCase())
+        .filter((email) => email.includes("@")),
+      aliases: cellList(row.aliases),
+      // The Sheet may hand back a bare number; anything unreadable means no budget.
+      budgetCents: parseMoney(String(row.budget ?? "")),
+      active: !INACTIVE.has(String(row.active ?? "").trim().toLowerCase()),
+    };
+    const group = groups.find((g) => sameName(g.name, name));
+    if (group) group.rows.push(parsed);
+    else groups.push({ name, rows: [parsed] });
   }
-  return events;
+  return groups.map(({ name, rows: all }) => {
+    const active = all.some((r) => r.active);
+    const used = active ? all.filter((r) => r.active) : all;
+    return {
+      name,
+      chairs: [...new Set(used.flatMap((r) => r.chairs))],
+      aliases: [...new Set(used.flatMap((r) => r.aliases))],
+      budgetCents: used.find((r) => r.budgetCents !== null)?.budgetCents ?? null,
+      active,
+    };
+  });
 }
 
 /** The event called `name` (ignoring case and spacing), or null. */
-export function findEvent(events: PtaEvent[], name: string): PtaEvent | null {
+export function findEvent<E extends Pick<PtaEvent, "name">>(events: E[], name: string): E | null {
   return name.trim() ? (events.find((e) => sameName(e.name, name)) ?? null) : null;
 }
 
@@ -110,7 +126,7 @@ export interface ChairRouting {
  * asked to sign their own request, and neither are their co-chairs: the line
  * stays blank for AP.
  */
-export function chairRouting(event: PtaEvent | null, requesterEmail: string): ChairRouting {
+export function chairRouting(event: Pick<PtaEvent, "chairs"> | null, requesterEmail: string): ChairRouting {
   if (!event) return { step: "", chairs: [] };
   if (event.chairs.includes(requesterEmail.trim().toLowerCase())) return { step: "Skipped: requester is a chair", chairs: [] };
   if (event.chairs.length === 0) return { step: "Skipped: no chair listed", chairs: [] };

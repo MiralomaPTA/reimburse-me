@@ -28,7 +28,7 @@ export function ChairSignForm({
   const [note, setNote] = useState("");
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ emailed: boolean } | null>(null);
+  const [done, setDone] = useState<{ emailed: boolean; chairCopied: boolean } | null>(null);
   const padRef = useRef<SignaturePadHandle>(null);
 
   async function sign() {
@@ -52,7 +52,7 @@ export function ChairSignForm({
         setProblems([body.error ?? "Could not sign. Please try again."]);
         return;
       }
-      setDone({ emailed: body.emailed !== false });
+      setDone({ emailed: body.emailed !== false, chairCopied: body.chairCopied !== false });
       window.scrollTo({ top: 0 });
     } catch {
       setProblems(["Could not sign. Check your connection and try again."]);
@@ -65,17 +65,20 @@ export function ChairSignForm({
     return (
       <div className="space-y-3 rounded-md border border-emerald-300 bg-emerald-50 p-4 text-emerald-900">
         <h2 className="text-lg font-semibold">Signed. Thank you!</h2>
-        <p className="text-sm">
-          {sendPacketsTo === "ap"
-            ? `Request ${requestId} has gone to the PTA's accounts payable team with your signature on it.`
-            : `${payeeName} has been sent the co-signed request to send on to the PTA.`}{" "}
-          We emailed you a copy for your records.
-        </p>
-        {!done.emailed && (
+        {done.emailed ? (
+          <p className="text-sm">
+            {sendPacketsTo === "ap"
+              ? `Request ${requestId} has gone to the PTA's accounts payable team with your signature on it.`
+              : `${payeeName} has been sent the co-signed request to send on to the PTA.`}
+          </p>
+        ) : (
           <p className="text-sm text-amber-900">
-            Your signature was saved, but an email didn&apos;t go out. Please let {payeeName} know it&apos;s signed.
+            Your signature was saved, but the email sending it on didn&apos;t go out. Please let {payeeName} know it&apos;s signed.
           </p>
         )}
+        <p className="text-sm">
+          {done.chairCopied ? "We emailed you a copy for your records." : "We couldn't email you a copy. Save one from the button below if you'd like it for your records."}
+        </p>
         <a href={pdfHref} target="_blank" rel="noopener" className="btn-secondary">
           Open the co-signed PDF
         </a>

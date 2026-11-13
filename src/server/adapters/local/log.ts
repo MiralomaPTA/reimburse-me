@@ -62,4 +62,12 @@ export const localRequestLog: RequestLog = {
     rows[index] = { ...rows[index], ...patch, updated_at: new Date().toISOString() };
     await writeAll(rows);
   },
+  async updateIf(requestId, condition, patch) {
+    const rows = await readAll();
+    const index = rows.findIndex((r) => r.request_id === requestId);
+    if (index === -1 || !condition(rows[index])) return false;
+    rows[index] = { ...rows[index], ...patch, updated_at: new Date().toISOString() };
+    await writeAll(rows);
+    return true;
+  },
 };
