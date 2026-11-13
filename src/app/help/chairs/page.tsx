@@ -74,7 +74,7 @@ export default function ChairGuidePage() {
           items={[
             {
               q: "This wasn't for my event, or something looks wrong.",
-              a: "Don't sign. Reply to the email: your reply goes to the person who asked, so they can fix it and send a corrected request.",
+              a: "Don't sign. Write to the person who asked, using the link at the bottom of the signing page, so they can fix it and send a corrected request. Please don't forward the email or reply to them from it: it holds your signing link. A reply to the email goes to the PTA.",
             },
             {
               q: "The link says it isn't valid or has expired.",

@@ -150,8 +150,6 @@ export interface CountersignaturePageInput {
   chairEmail: string;
   /** When that email went out, if known. */
   linkSentAt: Date | null;
-  ip: string;
-  userAgent: string;
   consentText: string;
   /** The packet the requester signed, which this one extends. */
   requesterSha256: string;
@@ -177,8 +175,7 @@ export async function appendCountersignaturePage(doc: PDFDocument, input: Counte
   w.sub("Signature");
   w.field("Method", input.signature.type === "typed" ? `Typed name: "${input.signature.name}"` : "Drawn with finger or mouse");
   w.field("Signed at", `${formatDateTime(input.signedAt)} (${input.signedAt.toISOString()})`);
-  w.field("IP address", input.ip || "unknown");
-  w.field("Browser", input.userAgent || "unknown");
+  w.field("Signed from", "The IP address and browser are kept in the PTA's request log, not in this file");
   w.field("Consent", input.consentText);
   if (input.note) {
     w.space(6);

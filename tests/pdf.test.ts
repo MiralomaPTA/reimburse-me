@@ -143,8 +143,6 @@ describe("countersignPacket", () => {
       signedAt: new Date("2026-11-14T18:00:00Z"),
       chairEmail: "lillie@example.org",
       linkSentAt: new Date("2026-11-12T20:00:00Z"),
-      ip: "127.0.0.1",
-      userAgent: "vitest",
       consentText: "I agree",
       note: "Water station",
     };

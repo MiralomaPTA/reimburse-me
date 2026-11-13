@@ -25,8 +25,6 @@ export interface CountersignInput {
   signedAt: Date;
   chairEmail: string;
   linkSentAt: Date | null;
-  ip: string;
-  userAgent: string;
   consentText: string;
   note: string;
 }
@@ -75,8 +73,6 @@ export async function countersignPacket(input: CountersignInput): Promise<Counte
     signedAt: input.signedAt,
     chairEmail: input.chairEmail,
     linkSentAt: input.linkSentAt,
-    ip: input.ip,
-    userAgent: input.userAgent,
     consentText: input.consentText,
     requesterSha256: input.requesterSha256,
     requesterPages,

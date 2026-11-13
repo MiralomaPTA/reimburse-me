@@ -253,7 +253,8 @@ export function chairRequestEmail(input: ChairRequestEmailInput): { subject: str
       "",
       `The link works for ${config.chairLinkDays} days and only for you, so please don't forward it.` +
         (input.chairCount > 1 ? ` The other ${event} chairs got this email too; one signature is enough.` : ""),
-      `If something isn't right, reply to this email to reach ${request.payeeName}. New to this? ${input.linkBase}/help/chairs explains it.`,
+      `If something isn't right, don't sign. Write to ${request.payeeName} at ${input.requesterEmail} in a new email rather than forwarding or replying to this one, which holds your link. A reply to this email goes to the PTA.`,
+      `New to this? ${input.linkBase}/help/chairs explains it.`,
       "",
       ...summary({ ...input, funding: [] }),
     ].join("\n"),

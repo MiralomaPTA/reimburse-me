@@ -58,7 +58,9 @@ describe("the event chair step", () => {
 
     const [toLillie] = mailer.to(LILLIE);
     expect(toLillie.subject).toBe(`Please sign: Fun Run reimbursement for Pat Teacher, $10.00 (${result.requestId})`);
-    expect(toLillie.replyTo).toBe(ME);
+    // Not the requester: a reply would hand them the chair's link.
+    expect(toLillie.replyTo).toBe(config.apEmail);
+    expect(toLillie.text).toContain(`Write to Pat Teacher at ${ME} in a new email`);
     expect(toLillie.attachments?.[0].filename).toBe(`${result.requestId}.pdf`);
     expect(toLillie.text).toContain("Fun Run budget: $500.00. Before this request $0.00 was claimed, $500.00 left; after it, $490.00 left.");
     expect(toLillie.text).toContain("The other Fun Run chairs got this email too");
@@ -90,7 +92,7 @@ describe("the event chair step", () => {
     expect(result.emailed).toBe(true);
     const row = log.rows[0];
     expect(result.chairCopied).toBe(true);
-    expect(row).toMatchObject({ status: "Submitted", chair_step: "Signed", chair_signed_by: LILLIE, chair_name: "Lillie Coit", chair_note: "Water station", chair_pdf_sha256: result.sha256, lock: "" });
+    expect(row).toMatchObject({ status: "Submitted", chair_step: "Signed", chair_signed_by: LILLIE, chair_name: "Lillie Coit", chair_note: "Water station", chair_pdf_sha256: result.sha256, chair_ip: "10.0.0.1", chair_user_agent: "vitest", lock: "" });
     const cosigned = files.files.get(row.chair_pdf_file_id)!;
     expect(cosigned.name).toBe(`${requestId}-cosigned.pdf`);
     expect((await PDFDocument.load(cosigned.bytes)).getPageCount()).toBe(pageCount + 1);

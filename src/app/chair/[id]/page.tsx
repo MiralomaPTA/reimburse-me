@@ -112,8 +112,8 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
       <ChairSignForm requestId={row.request_id} token={token} event={row.event} payeeName={request.payeeName} pdfHref={pdfHref} sendPacketsTo={config.sendPacketsTo} />
 
       <p className="text-sm text-neutral-600">
-        Something not right? Reply to the email you got, which goes to {request.payeeName}, or write to them at <MailtoLink email={stored.requesterEmail} />.
-        You&apos;re signing as {link.email}.
+        Something not right? Don&apos;t sign. Write to {request.payeeName} at <MailtoLink email={stored.requesterEmail} /> so they can fix it, rather than
+        forwarding the email you got: it holds your link. A reply to that email goes to the PTA. You&apos;re signing as {link.email}.
       </p>
     </div>
   );

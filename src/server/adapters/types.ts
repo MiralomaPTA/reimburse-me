@@ -99,6 +99,9 @@ export interface RequestRow {
   chair_signed_at: string;
   /** The chair's optional note to AP, sent with the co-signed packet. */
   chair_note: string;
+  /** Where the chair signed from. Here for AP only, never on the countersignature page, which the requester gets. */
+  chair_ip: string;
+  chair_user_agent: string;
   /** The co-signed packet: the requester-signed one with the chair's signature and a countersignature page. */
   chair_pdf_file_id: string;
   chair_pdf_sha256: string;
@@ -149,6 +152,8 @@ export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
   "chair_name",
   "chair_signed_at",
   "chair_note",
+  "chair_ip",
+  "chair_user_agent",
   "chair_pdf_file_id",
   "chair_pdf_sha256",
   "request_file_id",

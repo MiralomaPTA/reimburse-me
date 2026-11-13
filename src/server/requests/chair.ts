@@ -68,13 +68,17 @@ export interface ChairRequestInput {
   budget: EventBudget | null;
 }
 
-/** Emails each chair their own link. Never throws: says who was reached and why the others weren't. */
+/**
+ * Emails each chair their own link. Replies go to AP, not the requester: a
+ * reply quotes the email, link and all, and the link is all it takes to sign
+ * as the chair. Never throws: says who was reached and why the others weren't.
+ */
 export async function sendChairRequests(input: ChairRequestInput, mailer: Mailer): Promise<{ sent: string[]; failed: string[]; error?: string }> {
   const results = await Promise.allSettled(
     input.chairs.map(async (chair) => {
       const token = await createChairToken(chair, input.requestId, input.version);
       const mail = chairRequestEmail({ ...input, link: `${input.linkBase}${chairLinkPath(input.requestId, token)}`, chairCount: input.chairs.length });
-      await mailer.send({ to: [chair], replyTo: input.requesterEmail, subject: mail.subject, text: mail.text, attachments: [input.attachment] });
+      await mailer.send({ to: [chair], replyTo: config.apEmail, subject: mail.subject, text: mail.text, attachments: [input.attachment] });
     }),
   );
   const sent = input.chairs.filter((_, i) => results[i].status === "fulfilled");
@@ -180,6 +184,7 @@ export interface ChairSignInput {
   signature: SignatureInput;
   /** Optional, for AP. */
   note: string;
+  /** Where the chair signed from: recorded on the row for AP, never in the packet. */
   ip: string;
   userAgent: string;
   linkBase: string;
@@ -233,8 +238,6 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
       signedAt,
       chairEmail: link.email,
       linkSentAt: parseDate(row.chair_sent_at),
-      ip: input.ip,
-      userAgent: input.userAgent,
       consentText: chairConsentText(event),
       note: input.note,
     });
@@ -247,6 +250,9 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
       chair_name: input.name,
       chair_signed_at: signedAt.toISOString(),
       chair_note: input.note,
+      // Kept off the countersignature page, which the requester gets: only AP sees the Sheet.
+      chair_ip: input.ip,
+      chair_user_agent: input.userAgent,
       chair_pdf_file_id: saved.id,
       chair_pdf_sha256: packet.sha256,
     };

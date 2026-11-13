@@ -128,7 +128,7 @@ A request awaiting the chair counts against its stipend, the same as a submitted
 
 ## The chair's email and page
 
-**The email** goes to every address in the event's `chair_email`. Replies go to the requester.
+**The email** goes to every address in the event's `chair_email`. Replies go to AP, not the requester: a reply quotes the email, link and all, and the link is all it takes to sign as the chair. The email asks a chair who finds a problem to write to the requester in a new email instead, and the signing page links the requester's address for that.
 
 - Subject: "Please sign: Fun Run reimbursement for Harvey Milk, $123.45 (FY27-042)".
 - The body gives the requester's name and position, the purpose, the line items and the totals, and has a **Review and sign** link. When the event has a budget, a line says where it stands: "Fun Run budget: $1,500.00. Before this request $120.00 was claimed, $1,380.00 left; after it, $1,337.50 left." It ends with a link to the chairs' guide at `/help/chairs`.
@@ -171,7 +171,7 @@ The requester's signed PDF is never changed. Before co-signing, the app checks t
   - the event and the chair's name
   - the address the link was sent to
   - when the link was sent and when it was used
-  - the signature method, IP address and browser
+  - the signature method (the IP address and browser it was signed from go in the Sheet, not on this page, because the requester gets this file)
   - the consent text
   - the SHA-256 of the requester-signed packet it countersigns
 - The file is saved as `FY27-042-cosigned.pdf`, or `FY27-042-v2-cosigned.pdf` for a later version. Its SHA-256 goes in the Sheet and in the emails, the same as the requester's.
@@ -212,6 +212,7 @@ The request page shows *Waiting for the Fun Run chair to sign*, who the email re
 | `chair_name` | The name the chair signed under |
 | `chair_signed_at` | When the chair signed |
 | `chair_note` | The chair's note to AP |
+| `chair_ip`, `chair_user_agent` | The IP address and browser the chair signed from. Kept here for AP rather than on the countersignature page, which the requester gets |
 | `chair_pdf_file_id`, `chair_pdf_sha256` | The co-signed packet and its hash |
 | `request_file_id` | The request's JSON file (`FY27-042.json`), written for every request. Phase 2 calls it `request.json` |
 | `lock` | Held for a few seconds while the app signs or resends, so two of them at once can't both go through: the lock's expiry and a random ID. Blank otherwise. One left behind by a crash expires after 3 minutes, and is safe to clear by hand |
@@ -233,7 +234,8 @@ The request page shows *Waiting for the Fun Run chair to sign*, who the email re
 
 ## Security and privacy
 
-- The chair link is a signed token naming the chair's address, the request and its version. The app checks it against the request's row and the Events tab every time it's used. As with the sign-in and approval links, anyone who has the email can use the link. The countersignature page records which address it was sent to.
+- The chair link is a signed token naming the chair's address, the request and its version. The app checks it against the request's row and the Events tab every time it's used. As with the sign-in and approval links, anyone who has the email can use the link. The countersignature page records which address it was sent to. So that the requester never ends up holding a chair's link, the chair email's Reply-To is AP, and chairs are asked to write to the requester in a new email rather than reply or forward.
+- The chair's IP address and browser are recorded in the Sheet, which only AP and the admin see, and not on the countersignature page, because the requester gets the co-signed file. (The requester's own IP address and browser stay on their audit page, as before.)
 - Opening the link does nothing. Signing needs a separate button press after the page has loaded.
 - The chair sees only that one request: its summary and its packet, including the receipts. They can't see the requester's other requests or any stipend balances. The event budget shows only totals, never who claimed what. The existing tip to crop personal details out of receipts applies here too.
 - The chair page sends no Referer header and asks search engines not to index it, because the token is in its URL.
@@ -252,7 +254,7 @@ The request page shows *Waiting for the Fun Run chair to sign*, who the email re
    - The request's JSON file written on every submit.
    - Updated help guides, including a short page for chairs that their email links to.
 
-   Until step 2 ships, a chair who finds a problem replies to the email, and the reply goes to the requester.
+   Until step 2 ships, a chair who finds a problem writes to the requester in a new email, from the link on the signing page. A reply to the chair email goes to AP.
 2. **Send back.** The chair's **Send back** button and the requester's *Fix and re-sign* flow, with versions. This is shared with Phase 2b.
 3. **Nudge.** A daily Vercel cron job that sends the 3-day and 7-day reminders and handles the 14-day time-out. The same route can later run the Phase 2c digest and the 30-day cleanup of `pending/`.
 

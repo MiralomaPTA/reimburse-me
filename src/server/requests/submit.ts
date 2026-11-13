@@ -185,6 +185,8 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     chair_name: "",
     chair_signed_at: "",
     chair_note: "",
+    chair_ip: "",
+    chair_user_agent: "",
     chair_pdf_file_id: "",
     chair_pdf_sha256: "",
     request_file_id: requestFileId,
