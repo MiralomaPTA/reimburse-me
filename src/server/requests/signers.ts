@@ -15,7 +15,8 @@ import { addSecondSignature, buildAuthorizedPacket, fillFo10, type Fo10Details }
 import { SIGNER_CONSENT_TEXT } from "@/server/pdf/types";
 import { BusyError, withRequestLock } from "@/server/requests/lock";
 import { signersFor } from "@/server/requests/mailing";
-import { addressList, lowerEmail as lower, sha256, versionOf } from "@/server/requests/rows";
+import { sha256 } from "@/server/hash";
+import { addressList, appendNotes, lowerEmail as lower, versionOf } from "@/server/requests/rows";
 import { toPacketSignature } from "@/server/requests/signature";
 import { fundingEmailShares, fundingLabel, fundingOptions, parseFundingChoice } from "@/server/requests/stipends";
 import { authorizedName, cosignedName, fo10Name, loadStoredRequest, type StoredRequest } from "@/server/requests/stored";
@@ -441,7 +442,7 @@ export interface SignerSignResult {
   slot: 1 | 2;
   /** Of the file the signature made: the first-signature FO10, or the authorized packet. */
   sha256: string;
-  /** false when the signature was saved but an email onward (to the other signers, or to AP) didn't go. */
+  /** false when the signature was saved but didn't go onward: no other signer reached, or AP's email failed. */
   emailed: boolean;
   /** false when the signer's own receipt didn't go. */
   receipted: boolean;
@@ -635,11 +636,11 @@ export async function signAsSigner(input: SignerSignInput, adapters: Adapters): 
   // From here on the signature is recorded; email trouble is noted on the row.
   const problems: string[] = [];
   let emailed = true;
-  let notes = made.row.notes;
   if (!made.authorized) {
     const result = await sendToSigners({ row: made.row, stored, linkBase: input.linkBase, packetBytes: made.packetBytes, fo10Bytes: made.fo10, flags: state.flags, first: made.record }, adapters);
+    // Onward as long as someone who can sign next has a link; the rest are noted, and the requester can resend to them.
+    emailed = result.sent.length > 0;
     if (result.error) {
-      emailed = false;
       console.error(`[signers] "one more signature" for ${requestId} failed: ${result.error}`);
       problems.push(`The "one more signature" email${result.failed.length ? ` to ${result.failed.join(", ")}` : ""} failed: ${result.error}`);
       await log.update(requestId, { signers_sent_to: result.sent.join(", "), ...(result.sent.length === 0 ? { signers_sent_at: "" } : {}) }).catch(() => undefined);
@@ -647,19 +648,25 @@ export async function signAsSigner(input: SignerSignInput, adapters: Adapters): 
   } else {
     // Read again, and sent only if the authorized packet the row records is the one made here.
     const after = await log.get(requestId);
-    notes = after?.notes ?? notes;
     if (after && after.authorized_pdf_sha256 === made.authorized.sha256) {
+      let sent: Awaited<ReturnType<typeof sendAuthorizedPacket>> | null = null;
       try {
-        const sent = await sendAuthorizedPacket({ row: after, stored, authorized: made.authorized.bytes, linkBase: input.linkBase, flags: state.flags, first: first! }, adapters);
-        await log
-          .update(requestId, { authorized_sent_at: sent.sentAt.toISOString() })
-          .catch((error: unknown) => problems.push(`Sent to AP, but couldn't record when: ${error instanceof Error ? error.message : error}`));
-        if (sent.copyError) problems.push(`The requester's copy of the authorized packet failed: ${sent.copyError}`);
+        sent = await sendAuthorizedPacket({ row: after, stored, authorized: made.authorized.bytes, linkBase: input.linkBase, flags: state.flags, first: first! }, adapters);
       } catch (error) {
         emailed = false;
         const message = error instanceof Error ? error.message : String(error);
         console.error(`[signers] could not send ${requestId} to AP: ${message}`);
         problems.push(`The authorized packet's email to AP failed: ${message}`);
+        // Recorded only when it's known to have failed, so the requester is never offered a second send of a packet AP may have.
+        await log
+          .update(requestId, { authorized_send_error: message || "failed" })
+          .catch((e: unknown) => problems.push(`Couldn't record that AP's email failed: ${e instanceof Error ? e.message : e}`));
+      }
+      if (sent) {
+        await log
+          .update(requestId, { authorized_sent_at: sent.sentAt.toISOString() })
+          .catch((error: unknown) => problems.push(`Sent to AP, but couldn't record when: ${error instanceof Error ? error.message : error}`));
+        if (sent.copyError) problems.push(`The requester's copy of the authorized packet failed: ${sent.copyError}`);
       }
     } else {
       emailed = false;
@@ -678,7 +685,7 @@ export async function signAsSigner(input: SignerSignInput, adapters: Adapters): 
     problems.push(`The signer's receipt (to ${email}) failed: ${message}`);
     receipted = false;
   }
-  if (problems.length > 0) await log.update(requestId, { notes: [notes, ...problems].filter(Boolean).join(" | ") }).catch(() => undefined);
+  await appendNotes(log, requestId, problems);
   return { slot, sha256: made.authorized?.sha256 ?? made.fo10Sha256, emailed, receipted };
 }
 
@@ -801,7 +808,7 @@ export async function sendBackAsSigner(input: SignerSendBackInput, adapters: Ada
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[signers] the sent-back email for ${row.request_id} failed: ${message}`);
-    await log.update(row.request_id, { notes: [row.notes, `Email that a check signer sent it back failed: ${message}`].filter(Boolean).join(" | ") }).catch(() => undefined);
+    await appendNotes(log, row.request_id, [`Email that a check signer sent it back failed: ${message}`]);
     return { emailed: false };
   }
 }
@@ -887,29 +894,22 @@ export async function resendToSigners(
 }
 
 /**
- * How long after the second signature the app may still be sending the
- * authorized packet itself. Until then the requester's page says it's on its
- * way, and it can't be sent again.
- */
-export const AUTHORIZED_SENDING_MS = 5 * 60_000;
-
-/**
  * Whether AP has the authorized packet: "sent" once its email went (or AP has
- * moved the request on, so they have it), "sending" just after the second
- * signature, and "unsent" when that email failed. Null for a request with no
- * authorized packet.
+ * moved the request on, so they have it), "unsent" once a try to email it is
+ * known to have failed, and "sending" otherwise, while the second signer's
+ * request is still sending it. Never guessed from the time: a send that went
+ * through but couldn't be recorded stays "sending", so the requester isn't
+ * offered a second send of a packet AP may have. Null with no authorized packet.
  */
 export function authorizedSending(
-  row: Pick<RequestRow, "check_delivery" | "status" | "signers_step" | "authorized_pdf_file_id" | "authorized_sent_at" | "signer_2_signed_at">,
-  now = new Date(),
+  row: Pick<RequestRow, "check_delivery" | "status" | "signers_step" | "authorized_pdf_file_id" | "authorized_sent_at" | "authorized_send_error">,
 ): "sent" | "sending" | "unsent" | null {
   if (row.check_delivery !== "mail" || row.signers_step !== "Signed" || !row.authorized_pdf_file_id) return null;
   if (row.authorized_sent_at || row.status !== "Submitted") return "sent";
-  const at = parseDate(row.signer_2_signed_at);
-  return at && now.getTime() - at.getTime() < AUTHORIZED_SENDING_MS ? "sending" : "unsent";
+  return row.authorized_send_error ? "unsent" : "sending";
 }
 
-export type AuthorizedResendProblem = "not-found" | "closed" | "already-sent" | "too-soon" | "mismatch" | "busy" | "failed";
+export type AuthorizedResendProblem = "not-found" | "closed" | "already-sent" | "sending" | "mismatch" | "busy" | "failed";
 
 export class AuthorizedResendError extends Error {
   constructor(
@@ -920,39 +920,38 @@ export class AuthorizedResendError extends Error {
   }
 }
 
-function authorizedResendProblem(row: RequestRow, now: Date): AuthorizedResendError | null {
-  switch (authorizedSending(row, now)) {
+function authorizedResendProblem(row: RequestRow): AuthorizedResendError | null {
+  switch (authorizedSending(row)) {
     case null:
       return new AuthorizedResendError("closed", "This request has no authorized packet to send.");
     case "sent":
       return new AuthorizedResendError("already-sent", "The PTA's accounts payable team already has it.");
     case "sending":
-      return new AuthorizedResendError("too-soon", "It's still being sent. Reload the page in a few minutes.");
+      return new AuthorizedResendError("sending", "It's still on its way. You'll get a copy by email once the PTA has it.");
     case "unsent":
       return null;
   }
 }
 
 /**
- * The requester's "Send it to the PTA", for when the authorized packet's
- * email to AP failed after the second signature. Sends the saved packet from
+ * The requester's "Send it to the PTA", offered only once the authorized
+ * packet's email to AP is recorded as failed. Sends the saved packet from
  * Drive, checked against its hash, to AP only: the requester's copy, and the
  * PDF on their page, are as before. The requester never carries the packet.
  * Runs under the row's lock, so a double click sends it once.
  */
 export async function sendAuthorizedAgain(
-  input: { requestId: string; requesterEmail: string; linkBase: string; now?: Date },
+  input: { requestId: string; requesterEmail: string; linkBase: string },
   adapters: Pick<Adapters, "log" | "files" | "signatures" | "users" | "stipends" | "mailer">,
 ): Promise<void> {
   const { log, files, signatures } = adapters;
-  const now = input.now ?? new Date();
   const first = await log.get(input.requestId);
   if (!first || lower(first.requester_email) !== lower(input.requesterEmail)) throw new AuthorizedResendError("not-found", "That request wasn't found.");
-  const early = authorizedResendProblem(first, now);
+  const early = authorizedResendProblem(first);
   if (early) throw early;
   try {
     await withRequestLock(log, input.requestId, async (row) => {
-      const problem = authorizedResendProblem(row, now);
+      const problem = authorizedResendProblem(row);
       if (problem) throw problem;
       let sending: Parameters<typeof sendAuthorizedPacket>[0];
       try {
@@ -973,7 +972,7 @@ export async function sendAuthorizedAgain(
       }
       try {
         const { sentAt } = await sendAuthorizedPacket(sending, adapters);
-        return { patch: { authorized_sent_at: sentAt.toISOString() }, result: undefined };
+        return { patch: { authorized_sent_at: sentAt.toISOString(), authorized_send_error: "" }, result: undefined };
       } catch (error) {
         console.error(`[signers] resend of ${row.request_id}'s authorized packet failed: ${error instanceof Error ? error.message : error}`);
         throw new AuthorizedResendError("failed", "The email didn't go through. Please try again in a few minutes.");

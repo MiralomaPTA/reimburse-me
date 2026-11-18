@@ -5,10 +5,11 @@ import { chairRequestEmail, chairSignedEmail } from "@/server/email/templates";
 import { countersignPacket } from "@/server/pdf/countersign";
 import { chairConsentText } from "@/server/pdf/types";
 import { BusyError, withRequestLock } from "@/server/requests/lock";
-import { addressList, sha256, versionOf } from "@/server/requests/rows";
+import { sha256 } from "@/server/hash";
+import { addressList, appendNotes, lowerEmail, versionOf } from "@/server/requests/rows";
 import { signersFor } from "@/server/requests/mailing";
 import { sendPacketOn } from "@/server/requests/send-on";
-import { sendToSigners } from "@/server/requests/signers";
+import { sendToSigners, signerFlags } from "@/server/requests/signers";
 import { toPacketSignature } from "@/server/requests/signature";
 import { fundingEmailShares, fundingOptions } from "@/server/requests/stipends";
 import { cosignedName, loadStoredRequest, type StoredRequest } from "@/server/requests/stored";
@@ -207,6 +208,12 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
   if (state.kind !== "ready") throw new ChairError(chairStateMessage(state));
   const { link, stored, rows } = state;
   const { request_id: requestId, event } = state.row;
+  const mailed = stored.request.checkDelivery === "mail";
+  // As submit checks: a mailed check needs two check signers besides the requester, or it would wait for a second signature that can't come.
+  if (mailed && signersFor(state.row.requester_email).length < 2) {
+    console.error(`[chair] not co-signing ${requestId}: it's a mailed check, and CHECK_SIGNERS has fewer than two signers besides the requester`);
+    throw new ChairError(`This request's check is to be mailed, and the PTA doesn't have enough check signers set up to approve it right now. Please let the PTA know at ${config.apEmail}; you can sign once that's fixed.`);
+  }
   const signedAt = new Date();
 
   const signed = await withRequestLock(log, requestId, async (row) => {
@@ -239,7 +246,6 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
     const filename = cosignedName(requestId, versionOf(row));
     const saved = await files.putFile({ name: filename, mimeType: "application/pdf", bytes: packet.bytes, folderPath: ["requests", fiscalYearLabel(new Date(row.submitted_at)), requestId] });
     // A mailed check goes to the check signers next; it reaches AP only with their FO10.
-    const mailed = stored.request.checkDelivery === "mail";
     const patch: Partial<RequestRow> = {
       ...(mailed
         ? { status: "Awaiting signers", signers_step: "Waiting", signers_sent_to: signersFor(row.requester_email).join(", "), signers_sent_at: signedAt.toISOString() }
@@ -255,24 +261,25 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
       chair_pdf_file_id: saved.id,
       chair_pdf_sha256: packet.sha256,
     };
-    return { patch, result: { row, packet, filename } };
+    return { patch, result: { row: { ...row, ...patch }, packet, filename } };
   }).catch((error: unknown) => {
     if (error instanceof BusyError) throw new ChairError("This request is being signed right now, perhaps by a co-chair. Reload the page in a minute to see whether it went through.");
     throw error;
   });
 
-  // From here on the signature is recorded; email trouble is noted on the row.
+  // From here on the signature is recorded; email trouble is noted on the row. `row` is as just written.
   const { row, packet, filename } = signed;
   const submittedAt = new Date(row.submitted_at);
   const attachment = { filename, mimeType: "application/pdf", bytes: packet.bytes };
   const problems: string[] = [];
   let emailed = true;
-  const mailed = stored.request.checkDelivery === "mail";
   if (mailed) {
-    const after = await log.get(requestId);
-    const sent = after ? await sendToSigners({ row: after, stored, linkBase: input.linkBase, packetBytes: packet.bytes }, adapters) : { sent: [], failed: [], error: "the row vanished" };
+    // The log as read for the budget, so the flags don't need another read.
+    const flags = signerFlags(row, stored.request, rows.filter((r) => lowerEmail(r.requester_email) === lowerEmail(row.requester_email)));
+    const sent = await sendToSigners({ row, stored, linkBase: input.linkBase, packetBytes: packet.bytes, flags, first: null }, adapters);
+    // On its way as long as one signer has it; the rest are noted, and the requester can resend to them.
+    emailed = sent.sent.length > 0;
     if (sent.error) {
-      emailed = false;
       console.error(`[chair] could not send ${requestId} to the check signers: ${sent.error}`);
       problems.push(`Email to the check signers${sent.failed.length ? ` (${sent.failed.join(", ")})` : ""} failed after the chair signed: ${sent.error}`);
       await log.update(requestId, { signers_sent_to: sent.sent.join(", "), ...(sent.sent.length === 0 ? { signers_sent_at: "" } : {}) }).catch(() => undefined);
@@ -314,7 +321,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
     problems.push(`The chair's copy (to ${link.email}) failed: ${message}`);
     chairCopied = false;
   }
-  if (problems.length > 0) await log.update(requestId, { notes: [row.notes, ...problems].filter(Boolean).join(" | ") }).catch(() => undefined);
+  await appendNotes(log, requestId, problems);
   return { sha256: packet.sha256, emailed, chairCopied, mailed };
 }
 

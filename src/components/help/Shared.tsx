@@ -20,6 +20,9 @@ export const linkMinutes = config.magicLinkMinutes;
  */
 export const mailingInGuides = () => config.mailedChecks === "everyone" && config.checkSigners.length >= 2 && config.billPayAccounts.length > 0;
 
+/** The statuses *My requests* can show, with "Awaiting signers" once the guides describe mailing. */
+export const statusList = () => `Awaiting chair, ${mailingInGuides() ? "Awaiting signers, " : ""}Submitted, Approved, Returned or Paid`;
+
 /** What a mailed check does before it reaches the PTA; nothing while the guides leave mailing out. */
 function MailStep() {
   if (!mailingInGuides()) return null;

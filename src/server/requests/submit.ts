@@ -9,7 +9,8 @@ import { loadReceiptFiles } from "@/server/requests/receipts";
 import { sendPacketOn } from "@/server/requests/send-on";
 import { toPacketSignature } from "@/server/requests/signature";
 import { FundingError, fundingCell, fundingEmailShares, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
-import { sendToSigners } from "@/server/requests/signers";
+import { lowerEmail } from "@/server/requests/rows";
+import { sendToSigners, signerFlags } from "@/server/requests/signers";
 import { saveStoredRequest, type StoredRequest } from "@/server/requests/stored";
 import { chairRouting, eventBudget, findEvent, parseEvents } from "@/lib/events";
 import { fiscalYearLabel, formatRequestId, requestIdPrefix } from "@/lib/fiscal-year";
@@ -222,6 +223,7 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     authorized_pdf_file_id: "",
     authorized_pdf_sha256: "",
     authorized_sent_at: "",
+    authorized_send_error: "",
   };
   await log.append(row);
   const after = fundingOptions(user, stipendRows, [...earlierRows, row], submittedAt);
@@ -265,10 +267,13 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     }
   }
   if (toSigners) {
-    const sent = await sendToSigners({ row, stored: storedRequest, linkBase: input.linkBase, packetBytes: packet.bytes }, adapters);
+    // The log as read at the start: the requester's earlier requests, for the flags, without reading it again.
+    const flags = signerFlags(row, request, earlierRows.filter((r) => lowerEmail(r.requester_email) === lowerEmail(session.email)));
+    const sent = await sendToSigners({ row, stored: storedRequest, linkBase: input.linkBase, packetBytes: packet.bytes, flags, first: null }, adapters);
     signers = sent;
     if (sent.error) {
-      emailError = sent.error;
+      // Only when nobody has it: the requester's email says who it missed.
+      if (sent.sent.length === 0) emailError = sent.error;
       console.error(`[submit] email to the check signers failed for ${requestId}: ${sent.error}`);
       problems.push(`Email to the check signers${sent.failed.length ? ` (${sent.failed.join(", ")})` : ""} failed at submission: ${sent.error}`);
       patch.signers_sent_to = sent.sent.join(", ");

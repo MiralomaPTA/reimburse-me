@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { config } from "@/server/config";
 import { MailtoLink } from "@/components/MailtoLink";
 import { Guide, Questions, Section, Shot } from "@/components/help/Guide";
-import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions, mailingInGuides } from "@/components/help/Shared";
+import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions, mailingInGuides, statusList } from "@/components/help/Shared";
 import signIn from "@/images/help/teacher/sign-in.png";
 import checkEmail from "@/images/help/teacher/check-email.png";
 import almostThere from "@/images/help/teacher/almost-there.png";
@@ -139,7 +139,7 @@ export default function TeacherGuidePage() {
           paid, and what&apos;s left. A shared stipend counts everyone in your grade, so the number can move even when you haven&apos;t sent anything.
         </p>
         <Shot src={stipends} alt="The stipends box on the My requests page, with a bar for each stipend and what is left" wide />
-        <p>Below that is every request you&apos;ve sent, with its amount, which stipend it came from, and its status: Awaiting chair, Submitted, Approved, Returned or Paid.</p>
+        <p>Below that is every request you&apos;ve sent, with its amount, which stipend it came from, and its status: {statusList()}.</p>
         <Shot src={myRequests} alt="The My requests page" />
         <p>Tap a request to see its details and open the signed PDF again at any time.</p>
         <Shot src={toAp ? requestAp : requestRequester} alt="A request's details page, with an Open signed PDF button" />

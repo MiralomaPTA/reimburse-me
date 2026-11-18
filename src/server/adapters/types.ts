@@ -149,8 +149,10 @@ export interface RequestRow {
   /** The authorized packet: the FO10 signed by both, the packet they authorized, and an authorization page. */
   authorized_pdf_file_id: string;
   authorized_pdf_sha256: string;
-  /** When the authorized packet's email reached AP; blank until it does, so the requester can send it again. */
+  /** When the authorized packet's email reached AP; blank until it does. */
   authorized_sent_at: string;
+  /** Why the last try to email AP the authorized packet failed; blank otherwise. Only then can the requester send it again. */
+  authorized_send_error: string;
 }
 
 export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
@@ -213,6 +215,7 @@ export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
   "authorized_pdf_file_id",
   "authorized_pdf_sha256",
   "authorized_sent_at",
+  "authorized_send_error",
 ];
 
 export interface RequestLog {

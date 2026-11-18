@@ -130,7 +130,10 @@ export function SignerSignForm({
             PTA&apos;s records note it.
           </p>
         ) : (
-          <p className="text-sm text-amber-900">Your signature was saved, but an email sending it on didn&apos;t go out. The PTA has been told in its records.</p>
+          <p className="text-sm text-amber-900">
+            Your signature was saved, but the email asking the other check signers didn&apos;t go out. {payeeName} can resend it from their request page, and the PTA&apos;s
+            records note it.
+          </p>
         )}
         <p className="text-sm">{done.receipted ? "We emailed you a receipt, with the FO10 as you signed it." : "We couldn't email you a receipt, but your signature is saved."}</p>
       </div>

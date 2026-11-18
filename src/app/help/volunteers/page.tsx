@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { config } from "@/server/config";
 import { MailtoLink } from "@/components/MailtoLink";
 import { Guide, Questions, Section, Shot } from "@/components/help/Guide";
-import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions, mailingInGuides } from "@/components/help/Shared";
+import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions, mailingInGuides, statusList } from "@/components/help/Shared";
 import signIn from "@/images/help/volunteer/sign-in.png";
 import checkEmail from "@/images/help/volunteer/check-email.png";
 import almostThere from "@/images/help/volunteer/almost-there.png";
@@ -93,7 +93,7 @@ export default function VolunteerGuidePage() {
 
       <WhatHappensNext check={mailingInGuides() ? "picked up, left in the staff mailbox or mailed, as you chose" : "picked up from the PTA or left in the staff mailbox you chose"}>
         <p>
-          You can see every request you&apos;ve sent under <strong>My requests</strong>, with its status: Awaiting chair, Submitted, Approved, Returned or Paid.
+          You can see every request you&apos;ve sent under <strong>My requests</strong>, with its status: {statusList()}.
         </p>
         <Shot src={myRequests} alt="The My requests page, listing one request with its amount and status" />
         <p>Tap a request to see its details and open the signed PDF again at any time.</p>

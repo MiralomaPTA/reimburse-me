@@ -432,13 +432,16 @@ export function signerReceiptEmail(input: {
   payeeName: string;
   amountCents: number;
   mailingAddress: string;
-  /** false when the email onward (to the other signers, or to AP) didn't go. */
+  /** false when it didn't go onward: no other check signer was reached, or AP's email failed. */
   onward?: boolean;
 }): { subject: string; text: string } {
+  const failed = input.onward === false;
   const next =
     input.slot === 1
-      ? "One more check signer signs next. Then it goes to the PTA's accounts payable team, who set up the payment."
-      : input.onward === false
+      ? failed
+        ? `One more check signer signs next, but the email asking them didn't go through. ${input.payeeName} can resend it from their request page.`
+        : "One more check signer signs next. Then it goes to the PTA's accounts payable team, who set up the payment."
+      : failed
         ? `That was the second signature, but the email to the PTA's accounts payable team didn't go through. ${input.payeeName} can send it again from their request page.`
         : "That was the second signature. It has gone to the PTA's accounts payable team, who set up the payment.";
   return {

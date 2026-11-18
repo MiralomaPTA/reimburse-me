@@ -303,7 +303,7 @@ Getting a payment sent to a different address is the usual way to steal one. The
 
 The request page shows *Waiting for the PTA's check signers*, and then *One of two check signers has signed*. It shows when the emails went out, and it has a **Resend to the check signers** button that works at most once a day. Once both have signed, the page shows who signed and when, links the authorized packet, and says "The PTA's bank will mail your check to 123 Main St Apt 4, San Francisco, CA 94127." *My requests* shows the same status in the list.
 
-If the authorized packet's email to AP fails, the page doesn't say it went. It says AP doesn't have it yet and offers **Send it to the PTA**. That sends the saved packet from Drive to AP, after checking it against its hash, so the requester never carries it. The button shows from 5 minutes after the second signature, while the app's own send could still be running, until the email goes through or AP moves the request on.
+If the authorized packet's email to AP fails, the page doesn't say it went. It says AP doesn't have it yet and offers **Send it to the PTA**. That sends the saved packet from Drive to AP, after checking it against its hash, so the requester never carries it. The button shows only once the failure is recorded, never because of how long it has been. A send that went through but whose time couldn't be recorded must not lead to a second packet. Until the email is recorded as sent or failed, the page says the packet is on its way and that a copy will arrive by email, and asks the requester to contact the PTA if it hasn't come by the next day.
 
 ## Data changes
 
@@ -328,6 +328,7 @@ New columns are appended to the header on first use, like every column the app h
 | `fo10_file_id`, `fo10_sha256` | The FO10 with the first signature, and its hash |
 | `authorized_pdf_file_id`, `authorized_pdf_sha256` | The authorized packet and its hash |
 | `authorized_sent_at` | When the authorized packet's email reached AP. Blank until it does |
+| `authorized_send_error` | Why the last try to email AP the authorized packet failed. Blank otherwise. Only then is **Send it to the PTA** offered |
 
 Wherever the app links a packet, it uses the authorized one if there is one, then the co-signed one, then the requester-signed one. `RequestStatus` gains *Awaiting signers*.
 
@@ -386,6 +387,7 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 **Rules the server enforces**, whatever the form shows:
 
 - It refuses `checkDelivery: "mail"` while mailing is switched off for that requester, whether by their `mailed_checks` cell, by `MAILED_CHECKS`, or by the signer settings. It reads the Users row at signing, not from the session.
+- A mailed request goes on to the check signers only while `CHECK_SIGNERS` has two besides the requester. Submit refuses mailing otherwise. The chair's signature is refused until the PTA fixes the list, so the request never waits for a second signature that can't come.
 - Every path that sends a packet to AP sends a mailed request to the signers instead. Those paths are submit, chair signature, chair time-out, Phase 2 resubmission, and any later status tool. A single guard refuses to email AP a mailed request that has no authorized packet for its current version.
 - Each signature is made once, under the row lock (see *How a signature is recorded*).
 - The FO10 is filled from a `request.json` whose packet hash matches the row, and the second signature checks the first-signature FO10 and the packet against their recorded hashes.
@@ -442,7 +444,8 @@ From a code review of the first build:
 - *How a signature is recorded*: signing takes the row lock that the chair step and resends already use, in place of first-claim-wins in the Signatures tab. One mechanism now covers every step, a resend can't run halfway through a signature, and nothing depends on the tab's row order. The Signatures tab stays as the record of each signature and send-back.
 - The second signature takes the Budget Account and Payment Account from the first signature's record, not the editable row, so the FO10, the authorization page and AP's email always agree.
 - The authorization page leaves out the flags and the signers' notes, because the requester gets a copy. AP still gets both by email.
-- A new `authorized_sent_at` column records when AP got the authorized packet. If that email fails, the requester's page says so and offers **Send it to the PTA**.
+- New `authorized_sent_at` and `authorized_send_error` columns record whether AP got the authorized packet. Only a recorded failure makes the requester's page say so and offer **Send it to the PTA**.
+- The chair can't sign a mailed request while `CHECK_SIGNERS` has fewer than two signers besides the requester.
 
 ## Changes since v0.2
 

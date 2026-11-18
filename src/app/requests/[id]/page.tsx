@@ -27,7 +27,8 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
   const signerResend = query["resend-signers"];
   const signerProblem = typeof signerResend === "string" && Object.hasOwn(SIGNER_RESEND_PROBLEMS, signerResend) ? SIGNER_RESEND_PROBLEMS[signerResend as SignerResendProblem] : null;
   const sentBack = row.signers_step === "Sent back" ? await sentBackBy(signatures, row) : null;
-  const toAp = authorizedSending(row);
+  // Only while it's with AP: a Returned or Paid request has its own box.
+  const toAp = row.status === "Submitted" || row.status === "Approved" ? authorizedSending(row) : null;
   const sendAp = query["send-ap"];
   const sendApProblem = typeof sendAp === "string" && Object.hasOwn(SEND_AP_PROBLEMS, sendAp) ? SEND_AP_PROBLEMS[sendAp as AuthorizedResendProblem] : null;
 
@@ -63,7 +64,9 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
         <div className="rounded-md border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900">
           <div className="font-medium">Authorized by {signersWho(row)}</div>
           <p className="mt-1">
-            {toAp === "sending" ? "It's on its way to the PTA's accounts payable team." : "It went to the PTA's accounts payable team."}
+            {toAp === "sending"
+              ? `It's on its way to the PTA's accounts payable team, and you'll get a copy by email once they have it. If it hasn't come by tomorrow, ask the PTA at ${config.apEmail}.`
+              : "It went to the PTA's accounts payable team."}
             {query.sent === "ap" ? " Sent again just now." : ""} The PTA&apos;s bank will mail your check to {mailTo}.
           </p>
         </div>
@@ -212,7 +215,7 @@ const SEND_AP_PROBLEMS: Record<AuthorizedResendProblem, string> = {
   "not-found": "That request wasn't found.",
   closed: "This request has no authorized packet to send.",
   "already-sent": "The PTA's accounts payable team already has it.",
-  "too-soon": "It's still being sent. Reload this page in a few minutes.",
+  sending: "It's still on its way. You'll get a copy by email once the PTA has it.",
   mismatch: `This request's signed files don't match the record of what was signed. Please let the PTA know at ${config.apEmail}.`,
   busy: "It was already being sent. Reload this page in a minute to see whether it went.",
   failed: "The email didn't go through. Please try again in a few minutes.",

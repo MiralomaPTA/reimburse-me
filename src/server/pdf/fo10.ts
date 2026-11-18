@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { formatDateShort, formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { splitPhone } from "@/lib/request-schema";
+import { sha256 } from "@/server/hash";
 import { setFitted } from "@/server/pdf/fill-form";
 import { appendSignersPage, type SignersPageInput } from "@/server/pdf/pages";
 import { fitFontSize, fitText, winAnsi } from "@/server/pdf/text";
@@ -78,7 +78,6 @@ export interface Fo10File {
   sha256: string;
 }
 
-const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 /** "Reimbursement FY27-042: Classroom supplies" */
 export const fo10Reason = (requestId: string, purpose: string) => `Reimbursement ${requestId}: ${purpose}`;
