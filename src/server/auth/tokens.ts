@@ -1,4 +1,4 @@
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT, jwtVerify, type JWTPayload } from "jose";
 import { config, sessionSecret } from "@/server/config";
 
 let key: Uint8Array | null = null;
@@ -29,14 +29,20 @@ async function signLink(purpose: string, email: string, expiresIn: string, claim
     .sign(signingKey());
 }
 
-async function verifyLink(token: string, purpose: string): Promise<VerifiedLink | null> {
+/** The link's claims when it verifies and was made for `purpose`; null otherwise. */
+async function verifiedPayload(token: string, purpose: string): Promise<(JWTPayload & { sub: string; iat: number }) | null> {
   try {
     const { payload } = await jwtVerify(token, signingKey());
     if (payload.purpose !== purpose || typeof payload.sub !== "string" || typeof payload.iat !== "number") return null;
-    return { email: payload.sub, issuedAt: new Date(payload.iat * 1000) };
+    return payload as JWTPayload & { sub: string; iat: number };
   } catch {
     return null;
   }
+}
+
+async function verifyLink(token: string, purpose: string): Promise<VerifiedLink | null> {
+  const payload = await verifiedPayload(token, purpose);
+  return payload ? { email: payload.sub, issuedAt: new Date(payload.iat * 1000) } : null;
 }
 
 /** Short-lived token embedded in the sign-in link. */
@@ -47,44 +53,31 @@ export const verifyMagicToken = (token: string): Promise<VerifiedLink | null> =>
 export const createApprovalToken = (email: string): Promise<string> => signLink("approval", email, `${config.approvalLinkDays}d`);
 export const verifyApprovalToken = (token: string): Promise<VerifiedLink | null> => verifyLink(token, "approval");
 
-/** The claims of an event chair's signing link. */
-export interface ChairLink extends VerifiedLink {
+/** The claims of a link good for one version of one request: an event chair's or a check signer's. `issuedAt` is when its email went out. */
+export interface RequestLink extends VerifiedLink {
   requestId: string;
   version: number;
 }
 
+async function verifyRequestLink(token: string, purpose: "chair" | "signer"): Promise<RequestLink | null> {
+  const payload = await verifiedPayload(token, purpose);
+  if (!payload || typeof payload.rid !== "string" || typeof payload.ver !== "number") return null;
+  return { email: payload.sub, issuedAt: new Date(payload.iat * 1000), requestId: payload.rid, version: payload.ver };
+}
+
+export type ChairLink = RequestLink;
+
 /** Emailed to an event chair; lets that address sign or look at one version of one request, and nothing else. */
 export const createChairToken = (email: string, requestId: string, version: number): Promise<string> =>
   signLink("chair", email, `${config.chairLinkDays}d`, { rid: requestId, ver: version });
+export const verifyChairToken = (token: string): Promise<ChairLink | null> => verifyRequestLink(token, "chair");
 
-export async function verifyChairToken(token: string): Promise<ChairLink | null> {
-  try {
-    const { payload } = await jwtVerify(token, signingKey());
-    if (payload.purpose !== "chair" || typeof payload.sub !== "string" || typeof payload.iat !== "number") return null;
-    if (typeof payload.rid !== "string" || typeof payload.ver !== "number") return null;
-    return { email: payload.sub, issuedAt: new Date(payload.iat * 1000), requestId: payload.rid, version: payload.ver };
-  } catch {
-    return null;
-  }
-}
-
-/** The claims of a check signer's link: one signer, one version of one request. `issuedAt` is when its email went out. */
-export type SignerLink = ChairLink;
+export type SignerLink = RequestLink;
 
 /** Emailed to one check signer; lets that address look at, sign or send back one version of one request, and nothing else. */
 export const createSignerToken = (email: string, requestId: string, version: number): Promise<string> =>
   signLink("signer", email, `${config.signerLinkDays}d`, { rid: requestId, ver: version });
-
-export async function verifySignerToken(token: string): Promise<SignerLink | null> {
-  try {
-    const { payload } = await jwtVerify(token, signingKey());
-    if (payload.purpose !== "signer" || typeof payload.sub !== "string" || typeof payload.iat !== "number") return null;
-    if (typeof payload.rid !== "string" || typeof payload.ver !== "number") return null;
-    return { email: payload.sub, issuedAt: new Date(payload.iat * 1000), requestId: payload.rid, version: payload.ver };
-  } catch {
-    return null;
-  }
-}
+export const verifySignerToken = (token: string): Promise<SignerLink | null> => verifyRequestLink(token, "signer");
 
 /** Long-lived session token stored in the cookie after a link is used. */
 export async function createSessionToken(session: Session): Promise<string> {

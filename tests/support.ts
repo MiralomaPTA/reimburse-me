@@ -7,8 +7,8 @@ import type {
   Mailer,
   RequestLog,
   RequestRow,
-  SignatureClaim,
   SignatureLog,
+  SignatureRecord,
   StipendRow,
   StoredFileMeta,
   UserDirectory,
@@ -93,20 +93,15 @@ export class MemoryLog implements RequestLog {
 }
 
 export class MemorySignatures implements SignatureLog {
-  claims: SignatureClaim[] = [];
-  /** Runs after each append, so a test can slip in a competing claim. */
-  afterAppend: (claim: SignatureClaim) => void = () => {};
-  async append(claim: SignatureClaim) {
-    this.claims.push({ ...claim });
-    this.afterAppend(claim);
+  records: SignatureRecord[] = [];
+  /** Fail the next appends, as a Sheets outage would. */
+  failing = false;
+  async append(record: SignatureRecord) {
+    if (this.failing) throw new Error("Sheets refused");
+    this.records.push({ ...record });
   }
   async listFor(requestId: string) {
-    return this.claims.filter((c) => c.request_id === requestId).map((c) => ({ ...c }));
-  }
-  async update(claimId: string, patch: Partial<SignatureClaim>) {
-    const i = this.claims.findIndex((c) => c.claim_id === claimId);
-    if (i === -1) throw new Error(`no claim ${claimId}`);
-    this.claims[i] = { ...this.claims[i], ...patch };
+    return this.records.filter((r) => r.request_id === requestId).map((r) => ({ ...r }));
   }
 }
 

@@ -124,6 +124,11 @@ export function SignerSignForm({
               ? "One more check signer signs next; they've been emailed. Then it goes to the PTA's accounts payable team, who set up the payment."
               : `That was the second signature. Request ${requestId} has gone to the PTA's accounts payable team, who set up the payment.`}
           </p>
+        ) : done.slot === 2 ? (
+          <p className="text-sm text-amber-900">
+            Your signature was saved, but the email to the PTA&apos;s accounts payable team didn&apos;t go out. {payeeName} can send it again from their request page, and the
+            PTA&apos;s records note it.
+          </p>
         ) : (
           <p className="text-sm text-amber-900">Your signature was saved, but an email sending it on didn&apos;t go out. The PTA has been told in its records.</p>
         )}

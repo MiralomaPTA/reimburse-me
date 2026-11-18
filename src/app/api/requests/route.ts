@@ -2,6 +2,7 @@ import { getAdapters } from "@/server/adapters";
 import { linkBase } from "@/server/auth/links";
 import { clientIp } from "@/server/auth/rate-limit";
 import { getApprovedSession } from "@/server/auth/session";
+import { MailingError } from "@/server/requests/mailing";
 import { ReceiptError } from "@/server/requests/receipts";
 import { FundingError } from "@/server/requests/stipends";
 import { EventError, submitRequest } from "@/server/requests/submit";
@@ -30,7 +31,9 @@ export async function POST(request: Request) {
     );
     return Response.json(result);
   } catch (error) {
-    if (error instanceof ReceiptError || error instanceof FundingError || error instanceof EventError) return Response.json({ error: error.message }, { status: 400 });
+    if (error instanceof ReceiptError || error instanceof FundingError || error instanceof EventError || error instanceof MailingError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
     console.error("[submit]", error);
     return Response.json({ error: "Something went wrong while submitting. Nothing was sent; please try again." }, { status: 500 });
   }

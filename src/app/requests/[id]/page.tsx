@@ -4,7 +4,7 @@ import { getAdapters } from "@/server/adapters";
 import { requireApprovedSession } from "@/server/auth/session";
 import { config } from "@/server/config";
 import { chairSending, type ChairSending, type ResendProblem } from "@/server/requests/chair";
-import { sentBackBy, signerSending, type SignerResendProblem, type SignerSending } from "@/server/requests/signers";
+import { authorizedSending, sentBackBy, signerSending, type AuthorizedResendProblem, type SignerResendProblem, type SignerSending } from "@/server/requests/signers";
 import { formatDateTime, formatMonthDay, parseDate } from "@/lib/dates";
 import { parseEvents } from "@/lib/events";
 import { formatMoney, parseMoney } from "@/lib/money";
@@ -27,6 +27,9 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
   const signerResend = query["resend-signers"];
   const signerProblem = typeof signerResend === "string" && Object.hasOwn(SIGNER_RESEND_PROBLEMS, signerResend) ? SIGNER_RESEND_PROBLEMS[signerResend as SignerResendProblem] : null;
   const sentBack = row.signers_step === "Sent back" ? await sentBackBy(signatures, row) : null;
+  const toAp = authorizedSending(row);
+  const sendAp = query["send-ap"];
+  const sendApProblem = typeof sendAp === "string" && Object.hasOwn(SEND_AP_PROBLEMS, sendAp) ? SEND_AP_PROBLEMS[sendAp as AuthorizedResendProblem] : null;
 
   const money = (s: string) => formatMoney(parseMoney(s) ?? 0);
   const cosigned = Boolean(row.chair_pdf_file_id);
@@ -47,14 +50,24 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
 
       {sending && <AwaitingChair row={row} sending={sending} resent={query.resent === "1"} problem={resendProblem} />}
       {toSigners && <AwaitingSigners row={row} sending={toSigners} resent={query.resent === "signers"} problem={signerProblem} />}
-      {authorized && row.signers_step === "Signed" && (
+      {toAp === "unsent" ? (
+        <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+          <div className="font-medium">Authorized by {signersWho(row)}, but not sent yet</div>
+          <p>The email to the PTA&apos;s accounts payable team didn&apos;t go through, so they don&apos;t have it yet. Send it again here; it goes from the portal, so you don&apos;t need to forward anything.</p>
+          {sendApProblem && <p className="font-medium text-amber-900">{sendApProblem}</p>}
+          <PostButton action={`/api/requests/${encodeURIComponent(row.request_id)}/send-authorized`} busyLabel="Sending…">
+            Send it to the PTA
+          </PostButton>
+        </div>
+      ) : toAp ? (
         <div className="rounded-md border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900">
           <div className="font-medium">Authorized by {signersWho(row)}</div>
           <p className="mt-1">
-            It went to the PTA&apos;s accounts payable team. The PTA&apos;s bank will mail your check to {mailTo}.
+            {toAp === "sending" ? "It's on its way to the PTA's accounts payable team." : "It went to the PTA's accounts payable team."}
+            {query.sent === "ap" ? " Sent again just now." : ""} The PTA&apos;s bank will mail your check to {mailTo}.
           </p>
         </div>
-      )}
+      ) : null}
       {row.status === "Submitted" && config.sendPacketsTo === "requester" && !authorized && (
         <div className="rounded-md border border-sky-300 bg-sky-50 p-4 text-sm text-sky-900">
           The portal doesn&apos;t send requests to the PTA yet. If you haven&apos;t already, email the {cosigned ? "co-signed" : "signed"} PDF below to{" "}
@@ -192,6 +205,16 @@ const SIGNER_RESEND_PROBLEMS: Record<SignerResendProblem, string> = {
   "too-soon": `You can resend once every ${config.signerResendHours} hours.`,
   "no-signers": `The PTA hasn't listed enough check signers right now. Ask the PTA at ${config.apEmail} what to do.`,
   busy: "It was already being sent. Reload this page in a minute to see when it went.",
+  failed: "The email didn't go through. Please try again in a few minutes.",
+};
+
+const SEND_AP_PROBLEMS: Record<AuthorizedResendProblem, string> = {
+  "not-found": "That request wasn't found.",
+  closed: "This request has no authorized packet to send.",
+  "already-sent": "The PTA's accounts payable team already has it.",
+  "too-soon": "It's still being sent. Reload this page in a few minutes.",
+  mismatch: `This request's signed files don't match the record of what was signed. Please let the PTA know at ${config.apEmail}.`,
+  busy: "It was already being sent. Reload this page in a minute to see whether it went.",
   failed: "The email didn't go through. Please try again in a few minutes.",
 };
 

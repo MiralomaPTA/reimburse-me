@@ -4,12 +4,14 @@ import type { EventRow, MailMessage, UserRecord } from "@/server/adapters/types"
 import { config, parseBillPayAccounts, parseCheckSigners } from "@/server/config";
 import { createSignerToken } from "@/server/auth/tokens";
 import { signAsChair } from "@/server/requests/chair";
-import { claimTiming } from "@/server/requests/claims";
 import { lockTiming } from "@/server/requests/lock";
 import { MailingError, mailingRefusal } from "@/server/requests/mailing";
 import { profileFrom } from "@/server/requests/profile";
 import { sendPacketOn } from "@/server/requests/send-on";
 import {
+  AUTHORIZED_SENDING_MS,
+  AuthorizedResendError,
+  authorizedSending,
   budgetAccountDefault,
   resendToSigners,
   sendBackAsSigner,
@@ -19,6 +21,7 @@ import {
   signerLinkState,
   signerPdf,
   signAsSigner,
+  sendAuthorizedAgain,
 } from "@/server/requests/signers";
 import { submitRequest } from "@/server/requests/submit";
 import { requestInputSchema } from "@/lib/request-schema";
@@ -234,7 +237,9 @@ describe("the check signers' step", () => {
       signers_sent_to: `${NORTON}, ${ALIOTO}`,
     });
     expect(files.files.get(row.fo10_file_id)!.name).toBe(`${requestId}-fo10-1.pdf`);
-    expect(signatures.claims).toEqual([expect.objectContaining({ slot: 1, state: "signed", signer_email: COIT, ip: "10.0.0.9", browser: "vitest", fo10_sha256: row.fo10_sha256 })]);
+    expect(signatures.records).toEqual([
+      expect.objectContaining({ slot: 1, state: "signed", signer_email: COIT, ip: "10.0.0.9", browser: "vitest", budget_account: "Grade 2 stipend (art)", payment_account: ACCOUNTS[1], fo10_sha256: row.fo10_sha256 }),
+    ]);
 
     expect(mail.to(config.apEmail)).toEqual([]);
     expect(mail.to(COIT).map((m) => m.subject)).toEqual([`You signed: mailed check to Pat Teacher, $10.00 (${requestId})`]);
@@ -297,8 +302,8 @@ describe("the check signers' step", () => {
     await expect(sign(links.coit, "Lillie Coit", { budgetAccount: "  " })).rejects.toThrow("Enter the Budget Account");
     await expect(sign(links.coit, "Lillie Coit", { budgetAccount: "Grade 2 <b>" })).rejects.toThrow("Use only letters");
     await expect(sign(links.coit, "Lillie Coit", { paymentAccount: "Checking ••0000" })).rejects.toThrow("Choose the Payment Account");
-    // Refused before anything is claimed.
-    expect(signatures.claims).toEqual([]);
+    // Refused before anything is recorded.
+    expect(signatures.records).toEqual([]);
   }, 30_000);
 
   it("lets only one of two signers pressing Sign at once make the first signature", async () => {
@@ -308,26 +313,133 @@ describe("the check signers' step", () => {
     const lost = results.find((r): r is PromiseRejectedResult => r.status === "rejected")!.reason;
     expect(lost).toBeInstanceOf(SignerError);
     expect((lost as SignerError).reload).toBe(true);
-    expect(log.rows[0].signers_step).toBe("1 of 2 signed");
-    expect(signatures.claims.map((c) => c.state).sort()).toEqual(["lost", "signed"]);
+    expect(log.rows[0]).toMatchObject({ signers_step: "1 of 2 signed", lock: "" });
+    expect(signatures.records.map((r) => r.state)).toEqual(["signed"]);
     expect(mail.sent.filter((m) => m.subject.startsWith("You signed"))).toHaveLength(1);
   }, 30_000);
 
-  it("lets a claim left by a crash go after the time-out", async () => {
-    const { sign, links, signatures, requestId } = await submitted();
-    const old = new Date(Date.now() - claimTiming.timeoutMs - 1000).toISOString();
-    signatures.claims.push({ claim_id: "crashed", request_id: requestId, version: 1, slot: 1, signer_email: NORTON, signer_name: "Joshua Norton", state: "claimed", claimed_at: old, signed_at: "", method: "typed", ip: "", browser: "", link_sent_at: "", budget_account: "", payment_account: "", packet_sha256: "", fo10_sha256: "" });
+  it("waits for the row's lock, so a resend or another signer can't run halfway through a signature, and takes a lock left by a crash once it expires", async () => {
+    const { sign, links, log, signatures } = await submitted();
+    log.rows[0].lock = `${new Date(Date.now() + 60_000).toISOString()} resending`;
+    await expect(sign(links.coit, "Lillie Coit")).rejects.toMatchObject({ message: expect.stringContaining("working on this request right now"), reload: true });
+    expect(signatures.records).toEqual([]);
+    log.rows[0].lock = `${new Date(Date.now() - 1000).toISOString()} crashed`;
     await expect(sign(links.coit, "Lillie Coit")).resolves.toMatchObject({ slot: 1 });
-    expect(signatures.claims.find((c) => c.claim_id === "crashed")!.state).toBe("abandoned");
+    expect(log.rows[0].lock).toBe("");
   }, 30_000);
 
   it("refuses to sign when the packet no longer matches what was signed", async () => {
     const { sign, links, log, files, signatures } = await submitted();
     files.files.get(log.rows[0].pdf_file_id)!.bytes = new Uint8Array([1, 2, 3]);
     await expect(sign(links.coit, "Lillie Coit")).rejects.toThrow("don't match the record");
-    expect(log.rows[0].signers_step).toBe("Waiting");
-    // The failed claim doesn't hold the signature.
-    expect(signatures.claims[0].state).toBe("abandoned");
+    expect(log.rows[0]).toMatchObject({ signers_step: "Waiting", lock: "" });
+    expect(signatures.records).toEqual([]);
+  }, 30_000);
+
+  it("leaves the row as it was when the signature can't be recorded", async () => {
+    const { sign, links, log, signatures } = await submitted();
+    signatures.failing = true;
+    await expect(sign(links.coit, "Lillie Coit")).rejects.toThrow("Sheets refused");
+    expect(log.rows[0]).toMatchObject({ signers_step: "Waiting", signer_1_email: "", lock: "" });
+  }, 30_000);
+
+  it("shows a link whose files don't match the record as such, rather than failing", async () => {
+    const { links, log, requestId, adapters, sign } = await submitted();
+    log.rows[0].pdf_sha256 = "edited in the Sheet";
+    const state = await signerLinkState(requestId, links.coit.token, adapters);
+    expect(state.kind).toBe("mismatch");
+    await expect(sign(links.coit, "Lillie Coit")).rejects.toMatchObject({ message: expect.stringContaining("don't match the record"), reload: false });
+    await expect(signerPdf(requestId, links.coit.token, "fo10", adapters)).rejects.toBeInstanceOf(SignerError);
+  }, 30_000);
+
+  it("the second signature takes the accounts from the first signature's record, not the row, which can be edited", async () => {
+    const { sign, links, log, mailer: mail, requestId, adapters, signatures } = await submitted();
+    await sign(links.coit, "Lillie Coit", { budgetAccount: "Grade 2 stipend (art)", paymentAccount: ACCOUNTS[1] });
+    Object.assign(log.rows[0], { budget_account: "Edited", payment_account: ACCOUNTS[0] });
+    const state = await signerLinkState(requestId, links.norton.token, adapters);
+    expect(state).toMatchObject({ kind: "ready", slot: 2, accounts: { budgetAccount: "Grade 2 stipend (art)", paymentAccount: ACCOUNTS[1], locked: true } });
+    mail.sent = [];
+    await sign(links.norton, "Joshua Norton", { slot: 2 });
+    const [toAp] = mail.to(config.apEmail);
+    expect(toAp.text).toContain("Budget Account: Grade 2 stipend (art)");
+    expect(toAp.text).toContain(`Payment Account: ${ACCOUNTS[1]}`);
+    expect(signatures.records.map((r) => [r.slot, r.budget_account, r.payment_account])).toEqual([
+      [1, "Grade 2 stipend (art)", ACCOUNTS[1]],
+      [2, "Grade 2 stipend (art)", ACCOUNTS[1]],
+    ]);
+  }, 30_000);
+
+  it("refuses the second signature when there's no record of the first", async () => {
+    const { sign, links, signatures, requestId, adapters } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    signatures.records = [];
+    expect((await signerLinkState(requestId, links.norton.token, adapters)).kind).toBe("mismatch");
+    await expect(sign(links.norton, "Joshua Norton", { slot: 2 })).rejects.toThrow("don't match the record");
+  }, 30_000);
+
+  it("finds the first signature by its FO10, whatever order the Signatures tab is in", async () => {
+    const { sign, links, signatures, requestId, adapters } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    // A failed attempt's leftover, sorted above the real one.
+    signatures.records.unshift({ ...signatures.records[0], record_id: "leftover", budget_account: "Wrong", fo10_sha256: "another file" });
+    const state = await signerLinkState(requestId, links.alioto.token, adapters);
+    expect(state).toMatchObject({ kind: "ready", first: { signer_email: COIT }, accounts: { budgetAccount: "Grade 2 stipend" } });
+  }, 30_000);
+
+  it("when AP's email fails after the second signature, says so and lets the requester send it again, to AP only", async () => {
+    const { sign, links, log, mailer: mail, requestId, adapters } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    mail.sent = [];
+    mail.failingFor = [config.apEmail];
+    const result = await sign(links.norton, "Joshua Norton", { slot: 2 });
+    expect(result).toMatchObject({ slot: 2, emailed: false, receipted: true });
+    expect(log.rows[0]).toMatchObject({ status: "Submitted", signers_step: "Signed", authorized_sent_at: "" });
+    expect(log.rows[0].notes).toContain("The authorized packet's email to AP failed");
+    // The requester's copy says AP has it, so it isn't sent until AP does.
+    expect(mail.to(ME)).toEqual([]);
+    expect(mail.to(NORTON)[0].text).toContain("didn't go through. Pat Teacher can send it again from their request page.");
+
+    const later = new Date(Date.now() + AUTHORIZED_SENDING_MS + 1000);
+    expect(authorizedSending(log.rows[0])).toBe("sending");
+    expect(authorizedSending(log.rows[0], later)).toBe("unsent");
+    const again = (now?: Date) => sendAuthorizedAgain({ requestId, requesterEmail: ME, linkBase: "https://portal.example", now }, adapters);
+    await expect(again()).rejects.toMatchObject({ problem: "too-soon" });
+    await expect(again(later)).rejects.toMatchObject({ problem: "failed" });
+    mail.failingFor = [];
+    mail.sent = [];
+    await again(later);
+    const [toAp] = mail.to(config.apEmail);
+    expect(toAp.attachments?.[0].filename).toBe(`${requestId}-authorized.pdf`);
+    expect(toAp.text).toContain(`SHA-256: ${log.rows[0].authorized_pdf_sha256}`);
+    expect(mail.to(ME)).toEqual([]);
+    expect(log.rows[0].authorized_sent_at).not.toBe("");
+    expect(authorizedSending(log.rows[0], later)).toBe("sent");
+    await expect(again(later)).rejects.toMatchObject({ problem: "already-sent" });
+    await expect(sendAuthorizedAgain({ requestId, requesterEmail: "someone@example.org", linkBase: "", now: later }, adapters)).rejects.toBeInstanceOf(AuthorizedResendError);
+  }, 30_000);
+
+  it("when only the requester's copy fails, records that AP has it and blames the copy", async () => {
+    const { sign, links, log, mailer: mail } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    mail.failingFor = [ME];
+    const result = await sign(links.norton, "Joshua Norton", { slot: 2 });
+    expect(result.emailed).toBe(true);
+    expect(mail.to(config.apEmail)).toHaveLength(1);
+    expect(log.rows[0].authorized_sent_at).not.toBe("");
+    expect(log.rows[0].notes).toContain("The requester's copy of the authorized packet failed");
+    expect(log.rows[0].notes).not.toContain("to AP failed");
+  }, 30_000);
+
+  it("won't send an authorized packet again once it doesn't match its hash", async () => {
+    const { sign, links, log, files, mailer: mail, requestId, adapters } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    mail.failingFor = [config.apEmail];
+    await sign(links.norton, "Joshua Norton", { slot: 2 });
+    mail.failingFor = [];
+    files.files.get(log.rows[0].authorized_pdf_file_id)!.bytes = new Uint8Array([1, 2, 3]);
+    const later = new Date(Date.now() + AUTHORIZED_SENDING_MS + 1000);
+    await expect(sendAuthorizedAgain({ requestId, requesterEmail: ME, linkBase: "", now: later }, adapters)).rejects.toMatchObject({ problem: "mismatch" });
+    expect(mail.to(config.apEmail)).toEqual([]);
   }, 30_000);
 
   it("a send-back returns the request, tells the requester and AP, and stops every link", async () => {

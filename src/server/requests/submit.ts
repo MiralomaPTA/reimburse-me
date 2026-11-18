@@ -221,6 +221,7 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     fo10_sha256: "",
     authorized_pdf_file_id: "",
     authorized_pdf_sha256: "",
+    authorized_sent_at: "",
   };
   await log.append(row);
   const after = fundingOptions(user, stipendRows, [...earlierRows, row], submittedAt);

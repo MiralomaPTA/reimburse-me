@@ -1,5 +1,5 @@
 import { config } from "@/server/config";
-import { formatDateTime } from "@/lib/dates";
+import { formatDateTime, formatMonthDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import type { EventBudget } from "@/lib/events";
 import { formatAddress } from "@/lib/mailing";
@@ -328,8 +328,7 @@ export function approvedEmail(link: string): { subject: string; text: string } {
 
 /** "Lillie Coit (Nov 14) and Joshua Norton (Nov 15)" */
 function signerNames(signers: { name: string; signedAt: Date }[]): string {
-  const day = (d: Date) => new Intl.DateTimeFormat("en-US", { timeZone: config.timeZone, month: "short", day: "numeric" }).format(d);
-  return signers.map((s) => `${s.name} (${day(s.signedAt)})`).join(" and ");
+  return signers.map((s) => `${s.name} (${formatMonthDay(s.signedAt)})`).join(" and ");
 }
 
 /** The "worth a second look" lines, or nothing. */
@@ -433,7 +432,15 @@ export function signerReceiptEmail(input: {
   payeeName: string;
   amountCents: number;
   mailingAddress: string;
+  /** false when the email onward (to the other signers, or to AP) didn't go. */
+  onward?: boolean;
 }): { subject: string; text: string } {
+  const next =
+    input.slot === 1
+      ? "One more check signer signs next. Then it goes to the PTA's accounts payable team, who set up the payment."
+      : input.onward === false
+        ? `That was the second signature, but the email to the PTA's accounts payable team didn't go through. ${input.payeeName} can send it again from their request page.`
+        : "That was the second signature. It has gone to the PTA's accounts payable team, who set up the payment.";
   return {
     subject: `You signed: mailed check to ${input.payeeName}, ${formatMoney(input.amountCents)} (${input.requestId})`,
     text: [
@@ -443,9 +450,7 @@ export function signerReceiptEmail(input: {
       `Amount: ${formatMoney(input.amountCents)}`,
       `Mail to: ${input.mailingAddress}`,
       "",
-      input.slot === 1
-        ? "One more check signer signs next. Then it goes to the PTA's accounts payable team, who set up the payment."
-        : "That was the second signature. It has gone to the PTA's accounts payable team, who set up the payment.",
+      next,
       `If this wasn't you, tell the PTA at ${config.apEmail} right away.`,
       "",
       "The FO10 as you signed it is attached for your records.",

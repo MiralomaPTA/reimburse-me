@@ -1,6 +1,6 @@
 # Mailed Check — Spec
 
-Nov 12, 2026 · Draft v0.3 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
+Nov 17, 2026 · Draft v0.4 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
 
 ## Overview
 
@@ -241,14 +241,16 @@ The typed name also mustn't match the payee's name, ignoring case, spacing and p
 
 ## How a signature is recorded
 
-The Sheet can't update a cell only if nobody else has changed it, and today the app rewrites whole rows. Without more care, two signers pressing **Sign** at once could both be recorded as the first, or both as the second, and AP could get two authorized packets and pay twice. A new **Signatures** tab prevents that. Rows are only ever added to it, and the first claim wins.
+The Sheet can't update a cell only if nobody else has changed it, and today the app rewrites whole rows. Without more care, two signers pressing **Sign** at once could both be recorded as the first, or both as the second, and AP could get two authorized packets and pay twice. Signing uses the same row lock as the chair's signature and every resend (`lock.ts`), so one step runs on a request at a time, whichever kind it is.
 
 1. The page sends back what it showed: the version and which signature (first or second) the signer is making.
-2. The server checks the token and the row as above, then adds a row to the Signatures tab claiming that signature.
-3. It reads back the claims for that request, version and signature. The Sheet keeps rows in the order they were added, so every reader agrees which claim came first. If the earliest live claim isn't its own, it marks its claim *lost*, and the page reloads with the current state.
-4. Only the winner builds the files, records the signature and sends the emails. Before emailing AP, it re-reads the row and sends only if the authorized packet recorded there is the one it made.
+2. The server checks the token and the row as above, then takes the request's row lock. If another signer, a send-back or a resend holds it, the page says someone is working on the request and offers a reload.
+3. Under the lock, it reads the row again and stops if it no longer waits for that signature. Then it builds the files, adds the signature's row to the **Signatures** tab, and marks the Requests row in the same write that releases the lock.
+4. Only then does it send the emails. Before emailing AP, it re-reads the row and sends only if the authorized packet recorded there is the one it made.
 
-A claim that hasn't finished within 5 minutes, for example because the server crashed partway through, is marked *abandoned*, and the next press can claim that signature. Before writing anything, a process checks again that its own claim is still live.
+A lock left by a crash expires after 3 minutes, and the next press can take it. A failure before the Requests row is written leaves the row as it was. It may leave a file in Drive or a Signatures row behind, but neither matches the FO10 hash on the row, so nothing reads them.
+
+**The Signatures tab** keeps one row per signature or send-back, added under the lock and never changed. It holds what the Requests tab and the packet leave out: the signer's IP address and browser, and the accounts as the first signer locked them. The second signature, its emails, the authorization page and AP's email take the accounts from the first signature's row, found by the FO10 hash the Requests row records, not from the Requests row, which AP can edit. No step depends on the order of rows in the tab.
 
 Every write this feature makes to the Requests tab updates only its own cells, not the whole row. Today `SheetTable.update` rewrites the row, so it needs a cell-level update. That way a resend, a reminder, a signature and AP editing another column of the same row can't overwrite each other.
 
@@ -268,9 +270,8 @@ The requester-signed packet and the chair's co-signed packet are never changed. 
    - for each signer, their name, the address their link was sent to, when it was sent and when it was used, and the signature method
    - the consent text
    - the SHA-256 of the packet they authorized, and of the first-signature FO10
-   - any flags the signers were shown
 
-The signers' IP addresses and browsers go in the Signatures tab, not on this page, because the requester gets a copy of the packet.
+The requester gets a copy of the packet, so this page leaves some things out. The signers' IP addresses and browsers go in the Signatures tab. Their notes and the flags go to AP in the packet email. The flags are the PTA's checks for a stolen account, and whoever holds that account shouldn't learn them.
 
 A later version is saved as `FY27-042-v2-fo10-1.pdf` and `FY27-042-v2-authorized.pdf`. The authorized packet's SHA-256 goes in the Sheet and in the emails, the same as the requester's.
 
@@ -302,6 +303,8 @@ Getting a payment sent to a different address is the usual way to steal one. The
 
 The request page shows *Waiting for the PTA's check signers*, and then *One of two check signers has signed*. It shows when the emails went out, and it has a **Resend to the check signers** button that works at most once a day. Once both have signed, the page shows who signed and when, links the authorized packet, and says "The PTA's bank will mail your check to 123 Main St Apt 4, San Francisco, CA 94127." *My requests* shows the same status in the list.
 
+If the authorized packet's email to AP fails, the page doesn't say it went. It says AP doesn't have it yet and offers **Send it to the PTA**. That sends the saved packet from Drive to AP, after checking it against its hash, so the requester never carries it. The button shows from 5 minutes after the second signature, while the app's own send could still be running, until the email goes through or AP moves the request on.
+
 ## Data changes
 
 **Requests tab.** Three existing columns come back into use:
@@ -324,10 +327,11 @@ New columns are appended to the header on first use, like every column the app h
 | `budget_account`, `payment_account` | The values on the signed FO10 |
 | `fo10_file_id`, `fo10_sha256` | The FO10 with the first signature, and its hash |
 | `authorized_pdf_file_id`, `authorized_pdf_sha256` | The authorized packet and its hash |
+| `authorized_sent_at` | When the authorized packet's email reached AP. Blank until it does |
 
 Wherever the app links a packet, it uses the authorized one if there is one, then the co-signed one, then the requester-signed one. `RequestStatus` gains *Awaiting signers*.
 
-**New tab: Signatures.** One row per claim, added and never rewritten except to update that claim's own state. The columns are `request_id`, `version`, `slot` (1 or 2), `signer_email`, `signer_name`, `state` (claimed, signed, lost or abandoned), `claimed_at`, `signed_at`, `method`, `ip`, `browser`, `budget_account`, `payment_account`, `packet_sha256` and `fo10_sha256`.
+**New tab: Signatures.** One row per signature or send-back, added and never rewritten. The columns are `record_id`, `request_id`, `version`, `slot` (1 or 2), `signer_email`, `signer_name`, `state` (signed or sent back), `signed_at`, `method`, `ip`, `browser`, `link_sent_at`, `budget_account`, `payment_account`, `packet_sha256` and `fo10_sha256`.
 
 **Users tab.** One new column, `mailed_checks`, appended to the header on first use: `yes`, `no` or blank, as in *Who is offered mailing*.
 
@@ -350,7 +354,7 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 ## How this fits with the chair step and Phase 2
 
 - **Order.** Requester, then chair, then check signers, then AP. Each step adds a file and changes nothing before it.
-- **Shared parts.** The signer page reuses the chair page's signing step and token checks, and the request's `request.json`. The reminders run on the chair step's daily cron job. The Signatures-tab claim and the cell-level writes are new, and the chair step can use them too. Co-chairs pressing **Sign** at the same moment race the same way. Build this after step 1 of the chair spec.
+- **Shared parts.** The signer page reuses the chair page's signing step and token checks, and the request's `request.json`. The reminders run on the chair step's daily cron job. Signing takes the chair step's row lock, so signatures, send-backs and resends on one request never overlap. The Signatures tab and the cell-level writes are new. Build this after step 1 of the chair spec.
 - **Changes the chair spec should take.** The same review found two of these problems in the chair step:
   - The chair email's Reply-To should be AP, not the requester, because a reply hands the requester a working chair link.
   - The chair's IP address and browser should be kept off the countersignature page, which the requester receives.
@@ -383,7 +387,7 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 
 - It refuses `checkDelivery: "mail"` while mailing is switched off for that requester, whether by their `mailed_checks` cell, by `MAILED_CHECKS`, or by the signer settings. It reads the Users row at signing, not from the session.
 - Every path that sends a packet to AP sends a mailed request to the signers instead. Those paths are submit, chair signature, chair time-out, Phase 2 resubmission, and any later status tool. A single guard refuses to email AP a mailed request that has no authorized packet for its current version.
-- Only one claim wins each signature (see *How a signature is recorded*).
+- Each signature is made once, under the row lock (see *How a signature is recorded*).
 - The FO10 is filled from a `request.json` whose packet hash matches the row, and the second signature checks the first-signature FO10 and the packet against their recorded hashes.
 
 ## Rollout
@@ -430,6 +434,15 @@ Each has a default. The build follows it unless it is changed here.
 | 6 | Budget Account | The stipend first, then the event, otherwise blank. The first signer must fill it in before signing |
 | 7 | Offering mailing to everyone | `MAILED_CHECKS=everyone`, so blank cells follow along and new accounts get mailing without a row edit. The alternative is the column alone, where offering it to everyone means a `yes` in every row and on every new approval |
 | 8 | The guides during the pilot | They leave mailing out, so most readers don't look for a choice they can't see. The alternative is a line saying some accounts can have checks mailed |
+
+## Changes since v0.3
+
+From a code review of the first build:
+
+- *How a signature is recorded*: signing takes the row lock that the chair step and resends already use, in place of first-claim-wins in the Signatures tab. One mechanism now covers every step, a resend can't run halfway through a signature, and nothing depends on the tab's row order. The Signatures tab stays as the record of each signature and send-back.
+- The second signature takes the Budget Account and Payment Account from the first signature's record, not the editable row, so the FO10, the authorization page and AP's email always agree.
+- The authorization page leaves out the flags and the signers' notes, because the requester gets a copy. AP still gets both by email.
+- A new `authorized_sent_at` column records when AP got the authorized packet. If that email fails, the requester's page says so and offers **Send it to the PTA**.
 
 ## Changes since v0.2
 

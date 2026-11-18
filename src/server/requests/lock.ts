@@ -4,8 +4,9 @@ import type { RequestLog, RequestRow } from "@/server/adapters/types";
 /**
  * A short-lived lock on one request's row, for the steps that mustn't run
  * twice at once: a chair signing (two co-chairs at the same moment would send
- * AP two co-signed packets) and the requester's resend (a double click would
- * email every chair twice).
+ * AP two co-signed packets), a check signer signing or sending back (two
+ * signers at once could make two authorized packets), and the requester's
+ * resends (a double click would email everyone twice).
  *
  * The Sheet has no compare-and-set, so the lock is claimed in three steps:
  * write it only if no live lock is there (`updateIf`), wait `settleMs`, then

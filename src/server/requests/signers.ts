@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import type { Adapters, RequestRow, SignatureClaim } from "@/server/adapters/types";
+import { randomUUID } from "node:crypto";
+import type { Adapters, RequestRow, SignatureRecord } from "@/server/adapters/types";
 import { config } from "@/server/config";
 import { createSignerToken, verifySignerToken, type SignerLink } from "@/server/auth/tokens";
 import {
@@ -13,9 +13,9 @@ import {
 } from "@/server/email/templates";
 import { addSecondSignature, buildAuthorizedPacket, fillFo10, type Fo10Details } from "@/server/pdf/fo10";
 import { SIGNER_CONSENT_TEXT } from "@/server/pdf/types";
-import { claimSignature, stillHeld } from "@/server/requests/claims";
 import { BusyError, withRequestLock } from "@/server/requests/lock";
 import { signersFor } from "@/server/requests/mailing";
+import { addressList, lowerEmail as lower, sha256, versionOf } from "@/server/requests/rows";
 import { toPacketSignature } from "@/server/requests/signature";
 import { fundingEmailShares, fundingLabel, fundingOptions, parseFundingChoice } from "@/server/requests/stipends";
 import { authorizedName, cosignedName, fo10Name, loadStoredRequest, type StoredRequest } from "@/server/requests/stored";
@@ -34,20 +34,15 @@ import { fundingSplit, totals, type RequestInput, type SignatureInput } from "@/
  * Account, which are then locked. The second signature puts the signed FO10
  * in front of the packet and sends it straight to AP, whatever
  * SEND_PACKETS_TO says. Either signer may send the request back instead.
+ *
+ * Signing and sending back run under the request's row lock (lock.ts), as
+ * the chair's signature and every resend do, so two signers pressing Sign at
+ * once can't both make the same signature, and a resend can't go out halfway
+ * through one. Each signature and send-back is recorded in the Signatures
+ * tab, with what the packet leaves out.
  */
 
 export const signerLinkPath = (requestId: string, token: string) => `/signers/${encodeURIComponent(requestId)}?t=${encodeURIComponent(token)}`;
-
-const versionOf = (row: Pick<RequestRow, "version">) => Number(row.version) || 1;
-const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-const lower = (email: string) => String(email ?? "").trim().toLowerCase();
-
-/** A comma-separated address cell as lower-case addresses. */
-const addresses = (cell: string) =>
-  String(cell ?? "")
-    .split(",")
-    .map((part) => part.trim().toLowerCase())
-    .filter(Boolean);
 
 const folderOf = (row: Pick<RequestRow, "request_id" | "submitted_at">) => ["requests", fiscalYearLabel(new Date(row.submitted_at)), row.request_id];
 
@@ -67,7 +62,8 @@ export class SignerError extends Error {
   }
 }
 
-const mismatch = () => new SignerError(`This request's signed files don't match the record of what was signed, so it can't be authorized. Please let the PTA know at ${config.apEmail}.`);
+const mismatchMessage = () => `This request's signed files don't match the record of what was signed, so it can't be authorized. Please let the PTA know at ${config.apEmail}.`;
+const mismatch = () => new SignerError(mismatchMessage());
 
 /**
  * The request's JSON, which the FO10 is filled from, checked to belong to the
@@ -126,9 +122,32 @@ export interface Accounts {
   locked: boolean;
 }
 
-/** The Budget Account and Payment Account as the next signer sees them. */
-export function currentAccounts(row: RequestRow, request: RequestInput): Accounts {
-  if (row.signers_step === "1 of 2 signed") return { budgetAccount: row.budget_account, paymentAccount: row.payment_account, locked: true };
+/**
+ * The record of the first signature: the one that made the FO10 the row points
+ * to. The second signature, its emails and the authorization page take the
+ * accounts from here rather than from the row, which can be edited in the
+ * Sheet, since the FO10 was filled from them.
+ */
+export function firstSignature(row: RequestRow, records: SignatureRecord[]): SignatureRecord {
+  const first = records.find((r) => r.state === "signed" && Number(r.slot) === 1 && Number(r.version) === versionOf(row) && r.fo10_sha256 === row.fo10_sha256);
+  if (!first) {
+    console.error(`[signers] no record of the first signature on ${row.request_id} that made FO10 ${row.fo10_sha256}`);
+    throw mismatch();
+  }
+  if (first.budget_account !== row.budget_account || first.payment_account !== row.payment_account) {
+    console.warn(`[signers] ${row.request_id}'s row shows other accounts than its first signature; going by the signature`);
+  }
+  return first;
+}
+
+/** The first signature's record while the request waits for the second; null before the first. */
+async function firstIfSigned(signatures: Adapters["signatures"], row: RequestRow): Promise<SignatureRecord | null> {
+  return row.signers_step === "1 of 2 signed" ? firstSignature(row, await signatures.listFor(row.request_id)) : null;
+}
+
+/** The Budget Account and Payment Account as the next signer sees them: as the first signer locked them, once they've signed. */
+export function currentAccounts(request: RequestInput, first: SignatureRecord | null): Accounts {
+  if (first) return { budgetAccount: first.budget_account, paymentAccount: first.payment_account, locked: true };
   return { budgetAccount: budgetAccountDefault(request), paymentAccount: config.billPayAccounts[0] ?? "", locked: false };
 }
 
@@ -169,8 +188,8 @@ export function chairFor(row: RequestRow): ChairSignature | { skipped: string } 
 
 /** The FO10 as the next signer sees it: unsigned before the first signature, then the first-signature file. */
 async function currentFo10(row: RequestRow, stored: StoredRequest, files: Adapters["files"]): Promise<Uint8Array> {
-  if (row.signers_step === "1 of 2 signed" && row.fo10_file_id) return files.getFileBytes(row.fo10_file_id);
-  return (await fillFo10(fo10Details(row, stored, currentAccounts(row, stored.request)))).bytes;
+  if (row.signers_step === "1 of 2 signed") return files.getFileBytes(row.fo10_file_id);
+  return (await fillFo10(fo10Details(row, stored, currentAccounts(stored.request, null)))).bytes;
 }
 
 export interface SendToSignersInput {
@@ -180,8 +199,11 @@ export interface SendToSignersInput {
   /** Who to email; every check signer who may sign next when left out. */
   to?: string[];
   linkBase: string;
-  /** The packet's bytes, when the caller has them already. */
+  /** What the caller has already, so it isn't read again: the packet, the FO10 as it stands, the flags, and the first signature's record (null before it). */
   packetBytes?: Uint8Array;
+  fo10Bytes?: Uint8Array;
+  flags?: string[];
+  first?: SignatureRecord | null;
   reminder?: boolean;
 }
 
@@ -197,18 +219,22 @@ export function nextSigners(row: Pick<RequestRow, "requester_email" | "signer_1_
  * link, and the link is all it takes to sign. Never throws: says who was
  * reached and why the others weren't.
  */
-export async function sendToSigners(input: SendToSignersInput, adapters: Pick<Adapters, "files" | "log" | "mailer">): Promise<{ sent: string[]; failed: string[]; error?: string }> {
+export async function sendToSigners(
+  input: SendToSignersInput,
+  adapters: Pick<Adapters, "files" | "log" | "mailer" | "signatures">,
+): Promise<{ sent: string[]; failed: string[]; error?: string }> {
   const { row, stored } = input;
   const to = input.to ?? nextSigners(row);
   if (to.length === 0) return { sent: [], failed: [], error: "No check signers to email: CHECK_SIGNERS lists fewer than two besides the requester." };
   try {
     const packet = signedPacket(row);
-    const [packetBytes, fo10, requesterRows] = await Promise.all([
+    const [packetBytes, fo10, flags, first] = await Promise.all([
       input.packetBytes ?? adapters.files.getFileBytes(packet.fileId),
-      currentFo10(row, stored, adapters.files),
-      adapters.log.listByEmail(row.requester_email),
+      input.fo10Bytes ?? currentFo10(row, stored, adapters.files),
+      input.flags ?? adapters.log.listByEmail(row.requester_email).then((rows) => signerFlags(row, stored.request, rows)),
+      input.first !== undefined ? input.first : firstIfSigned(adapters.signatures, row),
     ]);
-    const accounts = currentAccounts(row, stored.request);
+    const accounts = currentAccounts(stored.request, first);
     const firstAt = parseDate(row.signer_1_signed_at);
     const common = {
       requestId: row.request_id,
@@ -219,7 +245,7 @@ export async function sendToSigners(input: SendToSignersInput, adapters: Pick<Ad
       linkBase: input.linkBase,
       budgetAccount: accounts.budgetAccount,
       paymentAccount: accounts.paymentAccount,
-      flags: signerFlags(row, stored.request, requesterRows),
+      flags,
       chair: chairFor(row),
       firstSigner: row.signers_step === "1 of 2 signed" && firstAt ? { name: row.signer_1_name, signedAt: firstAt } : null,
       packetSha256: packet.sha256,
@@ -255,6 +281,8 @@ export type SignerLinkState =
   | { kind: "done"; row: RequestRow; status: string }
   /** This signer signed the first line; the second must come from someone else. */
   | { kind: "signed-first"; row: RequestRow; link: SignerLink }
+  /** The files don't match the record of what was signed, so nothing can be signed until the PTA looks. */
+  | { kind: "mismatch"; row: RequestRow }
   | {
       kind: "ready";
       row: RequestRow;
@@ -263,13 +291,15 @@ export type SignerLinkState =
       /** Which Authorized By line this signer would sign. */
       slot: 1 | 2;
       accounts: Accounts;
+      /** The first signature's record, for the second signer; null for the first. */
+      first: SignatureRecord | null;
       /** What the app fills the Budget Account with, before the first signer changes it. */
       budgetAccountFilled: string;
       flags: string[];
       chair: ReturnType<typeof chairFor>;
     };
 
-type CheckedLink = Exclude<SignerLinkState, { kind: "ready" | "done" }> | { kind: "closed"; row: RequestRow } | { kind: "open"; row: RequestRow; link: SignerLink; slot: 1 | 2 };
+type CheckedLink = Exclude<SignerLinkState, { kind: "ready" | "done" | "mismatch" }> | { kind: "closed"; row: RequestRow } | { kind: "open"; row: RequestRow; link: SignerLink; slot: 1 | 2 };
 
 /**
  * The checks every use of a link makes, against the row and CHECK_SIGNERS as
@@ -294,13 +324,13 @@ async function checkLink(requestId: string, token: string, log: Adapters["log"])
 }
 
 /** Who sent a request back, from the Signatures tab. */
-export async function sentBackBy(signatures: Adapters["signatures"], row: RequestRow): Promise<SignatureClaim | null> {
-  const claims = await signatures.listFor(row.request_id);
-  return claims.filter((c) => c.state === "sent back" && Number(c.version) === versionOf(row)).pop() ?? null;
+export async function sentBackBy(signatures: Adapters["signatures"], row: RequestRow): Promise<SignatureRecord | null> {
+  const records = await signatures.listFor(row.request_id);
+  return records.find((r) => r.state === "sent back" && Number(r.version) === versionOf(row)) ?? null;
 }
 
 /** All a link shows once the request has left the check signers: who authorized it or sent it back, and when. */
-export function signersStatusLine(row: RequestRow, sentBack: Pick<SignatureClaim, "signer_name" | "signed_at"> | null): string {
+export function signersStatusLine(row: RequestRow, sentBack: Pick<SignatureRecord, "signer_name" | "signed_at"> | null): string {
   if (row.signers_step === "Signed") {
     const at = parseDate(row.signer_2_signed_at);
     return `Authorized by ${row.signer_1_name} and ${row.signer_2_name}${at ? ` on ${formatMonthDay(at)}` : ""}.`;
@@ -321,18 +351,29 @@ export async function signerLinkState(requestId: string, token: string, adapters
   }
   if (checked.kind !== "open") return checked;
   const { row, link, slot } = checked;
-  const [stored, requesterRows] = await Promise.all([loadCheckedRequest(adapters.files, row), adapters.log.listByEmail(row.requester_email)]);
-  return {
-    kind: "ready",
-    row,
-    link,
-    stored,
-    slot,
-    accounts: currentAccounts(row, stored.request),
-    budgetAccountFilled: budgetAccountDefault(stored.request),
-    flags: signerFlags(row, stored.request, requesterRows),
-    chair: chairFor(row),
-  };
+  try {
+    const [stored, requesterRows, first] = await Promise.all([
+      loadCheckedRequest(adapters.files, row),
+      adapters.log.listByEmail(row.requester_email),
+      firstIfSigned(adapters.signatures, row),
+    ]);
+    return {
+      kind: "ready",
+      row,
+      link,
+      stored,
+      slot,
+      accounts: currentAccounts(stored.request, first),
+      first,
+      budgetAccountFilled: budgetAccountDefault(stored.request),
+      flags: signerFlags(row, stored.request, requesterRows),
+      chair: chairFor(row),
+    };
+  } catch (error) {
+    // The only SignerError on this path: the stored request or the first signature doesn't match the row.
+    if (error instanceof SignerError) return { kind: "mismatch", row };
+    throw error;
+  }
 }
 
 /** Why a link can't be used to sign, in the signer's terms. */
@@ -348,6 +389,8 @@ export function signerStateMessage(state: Exclude<SignerLinkState, { kind: "read
         : `${state.link.email} isn't listed as one of the PTA's check signers any more. If that's a mistake, ask the PTA at ${config.apEmail}.`;
     case "signed-first":
       return "You've already signed this one. The second signature has to come from a different check signer.";
+    case "mismatch":
+      return mismatchMessage();
     case "done":
       return state.status;
   }
@@ -415,30 +458,54 @@ function checkShown(state: Extract<SignerLinkState, { kind: "ready" }>, input: P
   );
 }
 
-/** Words for a claim lost to another signer's. */
-function lostTo(winner: SignatureClaim): SignerError {
-  if (winner.state === "sent back") return new SignerError(`${winner.signer_name || "Another check signer"} sent this request back a moment ago.`, true);
-  if (winner.state === "signed") return new SignerError(`${winner.signer_name || "Another check signer"} signed this a moment ago. Reload the page to see where it stands.`, true);
-  return new SignerError("Another check signer is signing this request right now. Reload the page in a minute to see whether it went through.", true);
+/** Why `row`, read under the lock, no longer waits for this signer's line; null when it still does. */
+function changedSince(row: RequestRow, slot: 1 | 2, version: number): SignerError | null {
+  const expected = slot === 1 ? "Waiting" : "1 of 2 signed";
+  if (row.status === "Awaiting signers" && versionOf(row) === version && row.signers_step === expected) return null;
+  if (row.signers_step === "Sent back") return new SignerError("Another check signer sent this request back a moment ago.", true);
+  if (slot === 1 && row.signers_step === "1 of 2 signed") return new SignerError(`${row.signer_1_name || "Another check signer"} signed the first line a moment ago. Reload the page to sign the second.`, true);
+  if (row.signers_step === "Signed") return new SignerError(`${row.signer_2_name || "Another check signer"} signed this a moment ago. Reload the page to see where it stands.`, true);
+  return new SignerError("This request isn't waiting for the check signers any more. Reload the page to see where it stands.", true);
+}
+
+/** The lock is held: another signer is signing or sending it back right now, or the requester is resending. */
+function busy(error: unknown): never {
+  if (error instanceof BusyError) throw new SignerError("Another check signer is working on this request right now. Reload the page in a minute to see where it stands.", true);
+  throw error;
+}
+
+/** What a signature made, under the lock. */
+interface Signed {
+  /** The row as written. */
+  row: RequestRow;
+  record: SignatureRecord;
+  packetBytes: Uint8Array;
+  /** The FO10 with this signature on it. */
+  fo10: Uint8Array;
+  fo10Sha256: string;
+  /** The second signature's authorized packet; null after the first. */
+  authorized: { bytes: Uint8Array; sha256: string } | null;
 }
 
 /**
- * Signs one Authorized By line. The signature is claimed in the Signatures
- * tab first, and only the winning claim builds the files, records the
- * signature and sends the emails (see claims.ts). The first signature saves
- * the FO10 with it stamped on; the second adds its own to a copy, builds the
- * authorized packet and sends it to AP. Email trouble after the row is
- * written is noted on the row, never retried.
+ * Signs one Authorized By line. Under the row's lock, it checks the row
+ * again, builds the files, records the signature in the Signatures tab and
+ * marks the row, so a second signer pressing Sign at the same moment is
+ * refused. The first signature saves the FO10 with it stamped on; the second
+ * adds its own to a copy, builds the authorized packet and sends it to AP.
+ * Email trouble after the row is written is noted on the row; the requester
+ * can send the authorized packet to AP again from their request page.
  */
 export async function signAsSigner(input: SignerSignInput, adapters: Adapters): Promise<SignerSignResult> {
   const { files, log, signatures, mailer } = adapters;
   const state = await signerLinkState(input.requestId, input.token, adapters);
   if (state.kind !== "ready") throw new SignerError(signerStateMessage(state), state.kind === "done" || state.kind === "signed-first");
   checkShown(state, input);
-  const { row, link, stored, slot } = state;
+  const { link, stored, slot, first } = state;
   const { request } = stored;
-  const requestId = row.request_id;
-  const version = versionOf(row);
+  const requestId = state.row.request_id;
+  const version = versionOf(state.row);
+  const email = lower(link.email);
 
   const name = oneLine(input.name);
   if (name.length < 2) throw new SignerError("Enter your full name.");
@@ -455,52 +522,49 @@ export async function signAsSigner(input: SignerSignInput, adapters: Adapters): 
     if (!config.billPayAccounts.includes(paymentAccount)) throw new SignerError("Choose the Payment Account from the list.");
     accounts = { budgetAccount, paymentAccount };
   } else {
-    accounts = { budgetAccount: row.budget_account, paymentAccount: row.payment_account };
+    // As the first signer locked them, which the FO10 was filled from.
+    accounts = { budgetAccount: state.accounts.budgetAccount, paymentAccount: state.accounts.paymentAccount };
   }
 
-  const packet = signedPacket(row);
   const signedAt = new Date();
-  const outcome = await claimSignature(
-    signatures,
-    {
+  const made = await withRequestLock<Signed>(log, requestId, async (row) => {
+    const changed = changedSince(row, slot, version);
+    if (changed) throw changed;
+    // Sign only the exact files that were signed before.
+    const packet = signedPacket(row);
+    const packetBytes = await files.getFileBytes(packet.fileId);
+    if (sha256(packetBytes) !== packet.sha256) {
+      console.error(`[signers] not signing ${requestId}: the ${packet.kind} packet is ${sha256(packetBytes)}, the row says ${packet.sha256}`);
+      throw mismatch();
+    }
+    const record: SignatureRecord = {
+      record_id: randomUUID(),
       request_id: requestId,
       version,
       slot,
-      signer_email: lower(link.email),
+      signer_email: email,
       signer_name: name,
+      state: "signed",
+      signed_at: signedAt.toISOString(),
       method: signature.type,
       ip: input.ip,
       browser: input.userAgent,
       link_sent_at: link.issuedAt.toISOString(),
       budget_account: accounts.budgetAccount,
       payment_account: accounts.paymentAccount,
-    },
-    signedAt,
-  );
-  if (!outcome.won) throw lostTo(outcome.winner);
-  const { claim } = outcome;
-
-  let made: { fo10: Uint8Array; fo10Sha256: string; authorized: { bytes: Uint8Array; sha256: string } | null; packetBytes: Uint8Array };
-  try {
-    // Sign only the exact files that were signed before.
-    const packetBytes = await files.getFileBytes(packet.fileId);
-    if (sha256(packetBytes) !== packet.sha256) {
-      console.error(`[signers] not signing ${requestId}: the ${packet.kind} packet is ${sha256(packetBytes)}, the row says ${packet.sha256}`);
-      throw mismatch();
-    }
-    // Building takes seconds; make sure the claim still holds before writing anything.
-    const stillOurs = async () => {
-      if (!(await stillHeld(signatures, claim))) throw new SignerError("This took too long, and another check signer may be signing now. Reload the page to see where it stands.", true);
+      packet_sha256: packet.sha256,
+      fo10_sha256: "",
     };
-    let patch: Partial<RequestRow>;
+
     if (slot === 1) {
       const fo10 = await fillFo10(fo10Details(row, stored, accounts), [{ slot: 1, name, signature, signedAt }]);
-      await stillOurs();
       const saved = await files.putFile({ name: fo10Name(requestId, version), mimeType: "application/pdf", bytes: fo10.bytes, folderPath: folderOf(row) });
-      made = { fo10: fo10.bytes, fo10Sha256: fo10.sha256, authorized: null, packetBytes };
-      patch = {
+      const signed = { ...record, fo10_sha256: fo10.sha256 };
+      // Recorded before the row, so a row marked signed always has its record. One left by a failure here matches no FO10 the row points to.
+      await signatures.append(signed);
+      const patch: Partial<RequestRow> = {
         signers_step: "1 of 2 signed",
-        signer_1_email: lower(link.email),
+        signer_1_email: email,
         signer_1_name: name,
         signer_1_signed_at: signedAt.toISOString(),
         signer_1_note: input.note,
@@ -509,129 +573,128 @@ export async function signAsSigner(input: SignerSignInput, adapters: Adapters): 
         fo10_file_id: saved.id,
         fo10_sha256: fo10.sha256,
         // Narrowed below to who the "one more signature" email reaches.
-        signers_sent_to: nextSigners({ requester_email: row.requester_email, signer_1_email: link.email }).join(", "),
+        signers_sent_to: nextSigners({ requester_email: row.requester_email, signer_1_email: email }).join(", "),
         signers_sent_at: signedAt.toISOString(),
       };
-    } else {
-      const fo10One = await files.getFileBytes(row.fo10_file_id);
-      if (sha256(fo10One) !== row.fo10_sha256) {
-        console.error(`[signers] not signing ${requestId}: the first-signature FO10 is ${sha256(fo10One)}, the row says ${row.fo10_sha256}`);
-        throw mismatch();
-      }
-      const first = outcome.all.find((c) => c.state === "signed" && Number(c.slot) === 1 && Number(c.version) === version);
-      const fo10 = await addSecondSignature(fo10One, { name, signature, signedAt });
-      const firstSignedAt = parseDate(row.signer_1_signed_at) ?? signedAt;
-      const budgetAccountFilled = budgetAccountDefault(request);
-      const authorized = await buildAuthorizedPacket({
-        requestId,
-        fo10,
-        packet: packetBytes,
-        authorizedAt: signedAt,
-        page: {
-          requestId,
-          payeeName: request.payeeName,
-          mailingAddress: formatAddress(request),
-          amountCents: totals(request).reimbursementCents,
-          budgetAccount: accounts.budgetAccount,
-          paymentAccount: accounts.paymentAccount,
-          budgetAccountFilled: budgetAccountFilled === accounts.budgetAccount ? null : budgetAccountFilled,
-          signers: [
-            {
-              slot: 1,
-              name: row.signer_1_name,
-              email: row.signer_1_email,
-              linkSentAt: parseDate(first?.link_sent_at),
-              signedAt: firstSignedAt,
-              signature: first?.method === "drawn" ? { type: "drawn" } : { type: "typed", name: row.signer_1_name },
-              note: row.signer_1_note,
-            },
-            { slot: 2, name, email: lower(link.email), linkSentAt: link.issuedAt, signedAt, signature: signature.type === "typed" ? { type: "typed", name } : { type: "drawn" }, note: input.note },
-          ],
-          consentText: SIGNER_CONSENT_TEXT,
-          packetSha256: packet.sha256,
-          packetKind: packet.kind,
-          fo10Sha256: row.fo10_sha256,
-          flags: state.flags,
-        },
-      });
-      await stillOurs();
-      const saved = await files.putFile({ name: authorizedName(requestId, version), mimeType: "application/pdf", bytes: authorized.bytes, folderPath: folderOf(row) });
-      made = { fo10, fo10Sha256: sha256(fo10), authorized: { bytes: authorized.bytes, sha256: authorized.sha256 }, packetBytes };
-      patch = {
-        status: "Submitted",
-        signers_step: "Signed",
-        signer_2_email: lower(link.email),
-        signer_2_name: name,
-        signer_2_signed_at: signedAt.toISOString(),
-        signer_2_note: input.note,
-        authorized_pdf_file_id: saved.id,
-        authorized_pdf_sha256: authorized.sha256,
-      };
+      return { patch, result: { row: { ...row, ...patch }, record: signed, packetBytes, fo10: fo10.bytes, fo10Sha256: fo10.sha256, authorized: null } };
     }
-    const expected = slot === 1 ? "Waiting" : "1 of 2 signed";
-    const wrote = await log.updateIf(requestId, (r) => r.status === "Awaiting signers" && versionOf(r) === version && r.signers_step === expected, patch);
-    if (!wrote) throw new SignerError("This request isn't waiting for the check signers any more.", true);
-  } catch (error) {
-    // Frees the signature at once rather than after the time-out.
-    await signatures.update(claim.claim_id, { state: "abandoned" }).catch(() => undefined);
-    throw error;
-  }
-  await signatures
-    .update(claim.claim_id, { state: "signed", signed_at: signedAt.toISOString(), packet_sha256: packet.sha256, fo10_sha256: made.fo10Sha256 })
-    .catch((error: unknown) => console.error(`[signers] signed ${requestId} line ${slot}, but couldn't mark the claim signed: ${error instanceof Error ? error.message : error}`));
+
+    const fo10One = await files.getFileBytes(row.fo10_file_id);
+    if (sha256(fo10One) !== row.fo10_sha256 || row.fo10_sha256 !== first?.fo10_sha256) {
+      console.error(`[signers] not signing ${requestId}: the first-signature FO10 is ${sha256(fo10One)}, the row says ${row.fo10_sha256}, its record ${first?.fo10_sha256}`);
+      throw mismatch();
+    }
+    const fo10 = await addSecondSignature(fo10One, { name, signature, signedAt });
+    const budgetAccountFilled = budgetAccountDefault(request);
+    const authorized = await buildAuthorizedPacket({
+      requestId,
+      fo10,
+      packet: packetBytes,
+      authorizedAt: signedAt,
+      page: {
+        requestId,
+        payeeName: request.payeeName,
+        mailingAddress: formatAddress(request),
+        amountCents: totals(request).reimbursementCents,
+        budgetAccount: accounts.budgetAccount,
+        paymentAccount: accounts.paymentAccount,
+        budgetAccountFilled: budgetAccountFilled === accounts.budgetAccount ? null : budgetAccountFilled,
+        signers: [
+          {
+            slot: 1,
+            name: first.signer_name,
+            email: first.signer_email,
+            linkSentAt: parseDate(first.link_sent_at),
+            signedAt: parseDate(first.signed_at) ?? parseDate(row.signer_1_signed_at) ?? signedAt,
+            signature: first.method === "drawn" ? { type: "drawn" } : { type: "typed", name: first.signer_name },
+          },
+          { slot: 2, name, email, linkSentAt: link.issuedAt, signedAt, signature: signature.type === "typed" ? { type: "typed", name } : { type: "drawn" } },
+        ],
+        consentText: SIGNER_CONSENT_TEXT,
+        packetSha256: packet.sha256,
+        packetKind: packet.kind,
+        fo10Sha256: row.fo10_sha256,
+      },
+    });
+    const saved = await files.putFile({ name: authorizedName(requestId, version), mimeType: "application/pdf", bytes: authorized.bytes, folderPath: folderOf(row) });
+    const signed = { ...record, fo10_sha256: sha256(fo10) };
+    await signatures.append(signed);
+    const patch: Partial<RequestRow> = {
+      status: "Submitted",
+      signers_step: "Signed",
+      signer_2_email: email,
+      signer_2_name: name,
+      signer_2_signed_at: signedAt.toISOString(),
+      signer_2_note: input.note,
+      authorized_pdf_file_id: saved.id,
+      authorized_pdf_sha256: authorized.sha256,
+    };
+    return { patch, result: { row: { ...row, ...patch }, record: signed, packetBytes, fo10, fo10Sha256: signed.fo10_sha256, authorized: { bytes: authorized.bytes, sha256: authorized.sha256 } } };
+  }).catch(busy);
 
   // From here on the signature is recorded; email trouble is noted on the row.
   const problems: string[] = [];
   let emailed = true;
-  const after = await log.get(requestId);
-  if (slot === 1) {
-    const result = after ? await sendToSigners({ row: after, stored, linkBase: input.linkBase, packetBytes: made.packetBytes }, adapters) : { sent: [], failed: [], error: "the row vanished" };
+  let notes = made.row.notes;
+  if (!made.authorized) {
+    const result = await sendToSigners({ row: made.row, stored, linkBase: input.linkBase, packetBytes: made.packetBytes, fo10Bytes: made.fo10, flags: state.flags, first: made.record }, adapters);
     if (result.error) {
       emailed = false;
       console.error(`[signers] "one more signature" for ${requestId} failed: ${result.error}`);
       problems.push(`The "one more signature" email${result.failed.length ? ` to ${result.failed.join(", ")}` : ""} failed: ${result.error}`);
       await log.update(requestId, { signers_sent_to: result.sent.join(", "), ...(result.sent.length === 0 ? { signers_sent_at: "" } : {}) }).catch(() => undefined);
     }
-  } else if (after?.authorized_pdf_sha256 === made.authorized!.sha256) {
-    // Sent only if the authorized packet the row records is the one made here.
-    try {
-      await sendAuthorizedPacket({ row: after, stored, authorized: made.authorized!.bytes, linkBase: input.linkBase, flags: state.flags }, adapters);
-    } catch (error) {
-      emailed = false;
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[signers] could not send ${requestId} to AP: ${message}`);
-      problems.push(`Email of the authorized packet failed: ${message}`);
-    }
   } else {
-    emailed = false;
-    console.error(`[signers] not emailing AP for ${requestId}: the row records ${after?.authorized_pdf_sha256}, this signing made ${made.authorized!.sha256}`);
-    problems.push("The authorized packet wasn't emailed: the row records a different one.");
+    // Read again, and sent only if the authorized packet the row records is the one made here.
+    const after = await log.get(requestId);
+    notes = after?.notes ?? notes;
+    if (after && after.authorized_pdf_sha256 === made.authorized.sha256) {
+      try {
+        const sent = await sendAuthorizedPacket({ row: after, stored, authorized: made.authorized.bytes, linkBase: input.linkBase, flags: state.flags, first: first! }, adapters);
+        await log
+          .update(requestId, { authorized_sent_at: sent.sentAt.toISOString() })
+          .catch((error: unknown) => problems.push(`Sent to AP, but couldn't record when: ${error instanceof Error ? error.message : error}`));
+        if (sent.copyError) problems.push(`The requester's copy of the authorized packet failed: ${sent.copyError}`);
+      } catch (error) {
+        emailed = false;
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[signers] could not send ${requestId} to AP: ${message}`);
+        problems.push(`The authorized packet's email to AP failed: ${message}`);
+      }
+    } else {
+      emailed = false;
+      console.error(`[signers] not emailing AP for ${requestId}: the row records ${after?.authorized_pdf_sha256}, this signing made ${made.authorized.sha256}`);
+      problems.push("The authorized packet wasn't emailed: the row records a different one.");
+    }
   }
 
   let receipted = true;
   try {
-    const mail = signerReceiptEmail({ requestId, slot, name, payeeName: request.payeeName, amountCents: totals(request).reimbursementCents, mailingAddress: formatAddress(request) });
-    await mailer.send({ to: [lower(link.email)], subject: mail.subject, text: mail.text, attachments: [{ filename: `${requestId}-fo10.pdf`, mimeType: "application/pdf", bytes: made.fo10 }] });
+    const mail = signerReceiptEmail({ requestId, slot, name, payeeName: request.payeeName, amountCents: totals(request).reimbursementCents, mailingAddress: formatAddress(request), onward: emailed });
+    await mailer.send({ to: [email], subject: mail.subject, text: mail.text, attachments: [{ filename: `${requestId}-fo10.pdf`, mimeType: "application/pdf", bytes: made.fo10 }] });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`[signers] could not send ${link.email} their receipt for ${requestId}: ${message}`);
-    problems.push(`The signer's receipt (to ${link.email}) failed: ${message}`);
+    console.error(`[signers] could not send ${email} their receipt for ${requestId}: ${message}`);
+    problems.push(`The signer's receipt (to ${email}) failed: ${message}`);
     receipted = false;
   }
-  if (problems.length > 0) await log.update(requestId, { notes: [after?.notes ?? row.notes, ...problems].filter(Boolean).join(" | ") }).catch(() => undefined);
+  if (problems.length > 0) await log.update(requestId, { notes: [notes, ...problems].filter(Boolean).join(" | ") }).catch(() => undefined);
   return { slot, sha256: made.authorized?.sha256 ?? made.fo10Sha256, emailed, receipted };
 }
 
 /**
- * Sends the authorized packet to AP, always, with a copy to the requester.
- * The one way a mailed check reaches AP: refuses a row whose authorized
- * packet isn't the one given, for its current version.
+ * Sends the authorized packet to AP, always, with a copy to the requester
+ * unless `copyRequester` is false. The one way a mailed check reaches AP:
+ * refuses a row whose authorized packet isn't the one given, for its current
+ * version. The accounts come from the first signature's record, which the
+ * FO10 was filled from. Throws if AP's email fails; the requester's copy
+ * failing only comes back as `copyError`.
  */
 export async function sendAuthorizedPacket(
-  input: { row: RequestRow; stored: StoredRequest; authorized: Uint8Array; linkBase: string; flags: string[] },
+  input: { row: RequestRow; stored: StoredRequest; authorized: Uint8Array; linkBase: string; flags: string[]; first: SignatureRecord; copyRequester?: boolean },
   adapters: Pick<Adapters, "users" | "stipends" | "log" | "mailer">,
-): Promise<void> {
-  const { row, stored } = input;
+): Promise<{ sentAt: Date; copyError?: string }> {
+  const { row, stored, first } = input;
   const sha = sha256(input.authorized);
   if (row.check_delivery !== "mail" || row.signers_step !== "Signed" || !row.authorized_pdf_file_id || row.authorized_pdf_sha256 !== sha || stored.version !== versionOf(row)) {
     throw new Error(`Refusing to send ${row.request_id} to AP: it has no authorized packet for version ${versionOf(row)} matching ${sha}`);
@@ -641,11 +704,11 @@ export async function sendAuthorizedPacket(
   const chair = chairFor(row);
   const signers: SignersAuthorization = {
     signers: [
-      { name: row.signer_1_name, email: row.signer_1_email, signedAt: parseDate(row.signer_1_signed_at) ?? submittedAt, note: row.signer_1_note },
+      { name: first.signer_name, email: first.signer_email, signedAt: parseDate(first.signed_at) ?? submittedAt, note: row.signer_1_note },
       { name: row.signer_2_name, email: row.signer_2_email, signedAt: parseDate(row.signer_2_signed_at) ?? submittedAt, note: row.signer_2_note },
     ],
-    budgetAccount: row.budget_account,
-    paymentAccount: row.payment_account,
+    budgetAccount: first.budget_account,
+    paymentAccount: first.payment_account,
     flags: input.flags,
     packetSha256: signedPacket(row).sha256,
   };
@@ -664,8 +727,17 @@ export async function sendAuthorizedPacket(
   const attachment = { filename: authorizedName(row.request_id, versionOf(row)), mimeType: "application/pdf", bytes: input.authorized };
   const ap = apAuthorizedEmail(email);
   await adapters.mailer.send({ to: [config.apEmail], replyTo: row.requester_email, subject: ap.subject, text: ap.text, attachments: [attachment] });
-  const copy = requesterAuthorizedEmail(email);
-  await adapters.mailer.send({ to: [row.requester_email], subject: copy.subject, text: copy.text, attachments: [attachment] });
+  const sentAt = new Date();
+  if (input.copyRequester === false) return { sentAt };
+  try {
+    const copy = requesterAuthorizedEmail(email);
+    await adapters.mailer.send({ to: [row.requester_email], subject: copy.subject, text: copy.text, attachments: [attachment] });
+    return { sentAt };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[signers] AP has ${row.request_id}, but the requester's copy failed: ${message}`);
+    return { sentAt, copyError: message };
+  }
 }
 
 export interface SignerSendBackInput extends SignerAction {
@@ -675,52 +747,44 @@ export interface SignerSendBackInput extends SignerAction {
 
 /**
  * Sends the request back instead of signing: it becomes Returned, every
- * signer link stops working, and the requester and AP get the note. Claims
- * the signature it replaces, so a signature at the same moment can't also go
- * through.
+ * signer link stops working, and the requester and AP get the note. Runs
+ * under the row's lock, like a signature, so the two can't both go through.
  */
 export async function sendBackAsSigner(input: SignerSendBackInput, adapters: Adapters): Promise<{ emailed: boolean }> {
   const { log, signatures, mailer } = adapters;
   const state = await signerLinkState(input.requestId, input.token, adapters);
   if (state.kind !== "ready") throw new SignerError(signerStateMessage(state), state.kind === "done" || state.kind === "signed-first");
   checkShown(state, input);
-  const { row, link, stored, slot } = state;
+  const { link, stored, slot } = state;
   const name = oneLine(input.name);
   const note = input.note.trim();
   if (name.length < 2) throw new SignerError("Enter your full name.");
   if (!note) throw new SignerError("Say what needs to change, so the requester can fix it.");
-  const version = versionOf(row);
+  const version = versionOf(state.row);
   const now = new Date();
-  const outcome = await claimSignature(
-    signatures,
-    {
-      request_id: row.request_id,
+  const row = await withRequestLock(log, state.row.request_id, async (current) => {
+    const changed = changedSince(current, slot, version);
+    if (changed) throw changed;
+    await signatures.append({
+      record_id: randomUUID(),
+      request_id: current.request_id,
       version,
       slot,
       signer_email: lower(link.email),
       signer_name: name,
+      state: "sent back",
+      signed_at: now.toISOString(),
       method: "send back",
       ip: input.ip,
       browser: input.userAgent,
       link_sent_at: link.issuedAt.toISOString(),
       budget_account: "",
       payment_account: "",
-    },
-    now,
-  );
-  if (!outcome.won) throw lostTo(outcome.winner);
-  const expected = slot === 1 ? "Waiting" : "1 of 2 signed";
-  const wrote = await log
-    .updateIf(row.request_id, (r) => r.status === "Awaiting signers" && versionOf(r) === version && r.signers_step === expected, { status: "Returned", signers_step: "Sent back", returned_note: note })
-    .catch(async (error: unknown) => {
-      await signatures.update(outcome.claim.claim_id, { state: "abandoned" }).catch(() => undefined);
-      throw error;
+      packet_sha256: signedPacket(current).sha256,
+      fo10_sha256: "",
     });
-  if (!wrote) {
-    await signatures.update(outcome.claim.claim_id, { state: "abandoned" }).catch(() => undefined);
-    throw new SignerError("This request isn't waiting for the check signers any more.", true);
-  }
-  await signatures.update(outcome.claim.claim_id, { state: "sent back", signed_at: now.toISOString() }).catch(() => undefined);
+    return { patch: { status: "Returned", signers_step: "Sent back", returned_note: note }, result: current };
+  }).catch(busy);
 
   try {
     const mail = signerSentBackEmail({
@@ -768,7 +832,7 @@ export interface SignerSending {
 
 export function signerSending(row: Pick<RequestRow, "requester_email" | "signer_1_email" | "signers_sent_to" | "signers_sent_at">, now = new Date()): SignerSending {
   const current = nextSigners(row);
-  const reached = addresses(row.signers_sent_to).filter((a) => current.includes(a));
+  const reached = addressList(row.signers_sent_to).filter((a) => current.includes(a));
   const unreached = current.filter((signer) => !reached.includes(signer));
   const sentAt = parseDate(row.signers_sent_at);
   const next = sentAt ? new Date(sentAt.getTime() + config.signerResendHours * 3_600_000) : null;
@@ -787,11 +851,12 @@ function resendProblem(row: RequestRow, sending: SignerSending): SignerResendErr
  * The requester's "Resend to the check signers": the signing email again,
  * with fresh links. Once a day it goes to every signer who may sign next;
  * before that, only to those it hasn't reached. Runs under the row's lock,
- * so a double click sends it once.
+ * so a double click sends it once, and it can't go out halfway through a
+ * signature.
  */
 export async function resendToSigners(
   input: { requestId: string; requesterEmail: string; linkBase: string; now?: Date },
-  adapters: Pick<Adapters, "log" | "files" | "mailer">,
+  adapters: Pick<Adapters, "log" | "files" | "mailer" | "signatures">,
 ): Promise<{ sentTo: string[] }> {
   const { log } = adapters;
   const now = input.now ?? new Date();
@@ -817,6 +882,105 @@ export async function resendToSigners(
     });
   } catch (error) {
     if (error instanceof BusyError) throw new SignerResendError("busy", "It's being sent right now. Reload the page in a minute to see when it went.");
+    throw error;
+  }
+}
+
+/**
+ * How long after the second signature the app may still be sending the
+ * authorized packet itself. Until then the requester's page says it's on its
+ * way, and it can't be sent again.
+ */
+export const AUTHORIZED_SENDING_MS = 5 * 60_000;
+
+/**
+ * Whether AP has the authorized packet: "sent" once its email went (or AP has
+ * moved the request on, so they have it), "sending" just after the second
+ * signature, and "unsent" when that email failed. Null for a request with no
+ * authorized packet.
+ */
+export function authorizedSending(
+  row: Pick<RequestRow, "check_delivery" | "status" | "signers_step" | "authorized_pdf_file_id" | "authorized_sent_at" | "signer_2_signed_at">,
+  now = new Date(),
+): "sent" | "sending" | "unsent" | null {
+  if (row.check_delivery !== "mail" || row.signers_step !== "Signed" || !row.authorized_pdf_file_id) return null;
+  if (row.authorized_sent_at || row.status !== "Submitted") return "sent";
+  const at = parseDate(row.signer_2_signed_at);
+  return at && now.getTime() - at.getTime() < AUTHORIZED_SENDING_MS ? "sending" : "unsent";
+}
+
+export type AuthorizedResendProblem = "not-found" | "closed" | "already-sent" | "too-soon" | "mismatch" | "busy" | "failed";
+
+export class AuthorizedResendError extends Error {
+  constructor(
+    readonly problem: AuthorizedResendProblem,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function authorizedResendProblem(row: RequestRow, now: Date): AuthorizedResendError | null {
+  switch (authorizedSending(row, now)) {
+    case null:
+      return new AuthorizedResendError("closed", "This request has no authorized packet to send.");
+    case "sent":
+      return new AuthorizedResendError("already-sent", "The PTA's accounts payable team already has it.");
+    case "sending":
+      return new AuthorizedResendError("too-soon", "It's still being sent. Reload the page in a few minutes.");
+    case "unsent":
+      return null;
+  }
+}
+
+/**
+ * The requester's "Send it to the PTA", for when the authorized packet's
+ * email to AP failed after the second signature. Sends the saved packet from
+ * Drive, checked against its hash, to AP only: the requester's copy, and the
+ * PDF on their page, are as before. The requester never carries the packet.
+ * Runs under the row's lock, so a double click sends it once.
+ */
+export async function sendAuthorizedAgain(
+  input: { requestId: string; requesterEmail: string; linkBase: string; now?: Date },
+  adapters: Pick<Adapters, "log" | "files" | "signatures" | "users" | "stipends" | "mailer">,
+): Promise<void> {
+  const { log, files, signatures } = adapters;
+  const now = input.now ?? new Date();
+  const first = await log.get(input.requestId);
+  if (!first || lower(first.requester_email) !== lower(input.requesterEmail)) throw new AuthorizedResendError("not-found", "That request wasn't found.");
+  const early = authorizedResendProblem(first, now);
+  if (early) throw early;
+  try {
+    await withRequestLock(log, input.requestId, async (row) => {
+      const problem = authorizedResendProblem(row, now);
+      if (problem) throw problem;
+      let sending: Parameters<typeof sendAuthorizedPacket>[0];
+      try {
+        const [authorized, stored, records, requesterRows] = await Promise.all([
+          files.getFileBytes(row.authorized_pdf_file_id),
+          loadCheckedRequest(files, row),
+          signatures.listFor(row.request_id),
+          log.listByEmail(row.requester_email),
+        ]);
+        if (sha256(authorized) !== row.authorized_pdf_sha256) {
+          console.error(`[signers] not resending ${row.request_id}: the authorized packet is ${sha256(authorized)}, the row says ${row.authorized_pdf_sha256}`);
+          throw mismatch();
+        }
+        sending = { row, stored, authorized, linkBase: input.linkBase, flags: signerFlags(row, stored.request, requesterRows), first: firstSignature(row, records), copyRequester: false };
+      } catch (error) {
+        if (error instanceof SignerError) throw new AuthorizedResendError("mismatch", error.message);
+        throw error;
+      }
+      try {
+        const { sentAt } = await sendAuthorizedPacket(sending, adapters);
+        return { patch: { authorized_sent_at: sentAt.toISOString() }, result: undefined };
+      } catch (error) {
+        console.error(`[signers] resend of ${row.request_id}'s authorized packet failed: ${error instanceof Error ? error.message : error}`);
+        throw new AuthorizedResendError("failed", "The email didn't go through. Please try again in a few minutes.");
+      }
+    });
+  } catch (error) {
+    if (error instanceof BusyError) throw new AuthorizedResendError("busy", "It's being sent right now. Reload the page in a minute to see whether it went.");
     throw error;
   }
 }

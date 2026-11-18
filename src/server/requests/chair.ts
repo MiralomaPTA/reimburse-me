@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { Adapters, MailAttachment, Mailer, RequestRow } from "@/server/adapters/types";
 import { config } from "@/server/config";
 import { createChairToken, verifyChairToken, type ChairLink } from "@/server/auth/tokens";
@@ -6,6 +5,7 @@ import { chairRequestEmail, chairSignedEmail } from "@/server/email/templates";
 import { countersignPacket } from "@/server/pdf/countersign";
 import { chairConsentText } from "@/server/pdf/types";
 import { BusyError, withRequestLock } from "@/server/requests/lock";
+import { addressList, sha256, versionOf } from "@/server/requests/rows";
 import { signersFor } from "@/server/requests/mailing";
 import { sendPacketOn } from "@/server/requests/send-on";
 import { sendToSigners } from "@/server/requests/signers";
@@ -30,15 +30,6 @@ import type { RequestInput, SignatureInput } from "@/lib/request-schema";
 /** The page a chair's link opens. */
 export const chairLinkPath = (requestId: string, token: string) => `/chair/${encodeURIComponent(requestId)}?t=${encodeURIComponent(token)}`;
 
-const versionOf = (row: RequestRow) => Number(row.version) || 1;
-
-/** A comma-separated address cell as lower-case addresses. */
-const addresses = (cell: string) =>
-  String(cell ?? "")
-    .split(",")
-    .map((part) => part.trim().toLowerCase())
-    .filter(Boolean);
-
 /**
  * Who may sign `row` as chair now: its event's chairs in the Events tab, or,
  * when the event is no longer in the tab at all (renamed or deleted), the
@@ -49,10 +40,8 @@ const addresses = (cell: string) =>
 export function signingChairs(row: Pick<RequestRow, "event" | "chair_sent_to" | "requester_email">, events: PtaEvent[]): string[] {
   const event = findEvent(events, row.event);
   const requester = row.requester_email.trim().toLowerCase();
-  return (event ? event.chairs : addresses(row.chair_sent_to)).filter((chair) => chair !== requester);
+  return (event ? event.chairs : addressList(row.chair_sent_to)).filter((chair) => chair !== requester);
 }
-
-const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 export interface ChairRequestInput {
   requestId: string;
@@ -364,7 +353,7 @@ export interface ChairSending {
 
 export function chairSending(row: Pick<RequestRow, "event" | "chair_sent_to" | "chair_sent_at" | "requester_email">, events: PtaEvent[], now = new Date()): ChairSending {
   const chairs = signingChairs(row, events);
-  const reached = addresses(row.chair_sent_to);
+  const reached = addressList(row.chair_sent_to);
   const unreached = chairs.filter((chair) => !reached.includes(chair));
   const next = nextResendAt(row);
   const everyone = !next || next <= now;

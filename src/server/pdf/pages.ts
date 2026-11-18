@@ -201,7 +201,6 @@ export interface SignerRecord {
   linkSentAt: Date | null;
   signedAt: Date;
   signature: { type: "typed"; name: string } | { type: "drawn" };
-  note: string;
 }
 
 export interface SignersPageInput {
@@ -221,16 +220,17 @@ export interface SignersPageInput {
   packetKind: "co-signed" | "requester-signed";
   /** The FO10 as the first signer signed it. */
   fo10Sha256: string;
-  /** The "worth a second look" flags the signers were shown. */
-  flags: string[];
   /** How many pages the authorized packet holds, after the FO10. */
   packetPages: number;
 }
 
 /**
  * The last page of the authorized packet: what the check signers authorized,
- * who they were and how they signed. Their IP addresses and browsers stay in
- * the Signatures tab, since the requester gets a copy of this file.
+ * who they were and how they signed. The requester gets a copy of this file,
+ * so it leaves out the signers' IP addresses and browsers (in the Signatures
+ * tab), their notes to AP, and the "worth a second look" flags they were
+ * shown (both in AP's email): the flags are the PTA's checks for a stolen
+ * account, and whoever holds one shouldn't learn them.
  */
 export async function appendSignersPage(doc: PDFDocument, input: SignersPageInput): Promise<void> {
   const w = await writer(doc);
@@ -254,16 +254,11 @@ export async function appendSignersPage(doc: PDFDocument, input: SignersPageInpu
     w.field("Signing link", `Emailed to ${signer.email}${signer.linkSentAt ? ` on ${formatDateTime(signer.linkSentAt)}` : ""}; the link works only for this request`);
     w.field("Signed at", `${formatDateTime(signer.signedAt)} (${signer.signedAt.toISOString()})`);
     w.field("Method", signer.signature.type === "typed" ? `Typed name: "${signer.signature.name}"` : "Drawn with finger or mouse");
-    if (signer.note) w.field("Note to the PTA", signer.note);
   }
   w.space(6);
   w.field("Signed from", "The IP addresses and browsers are kept in the PTA's records, not in this file");
   w.field("Consent", input.consentText);
-  if (input.flags.length > 0) {
-    w.space(6);
-    w.sub("Shown to the signers as worth a second look");
-    for (const flag of input.flags) w.paragraph(`- ${flag}`);
-  }
+  w.field("For the PTA", "The signers' notes, and anything they were asked to look at twice, went to the PTA's accounts payable team with this file, not in it");
   w.space(6);
   w.sub("Integrity");
   w.field(`Packet authorized`, `SHA-256 ${input.packetSha256} (the ${input.packetKind} packet, pages 2 to ${input.packetPages + 1})`);

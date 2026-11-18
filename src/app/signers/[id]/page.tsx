@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getAdapters } from "@/server/adapters";
 import { config } from "@/server/config";
+import { versionOf } from "@/server/requests/rows";
 import { signerLinkState, signerStateMessage } from "@/server/requests/signers";
 import { formatDateTime, parseDate } from "@/lib/dates";
 import { formatAddress } from "@/lib/mailing";
@@ -36,11 +37,13 @@ export default async function SignerPage(props: PageProps<"/signers/[id]">) {
         ? "This link isn't valid"
         : state.kind === "signed-first"
           ? "You've signed this one"
-          : state.kind === "done" && state.row.signers_step === "Signed"
-            ? "Authorized"
-            : state.kind === "done" && state.row.signers_step === "Sent back"
-              ? "Sent back"
-              : "Nothing to sign";
+          : state.kind === "mismatch"
+            ? "This request can't be signed"
+              : state.kind === "done" && state.row.signers_step === "Signed"
+              ? "Authorized"
+              : state.kind === "done" && state.row.signers_step === "Sent back"
+                ? "Sent back"
+                : "Nothing to sign";
     return (
       <div className="mx-auto max-w-md space-y-4">
         <h1 className="text-2xl font-semibold">{title}</h1>
@@ -138,7 +141,7 @@ export default async function SignerPage(props: PageProps<"/signers/[id]">) {
         requestId={row.request_id}
         token={token}
         slot={slot}
-        version={Number(row.version) || 1}
+        version={versionOf(row)}
         payeeName={request.payeeName}
         accounts={accounts}
         billPayAccounts={config.billPayAccounts}

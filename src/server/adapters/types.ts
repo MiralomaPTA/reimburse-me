@@ -149,6 +149,8 @@ export interface RequestRow {
   /** The authorized packet: the FO10 signed by both, the packet they authorized, and an authorization page. */
   authorized_pdf_file_id: string;
   authorized_pdf_sha256: string;
+  /** When the authorized packet's email reached AP; blank until it does, so the requester can send it again. */
+  authorized_sent_at: string;
 }
 
 export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
@@ -210,6 +212,7 @@ export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
   "fo10_sha256",
   "authorized_pdf_file_id",
   "authorized_pdf_sha256",
+  "authorized_sent_at",
 ];
 
 export interface RequestLog {
@@ -367,23 +370,24 @@ export interface EventTable {
 }
 
 /**
- * One claim on a check signer's signature, in the Signatures tab. Rows are only
- * added, and each changes only its own `state` and the details filled in when
- * it finishes. The first live claim on a signature wins: see
- * server/requests/claims.ts.
+ * One check signer's signature, or their sending the request back, in the
+ * Signatures tab. A row is added only once it has gone through, under the
+ * request's row lock (server/requests/lock.ts), and never changed after. It
+ * keeps what the Requests tab and the packet leave out, like the signer's IP
+ * address and browser, and the accounts the first signer locked, which the
+ * second signature reads from here rather than from the editable row.
  */
-export interface SignatureClaim {
-  /** Random; the tab's key, so a claim can update its own row. */
-  claim_id: string;
+export interface SignatureRecord {
+  /** Random; the tab's key. */
+  record_id: string;
   request_id: string;
   version: number;
   /** 1 or 2: which Authorized By line. */
   slot: number;
   signer_email: string;
   signer_name: string;
-  /** "sent back" is a signer returning the request instead of signing it, which ends every claim after it. */
-  state: "claimed" | "signed" | "sent back" | "lost" | "abandoned";
-  claimed_at: string;
+  /** "sent back" is a signer returning the request instead of signing it. */
+  state: "signed" | "sent back";
   signed_at: string;
   /** "typed", "drawn", or "send back". */
   method: string;
@@ -391,6 +395,7 @@ export interface SignatureClaim {
   browser: string;
   /** When this signer's link was made: when the email that carried it went out. */
   link_sent_at: string;
+  /** Set by the first signature, and the same on the second. */
   budget_account: string;
   payment_account: string;
   /** The packet the signer authorized (co-signed or requester-signed). */
@@ -399,15 +404,14 @@ export interface SignatureClaim {
   fo10_sha256: string;
 }
 
-export const SIGNATURE_COLUMNS: (keyof SignatureClaim)[] = [
-  "claim_id",
+export const SIGNATURE_COLUMNS: (keyof SignatureRecord)[] = [
+  "record_id",
   "request_id",
   "version",
   "slot",
   "signer_email",
   "signer_name",
   "state",
-  "claimed_at",
   "signed_at",
   "method",
   "ip",
@@ -420,11 +424,9 @@ export const SIGNATURE_COLUMNS: (keyof SignatureClaim)[] = [
 ];
 
 export interface SignatureLog {
-  append(claim: SignatureClaim): Promise<void>;
-  /** Every claim for `requestId`, in the order they were added. Every reader sees the same order. */
-  listFor(requestId: string): Promise<SignatureClaim[]>;
-  /** Changes one claim's own cells. */
-  update(claimId: string, patch: Partial<SignatureClaim>): Promise<void>;
+  append(record: SignatureRecord): Promise<void>;
+  /** Every record for `requestId`. Nothing depends on their order. */
+  listFor(requestId: string): Promise<SignatureRecord[]>;
 }
 
 export interface Adapters {

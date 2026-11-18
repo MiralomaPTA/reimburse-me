@@ -1,41 +1,30 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { config } from "@/server/config";
-import type { SignatureClaim, SignatureLog } from "@/server/adapters/types";
+import type { SignatureLog, SignatureRecord } from "@/server/adapters/types";
 
-/** Development stand-in for the Signatures tab: a JSON array in .data/signatures.json, in the order claims were added. */
+/** Development stand-in for the Signatures tab: a JSON array in .data/signatures.json. */
 
-function claimsPath() {
+function recordsPath() {
   return path.join(process.cwd(), config.localDataDir, "signatures.json");
 }
 
-async function readAll(): Promise<SignatureClaim[]> {
+async function readAll(): Promise<SignatureRecord[]> {
   try {
-    return JSON.parse(await fs.readFile(claimsPath(), "utf8")) as SignatureClaim[];
+    return JSON.parse(await fs.readFile(recordsPath(), "utf8")) as SignatureRecord[];
   } catch {
     return [];
   }
 }
 
-async function writeAll(rows: SignatureClaim[]) {
-  await fs.mkdir(path.dirname(claimsPath()), { recursive: true });
-  await fs.writeFile(claimsPath(), JSON.stringify(rows, null, 2));
-}
-
 export const localSignatureLog: SignatureLog = {
-  async append(claim) {
+  async append(record) {
     const rows = await readAll();
-    rows.push(claim);
-    await writeAll(rows);
+    rows.push(record);
+    await fs.mkdir(path.dirname(recordsPath()), { recursive: true });
+    await fs.writeFile(recordsPath(), JSON.stringify(rows, null, 2));
   },
   async listFor(requestId) {
     return (await readAll()).filter((r) => r.request_id === requestId);
-  },
-  async update(claimId, patch) {
-    const rows = await readAll();
-    const index = rows.findIndex((r) => r.claim_id === claimId);
-    if (index === -1) throw new Error(`Unknown claim ${claimId}`);
-    rows[index] = { ...rows[index], ...patch };
-    await writeAll(rows);
   },
 };
