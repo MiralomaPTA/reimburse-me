@@ -46,9 +46,10 @@ export default function SignerGuidePage() {
           the PTA form with the receipts on the pages after it. Make sure the spending looks right for the PTA and the amounts add up.
         </p>
         <p>
-          A yellow <strong>Worth a second look</strong> box appears when this is the account&apos;s first mailed request, when the address is different from
-          the last one, or when the name is different from earlier requests. Those are how a stolen account would show. If something seems off, phone the
-          requester (their number is on the page) before you sign.
+          A yellow <strong>Worth a second look</strong> box appears when no mailed check has gone through for this account before, when the address is
+          different from the last one that did, or when the name is different from earlier requests that went through. Requests that were sent back, or are
+          still waiting, don&apos;t count. Those are how a stolen account would show. If something seems off, phone the requester (their number is on the
+          page) before you sign.
         </p>
       </Section>
 

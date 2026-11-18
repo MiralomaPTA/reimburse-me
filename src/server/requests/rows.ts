@@ -1,6 +1,6 @@
 import type { RequestLog, RequestRow } from "@/server/adapters/types";
 
-/** Small helpers the chair and check signer steps share for reading and noting on request rows. */
+/** Small helpers the chair and check signer steps share: reading and noting on request rows, and the requester's resend errors. */
 
 /** The row's version: 1 for a row from before versions, or a cell cleared by hand. */
 export const versionOf = (row: Pick<RequestRow, "version">) => Number(row.version) || 1;
@@ -33,5 +33,18 @@ export async function appendNotes(log: RequestLog, requestId: string, lines: str
     console.error(`[notes] the notes on ${requestId} kept changing; not added: ${lines.join(" | ")}`);
   } catch (error) {
     console.error(`[notes] couldn't add to the notes on ${requestId}: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+/**
+ * Why a requester's resend didn't go: a `problem` code the route puts in the
+ * page's URL, which the page words, and a message for the logs and tests.
+ */
+export class ResendProblemError<P extends string> extends Error {
+  constructor(
+    readonly problem: P,
+    message: string,
+  ) {
+    super(message);
   }
 }

@@ -6,7 +6,7 @@ import { countersignPacket } from "@/server/pdf/countersign";
 import { chairConsentText } from "@/server/pdf/types";
 import { BusyError, withRequestLock } from "@/server/requests/lock";
 import { sha256 } from "@/server/hash";
-import { addressList, appendNotes, lowerEmail, versionOf } from "@/server/requests/rows";
+import { addressList, appendNotes, ResendProblemError, versionOf } from "@/server/requests/rows";
 import { signersFor } from "@/server/requests/mailing";
 import { sendPacketOn } from "@/server/requests/send-on";
 import { sendToSigners, signerFlags } from "@/server/requests/signers";
@@ -275,7 +275,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
   let emailed = true;
   if (mailed) {
     // The log as read for the budget, so the flags don't need another read.
-    const flags = signerFlags(row, stored.request, rows.filter((r) => lowerEmail(r.requester_email) === lowerEmail(row.requester_email)));
+    const flags = signerFlags(row, stored.request, rows);
     const sent = await sendToSigners({ row, stored, linkBase: input.linkBase, packetBytes: packet.bytes, flags, first: null }, adapters);
     // On its way as long as one signer has it; the rest are noted, and the requester can resend to them.
     emailed = sent.sent.length > 0;
@@ -327,14 +327,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
 
 export type ResendProblem = "not-found" | "closed" | "too-soon" | "no-chair" | "requester-chair" | "busy" | "failed";
 
-export class ResendError extends Error {
-  constructor(
-    readonly problem: ResendProblem,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export class ResendError extends ResendProblemError<ResendProblem> {}
 
 /** When the requester may resend to every chair: `chairResendHours` after the last send, or now if none went out. */
 export function nextResendAt(row: Pick<RequestRow, "chair_sent_at">): Date | null {

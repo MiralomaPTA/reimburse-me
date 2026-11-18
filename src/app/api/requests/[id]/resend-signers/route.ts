@@ -5,6 +5,9 @@ import { getApprovedSession } from "@/server/auth/session";
 import { seeOther } from "@/server/http";
 import { SignerResendError, resendToSigners } from "@/server/requests/signers";
 
+// Under the row lock it reads the Sheet and Drive and sends emails with the packet attached; lock.ts counts on 60 seconds.
+export const maxDuration = 60;
+
 /** The requester's "Resend to the check signers" button on their request page. */
 export async function POST(request: NextRequest, ctx: RouteContext<"/api/requests/[id]/resend-signers">) {
   const { id } = await ctx.params;

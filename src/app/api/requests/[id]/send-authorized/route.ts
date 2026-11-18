@@ -5,6 +5,9 @@ import { getApprovedSession } from "@/server/auth/session";
 import { seeOther } from "@/server/http";
 import { AuthorizedResendError, sendAuthorizedAgain } from "@/server/requests/signers";
 
+// Under the row lock it reads the Sheet and Drive and sends emails with the packet attached; lock.ts counts on 60 seconds.
+export const maxDuration = 60;
+
 /** The requester's "Send it to the PTA", when the authorized packet's email to AP failed after the second signature. */
 export async function POST(request: NextRequest, ctx: RouteContext<"/api/requests/[id]/send-authorized">) {
   const { id } = await ctx.params;

@@ -8,6 +8,7 @@ import { lockTiming } from "@/server/requests/lock";
 import { MailingError, mailingRefusal } from "@/server/requests/mailing";
 import { profileFrom } from "@/server/requests/profile";
 import { appendNotes } from "@/server/requests/rows";
+import { budgetAccountProblem } from "@/lib/mailing";
 import { sendPacketOn } from "@/server/requests/send-on";
 import {
   AuthorizedResendError,
@@ -169,7 +170,7 @@ describe("mailed checks", () => {
     expect(toCoit.text).toContain("Mail the check to: 123 Main St Apt 4, San Francisco, CA 94127");
     expect(toCoit.text).toContain("Budget Account: Grade 2 stipend");
     expect(toCoit.text).toContain(`Payment Account: ${ACCOUNTS[0]}`);
-    expect(toCoit.text).toContain("This is the first mailed request from this account.");
+    expect(toCoit.text).toContain("No mailed check has gone through for this account before.");
     expect(toCoit.text).not.toContain("Paid from");
     expect(toCoit.attachments?.map((a) => a.filename)).toEqual([`${result.requestId}.pdf`, `${result.requestId}-fo10.pdf`]);
     expect(linkIn(toCoit).token).not.toBe(linkIn(mail.to(NORTON)[0]).token);
@@ -280,7 +281,7 @@ describe("the check signers' step", () => {
     expect(toAp.text).toMatch(/Authorized by Lillie Coit \(\w+ \d+\) and Joseph Alioto \(\w+ \d+\)/);
     expect(toAp.text).toContain("Pay only to the address on the signed FO10. A change of address needs a new request.");
     expect(toAp.text).toContain("Lillie Coit's note: First");
-    expect(toAp.text).toContain("This is the first mailed request from this account.");
+    expect(toAp.text).toContain("No mailed check has gone through for this account before.");
     expect(toAp.text).toContain(`SHA-256: ${row.authorized_pdf_sha256}`);
     expect(toAp.attachments?.[0].filename).toBe(`${requestId}-authorized.pdf`);
     expect(mail.to(ME)[0].subject).toContain("approved for mailing");
@@ -386,7 +387,7 @@ describe("the check signers' step", () => {
     expect(state).toMatchObject({ kind: "ready", first: { signer_email: COIT }, accounts: { budgetAccount: "Grade 2 stipend" } });
   }, 30_000);
 
-  it("when AP's email fails after the second signature, records it and lets the requester send it again, to AP only", async () => {
+  it("when AP's email fails after the second signature, records it and lets the requester send it again, with their copy", async () => {
     const { sign, links, log, mailer: mail, requestId, adapters } = await submitted();
     await sign(links.coit, "Lillie Coit");
     mail.sent = [];
@@ -409,7 +410,10 @@ describe("the check signers' step", () => {
     const [toAp] = mail.to(config.apEmail);
     expect(toAp.attachments?.[0].filename).toBe(`${requestId}-authorized.pdf`);
     expect(toAp.text).toContain(`SHA-256: ${log.rows[0].authorized_pdf_sha256}`);
-    expect(mail.to(ME)).toEqual([]);
+    // The copy that didn't go the first time, now that AP has it.
+    const copies = mail.to(ME);
+    expect(copies).toHaveLength(1);
+    expect(copies[0].attachments?.[0].filename).toBe(`${requestId}-authorized.pdf`);
     expect(log.rows[0]).toMatchObject({ authorized_sent_at: expect.stringMatching(/^\d{4}-/), authorized_send_error: "" });
     expect(authorizedSending(log.rows[0])).toBe("sent");
     await expect(again()).rejects.toMatchObject({ problem: "already-sent" });
@@ -453,6 +457,94 @@ describe("the check signers' step", () => {
     files.files.get(log.rows[0].authorized_pdf_file_id)!.bytes = new Uint8Array([1, 2, 3]);
     await expect(sendAuthorizedAgain({ requestId, requesterEmail: ME, linkBase: "" }, adapters)).rejects.toMatchObject({ problem: "mismatch" });
     expect(mail.to(config.apEmail)).toEqual([]);
+  }, 30_000);
+
+  it("emails AP from the row as the lock wrote it, so a Sheets read failing just after the signature can't stop it", async () => {
+    const { sign, links, log, mailer: mail } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    const updateIf = log.updateIf.bind(log);
+    const get = log.get.bind(log);
+    let recorded = false;
+    log.updateIf = async (id, condition, patch) => {
+      const done = await updateIf(id, condition, patch);
+      if (done && patch.signers_step === "Signed") recorded = true;
+      return done;
+    };
+    log.get = async (id) => {
+      if (recorded) throw new Error("Sheets timed out");
+      return get(id);
+    };
+    await expect(sign(links.norton, "Joshua Norton", { slot: 2 })).resolves.toMatchObject({ slot: 2, emailed: true });
+    expect(mail.to(config.apEmail)).toHaveLength(1);
+    expect(log.rows[0].authorized_sent_at).not.toBe("");
+    expect(authorizedSending(log.rows[0])).toBe("sent");
+  }, 30_000);
+
+  it("records a failure before AP's email, whatever it was, so the requester is offered the send rather than left waiting", async () => {
+    const { sign, links, log, mailer: mail, adapters } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    mail.sent = [];
+    // A Sheets read failing after the signature is recorded, before the email goes.
+    adapters.stipends.list = async () => {
+      throw new Error("Sheets timed out");
+    };
+    await expect(sign(links.norton, "Joshua Norton", { slot: 2 })).resolves.toMatchObject({ slot: 2, emailed: false });
+    expect(mail.to(config.apEmail)).toEqual([]);
+    expect(log.rows[0]).toMatchObject({ status: "Submitted", signers_step: "Signed", authorized_send_error: "Sheets timed out", lock: "" });
+    expect(authorizedSending(log.rows[0])).toBe("unsent");
+  }, 30_000);
+
+  it("reads the Requests tab once to check the link and once under the lock, and emails AP with the log as read", async () => {
+    const { sign, links, log, mailer: mail } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    // Each of these reads the whole tab in the Sheet.
+    const reads: string[] = [];
+    for (const method of ["get", "list", "listByEmail"] as const) {
+      const read = log[method].bind(log) as (arg?: string) => Promise<never>;
+      (log as unknown as Record<string, unknown>)[method] = (arg?: string) => {
+        reads.push(method);
+        return read(arg);
+      };
+    }
+    await sign(links.norton, "Joshua Norton", { slot: 2 });
+    expect(mail.to(config.apEmail)).toHaveLength(1);
+    expect(reads).toEqual(["list", "get"]);
+  }, 30_000);
+
+  it("goes by the first signature's record for who signed first, not the row's signer_1_email, which can be edited", async () => {
+    const { sign, links, log, signatures, requestId, adapters } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    log.rows[0].signer_1_email = "";
+    expect((await signerLinkState(requestId, links.coit.token, adapters)).kind).toBe("signed-first");
+    await expect(sign(links.coit, "Lillie Coit", { slot: 2 })).rejects.toThrow("You've already signed this one.");
+    expect(log.rows[0]).toMatchObject({ signers_step: "1 of 2 signed", lock: "" });
+    expect(signatures.records).toHaveLength(1);
+  }, 30_000);
+
+  it("never shows or emails a signer an FO10 or packet that doesn't match the row", async () => {
+    const { sign, links, log, files, mailer: mail, requestId, adapters } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    files.files.get(log.rows[0].fo10_file_id)!.bytes = new Uint8Array([1, 2, 3]);
+    await expect(signerPdf(requestId, links.norton.token, "fo10", adapters)).rejects.toThrow("don't match the record");
+    // The resend has nothing it may attach, so nothing goes.
+    mail.sent = [];
+    log.rows[0].signers_sent_at = new Date(Date.now() - 48 * 3_600_000).toISOString();
+    await expect(resendToSigners({ requestId, requesterEmail: ME, linkBase: "" }, adapters)).rejects.toMatchObject({ problem: "failed" });
+    expect(mail.sent).toEqual([]);
+
+    files.files.get(log.rows[0].pdf_file_id)!.bytes = new Uint8Array([4, 5, 6]);
+    await expect(signerPdf(requestId, links.norton.token, "packet", adapters)).rejects.toThrow("don't match the record");
+  }, 30_000);
+
+  it("fills the Budget Account with something the first signer can sign as it is", async () => {
+    const event = "Kids\u2019 Art Night: Grades 1\u20132 at the Café, with a very long name";
+    const w = await setup({ funding: "none", event, events: [{ name: event, chair_email: "", aliases: "", budget: "", active: "", note: "" }] });
+    const { requestId } = await w.submit();
+    const coit = linkIn(w.mailer.to(COIT)[0]);
+    const state = await signerLinkState(requestId, coit.token, w.adapters);
+    if (state.kind !== "ready") throw new Error(state.kind);
+    expect(state.accounts.budgetAccount).toBe("Kids' Art Night Grades 1-2 at the Cafe, with a very long name".slice(0, 60).trim());
+    await expect(w.sign(coit, "Lillie Coit", { budgetAccount: state.accounts.budgetAccount })).resolves.toMatchObject({ slot: 1 });
   }, 30_000);
 
   it("after the first signature, tells the signer when nobody else was reached, and counts it as sent when someone was", async () => {
@@ -567,19 +659,45 @@ describe("the FO10's Budget Account and the flags", () => {
     expect(budgetAccountDefault(request(["a"]))).toBe("");
   });
 
-  it("flags a first mailed request, a changed address and a changed payee name", () => {
-    const row = { request_id: "FY27-009", submitted_at: "2026-11-10T00:00:00Z" };
-    const earlier = (id: string, at: string, extra: object) => ({ request_id: id, submitted_at: at, check_delivery: "mailbox", address: "", city_zip: "", payee_name: "Pat Teacher", ...extra }) as never;
+  it("makes an event's name fit the Budget Account's rules", () => {
+    expect(budgetAccountDefault(request(["a"], "none", 0, "Kids\u2019 Art Night"))).toBe("Kids' Art Night");
+    expect(budgetAccountDefault(request(["a"], "none", 0, "Fun Run: 2026 \u2014 \"Spring\""))).toBe("Fun Run 2026 - Spring");
+    const long = budgetAccountDefault(request(["a"], "none", 0, "A".repeat(70)));
+    expect(long).toHaveLength(60);
+    expect(budgetAccountProblem(long)).toBeNull();
+  });
+
+  it("flags a first mailed check, a changed address and a changed payee name", () => {
+    const row = { request_id: "FY27-009", submitted_at: "2026-11-10T00:00:00Z", requester_email: ME };
+    const earlier = (id: string, at: string, extra: object) =>
+      ({ request_id: id, submitted_at: at, requester_email: ME, status: "Paid", check_delivery: "mailbox", address: "", city_zip: "", payee_name: "Pat Teacher", ...extra }) as never;
     const req = { payeeName: "Pat Teacher", ...ADDRESS };
-    expect(signerFlags(row, req, [])).toEqual(["This is the first mailed request from this account."]);
+    expect(signerFlags(row, req, [])).toEqual(["No mailed check has gone through for this account before."]);
     const sameAddress = earlier("FY27-001", "2026-10-01T00:00:00Z", { check_delivery: "mail", address: "123 main st apt 4", city_zip: "San Francisco CA 94127" });
     expect(signerFlags(row, req, [sameAddress])).toEqual([]);
     const moved = earlier("FY27-002", "2026-10-02T00:00:00Z", { check_delivery: "mail", address: "9 Elm St", city_zip: "Oakland, CA 94601" });
-    expect(signerFlags(row, req, [sameAddress, moved])).toEqual(["The address differs from this account's last mailed request (FY27-002)."]);
-    // Later requests don't count.
+    expect(signerFlags(row, req, [sameAddress, moved])).toEqual(["The address differs from the last mailed check that went through for this account (FY27-002)."]);
+    // Later requests don't count, nor do anyone else's.
     const later = earlier("FY27-010", "2026-11-11T00:00:00Z", { check_delivery: "mail", address: "1 Other St", city_zip: "SF, CA 94110", payee_name: "Someone" });
-    expect(signerFlags(row, req, [sameAddress, later])).toEqual([]);
-    expect(signerFlags(row, { ...req, payeeName: "Mallory Thief" }, [sameAddress])).toEqual([`The payee name differs from the one on this account's earlier requests ("Pat Teacher").`]);
+    const theirs = earlier("FY27-003", "2026-10-03T00:00:00Z", { requester_email: "someone@example.org", check_delivery: "mail", address: "1 Other St", city_zip: "SF, CA 94110" });
+    expect(signerFlags(row, req, [sameAddress, later, theirs])).toEqual([]);
+    expect(signerFlags(row, { ...req, payeeName: "Mallory Thief" }, [sameAddress])).toEqual([`The payee name differs from the one on this account's earlier requests that went through ("Pat Teacher").`]);
+  });
+
+  it("doesn't let a request that was sent back, or one still waiting, clear the flags on the next", () => {
+    const row = { request_id: "FY27-009", submitted_at: "2026-11-10T00:00:00Z", requester_email: ME };
+    const thief = { payeeName: "Mallory Thief", address: "1 Drop Box Way", cityStateZip: "Oakland, CA 94601" };
+    const attempt = (id: string, extra: object) =>
+      ({ request_id: id, submitted_at: "2026-11-01T00:00:00Z", requester_email: ME, check_delivery: "mail", address: thief.address, city_zip: thief.cityStateZip, payee_name: thief.payeeName, ...extra }) as never;
+    const paid = { request_id: "FY27-001", submitted_at: "2026-10-01T00:00:00Z", requester_email: ME, status: "Paid", check_delivery: "mailbox", address: "", city_zip: "", payee_name: "Pat Teacher" } as never;
+    const flagged = [
+      "No mailed check has gone through for this account before.",
+      `The payee name differs from the one on this account's earlier requests that went through ("Pat Teacher").`,
+    ];
+    expect(signerFlags(row, thief, [paid, attempt("FY27-005", { status: "Returned", signers_step: "Sent back" })])).toEqual(flagged);
+    expect(signerFlags(row, thief, [paid, attempt("FY27-006", { status: "Awaiting signers", signers_step: "Waiting" })])).toEqual(flagged);
+    // Authorized by two signers, it counts.
+    expect(signerFlags(row, thief, [paid, attempt("FY27-007", { status: "Submitted", signers_step: "Signed" })])).toEqual([]);
   });
 });
 

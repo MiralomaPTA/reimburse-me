@@ -9,7 +9,6 @@ import { loadReceiptFiles } from "@/server/requests/receipts";
 import { sendPacketOn } from "@/server/requests/send-on";
 import { toPacketSignature } from "@/server/requests/signature";
 import { FundingError, fundingCell, fundingEmailShares, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
-import { lowerEmail } from "@/server/requests/rows";
 import { sendToSigners, signerFlags } from "@/server/requests/signers";
 import { saveStoredRequest, type StoredRequest } from "@/server/requests/stored";
 import { chairRouting, eventBudget, findEvent, parseEvents } from "@/lib/events";
@@ -267,8 +266,8 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     }
   }
   if (toSigners) {
-    // The log as read at the start: the requester's earlier requests, for the flags, without reading it again.
-    const flags = signerFlags(row, request, earlierRows.filter((r) => lowerEmail(r.requester_email) === lowerEmail(session.email)));
+    // The log as read at the start, for the requester's earlier requests, without reading it again.
+    const flags = signerFlags(row, request, earlierRows);
     const sent = await sendToSigners({ row, stored: storedRequest, linkBase: input.linkBase, packetBytes: packet.bytes, flags, first: null }, adapters);
     signers = sent;
     if (sent.error) {

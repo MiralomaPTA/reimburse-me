@@ -1,6 +1,6 @@
 # Mailed Check — Spec
 
-Nov 17, 2026 · Draft v0.4 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
+Nov 18, 2026 · Draft v0.5 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
 
 ## Overview
 
@@ -152,7 +152,7 @@ The requester's details on the FO10 come from the request's `request.json`, neve
 2. If no stipend pays for it, the event it's for ("Fun Run").
 3. Otherwise blank, and the first signer fills it in.
 
-The first signer can change it. It's required, up to 60 characters, with the same character rules as the address.
+The first signer can change it. It's required, up to 60 characters, with the same character rules as the address, plus `;`, `&`, `(` and `)`. The value the app fills in is made to fit those rules: curly quotes and dashes become plain ones, accents come off, other characters become spaces, and it's cut to 60 characters. A first signer who leaves it as it is can always sign.
 
 **Payment Account.** This is the PTA account the payment comes from. The first signer picks it from `BILL_PAY_ACCOUNTS`, and it starts on the first entry. Each entry is a nickname or the last four digits, such as "Bill pay checking ••1234", and never a full account number. With only one entry, there's nothing to pick.
 
@@ -210,11 +210,13 @@ A request awaiting the signers counts against its stipend, the same as a submitt
 
 **Worth a second look.** The signer page and every email to the signers and AP show these flags when they apply:
 
-- This is the first mailed request from this account.
-- The address differs from this account's last mailed request.
-- The payee name differs from the one on this account's earlier requests.
+- No mailed check has gone through for this account before.
+- The address differs from the last mailed check that went through for this account.
+- The payee name differs from the one on this account's earlier requests that went through.
 
 An account that has been taken over is worth more once a check can be mailed to any address, and these are the signs of it.
+
+Only the account's requests that went through count: approved or paid by AP, or authorized by two check signers. A request that was sent back, or is still waiting, doesn't count. Otherwise a try that a signer sent back, or one still waiting, would make the next one look like the account's usual.
 
 **The page** at `/signers/FY27-042?t=…` shows the same summary and flags, the FO10, and the packet with its receipts. It offers two choices:
 
@@ -227,7 +229,7 @@ An account that has been taken over is worth more once a check can be mailed to 
 - the address isn't the requester's
 - the request ID matches the page, and the version matches the row
 - the request is still awaiting the signers
-- for the second signature, the address isn't the first signer's: "You've already signed this one. The second signature has to come from a different check signer."
+- for the second signature, the address isn't the first signer's: "You've already signed this one. The second signature has to come from a different check signer." The first signer is taken from the first signature's row in the Signatures tab, not from `signer_1_email`, which can be edited. This is checked again under the lock.
 
 The typed name also mustn't match the payee's name, ignoring case, spacing and punctuation: "You can't authorize a payment to yourself."
 
@@ -246,7 +248,7 @@ The Sheet can't update a cell only if nobody else has changed it, and today the 
 1. The page sends back what it showed: the version and which signature (first or second) the signer is making.
 2. The server checks the token and the row as above, then takes the request's row lock. If another signer, a send-back or a resend holds it, the page says someone is working on the request and offers a reload.
 3. Under the lock, it reads the row again and stops if it no longer waits for that signature. Then it builds the files, adds the signature's row to the **Signatures** tab, and marks the Requests row in the same write that releases the lock.
-4. Only then does it send the emails. Before emailing AP, it re-reads the row and sends only if the authorized packet recorded there is the one it made.
+4. Only then does it send the emails. AP's email goes from the row as the lock wrote it, with nothing read in between. Anything that stops that email, a failed Sheets read as much as a failed send, is recorded in `authorized_send_error`, so the requester is offered **Send it to the PTA** rather than left waiting.
 
 A lock left by a crash expires after 3 minutes, and the next press can take it. A failure before the Requests row is written leaves the row as it was. It may leave a file in Drive or a Signatures row behind, but neither matches the FO10 hash on the row, so nothing reads them.
 
@@ -303,7 +305,7 @@ Getting a payment sent to a different address is the usual way to steal one. The
 
 The request page shows *Waiting for the PTA's check signers*, and then *One of two check signers has signed*. It shows when the emails went out, and it has a **Resend to the check signers** button that works at most once a day. Once both have signed, the page shows who signed and when, links the authorized packet, and says "The PTA's bank will mail your check to 123 Main St Apt 4, San Francisco, CA 94127." *My requests* shows the same status in the list.
 
-If the authorized packet's email to AP fails, the page doesn't say it went. It says AP doesn't have it yet and offers **Send it to the PTA**. That sends the saved packet from Drive to AP, after checking it against its hash, so the requester never carries it. The button shows only once the failure is recorded, never because of how long it has been. A send that went through but whose time couldn't be recorded must not lead to a second packet. Until the email is recorded as sent or failed, the page says the packet is on its way and that a copy will arrive by email, and asks the requester to contact the PTA if it hasn't come by the next day.
+If the authorized packet's email to AP fails, the page doesn't say it went. It says AP doesn't have it yet and offers **Send it to the PTA**. That sends the saved packet from Drive to AP, after checking it against its hash, so the requester never carries it. Then it sends the requester's copy. The copy goes only once AP has the packet, so it didn't go the first time. The button shows only once the failure is recorded, never because of how long it has been. A send that went through but whose time couldn't be recorded must not lead to a second packet. Until the email is recorded as sent or failed, the page says the packet is on its way and that a copy will arrive by email, and asks the requester to contact the PTA if it hasn't come by the next day.
 
 ## Data changes
 
@@ -390,7 +392,7 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 - A mailed request goes on to the check signers only while `CHECK_SIGNERS` has two besides the requester. Submit refuses mailing otherwise. The chair's signature is refused until the PTA fixes the list, so the request never waits for a second signature that can't come.
 - Every path that sends a packet to AP sends a mailed request to the signers instead. Those paths are submit, chair signature, chair time-out, Phase 2 resubmission, and any later status tool. A single guard refuses to email AP a mailed request that has no authorized packet for its current version.
 - Each signature is made once, under the row lock (see *How a signature is recorded*).
-- The FO10 is filled from a `request.json` whose packet hash matches the row, and the second signature checks the first-signature FO10 and the packet against their recorded hashes.
+- The FO10 is filled from a `request.json` whose packet hash matches the row. Every FO10 and packet a signer is shown, is emailed or signs is first checked against its recorded hash, and so is the authorized packet before a resend to AP. A file that doesn't match isn't shown or sent.
 
 ## Rollout
 
@@ -436,6 +438,17 @@ Each has a default. The build follows it unless it is changed here.
 | 6 | Budget Account | The stipend first, then the event, otherwise blank. The first signer must fill it in before signing |
 | 7 | Offering mailing to everyone | `MAILED_CHECKS=everyone`, so blank cells follow along and new accounts get mailing without a row edit. The alternative is the column alone, where offering it to everyone means a `yes` in every row and on every new approval |
 | 8 | The guides during the pilot | They leave mailing out, so most readers don't look for a choice they can't see. The alternative is a line saying some accounts can have checks mailed |
+
+## Changes since v0.4
+
+From a third code review:
+
+- The flags count only requests that went through, so a request a signer sent back, or one still waiting, can't clear them for the next.
+- The second signature checks the signer against the first signature's record, not the editable `signer_1_email`.
+- AP's email after the second signature goes from the row as the lock wrote it. Anything that stops it is recorded, so the request can't be stuck "on its way" with no **Send it to the PTA**.
+- **Send it to the PTA** also sends the requester's copy, which never went the first time.
+- The Budget Account the app fills in is made to fit its own rules.
+- The FO10 and packet a signer is shown or emailed are checked against their hashes, as they already were when signing.
 
 ## Changes since v0.3
 

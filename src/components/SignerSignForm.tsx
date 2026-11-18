@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { BUDGET_ACCOUNT_MAX } from "@/lib/mailing";
+import { BUDGET_ACCOUNT_MAX, budgetAccountProblem } from "@/lib/mailing";
 import { SIGNER_CONSENT_TEXT } from "@/server/pdf/types";
 import type { Accounts } from "@/server/requests/signers";
 import { SignaturePad, type SignaturePadHandle } from "@/components/SignaturePad";
@@ -61,7 +61,8 @@ export function SignerSignForm({
     const signature = mode === "typed" ? { type: "typed" as const, name: name.trim() } : { type: "drawn" as const, pngDataUrl: padRef.current?.toDataUrl() ?? "" };
     const found: string[] = [];
     if (name.trim().length < 2) found.push("Enter your full name.");
-    if (!accounts.locked && !budgetAccount.trim()) found.push("Enter the Budget Account the payment comes from.");
+    const accountProblem = accounts.locked ? null : budgetAccountProblem(budgetAccount);
+    if (accountProblem) found.push(accountProblem);
     if (signature.type === "drawn" && !signature.pngDataUrl) found.push("Draw your signature, or switch to typing your name.");
     if (!consent) found.push("Tick the box to sign electronically.");
     setPressed("sign");

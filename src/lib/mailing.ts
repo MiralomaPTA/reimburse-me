@@ -54,6 +54,22 @@ export const squash = (text: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
+/**
+ * `text` (an event's name, say) made to fit the Budget Account's rules, for
+ * the value the app fills in: curly quotes and dashes become plain ones,
+ * accents come off, other characters become spaces, and it's cut to the
+ * limit. Blank, or a value budgetAccountProblem accepts.
+ */
+export function toBudgetAccount(text: string): string {
+  const plain = String(text ?? "")
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[‘’ʼ]/g, "'")
+    .replace(/[‐-―]/g, "-")
+    .replace(/[^A-Za-z0-9 .,#\-/';&()]/g, " ");
+  return oneLine(oneLine(plain).slice(0, BUDGET_ACCOUNT_MAX));
+}
+
 /** What's wrong with a Budget Account the first check signer typed, or null. */
 export function budgetAccountProblem(value: string): string | null {
   const text = oneLine(value);

@@ -7,6 +7,7 @@ import { chairSending, type ChairSending, type ResendProblem } from "@/server/re
 import { authorizedSending, sentBackBy, signerSending, type AuthorizedResendProblem, type SignerResendProblem, type SignerSending } from "@/server/requests/signers";
 import { formatDateTime, formatMonthDay, parseDate } from "@/lib/dates";
 import { parseEvents } from "@/lib/events";
+import { formatAddress } from "@/lib/mailing";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { MailtoLink } from "@/components/MailtoLink";
 import { PostButton } from "@/components/PostButton";
@@ -35,7 +36,7 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
   const money = (s: string) => formatMoney(parseMoney(s) ?? 0);
   const cosigned = Boolean(row.chair_pdf_file_id);
   const authorized = Boolean(row.authorized_pdf_file_id);
-  const mailTo = row.check_delivery === "mail" ? `${row.address}, ${row.city_zip}` : "";
+  const mailTo = row.check_delivery === "mail" ? rowAddress(row) : "";
   return (
     <div className="space-y-6">
       <div>
@@ -67,7 +68,7 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
             {toAp === "sending"
               ? `It's on its way to the PTA's accounts payable team, and you'll get a copy by email once they have it. If it hasn't come by tomorrow, ask the PTA at ${config.apEmail}.`
               : "It went to the PTA's accounts payable team."}
-            {query.sent === "ap" ? " Sent again just now." : ""} The PTA&apos;s bank will mail your check to {mailTo}.
+            {query.sent === "ap" ? " Sent again just now, with a copy to you by email." : ""} The PTA&apos;s bank will mail your check to {mailTo}.
           </p>
         </div>
       ) : null}
@@ -244,7 +245,7 @@ function AwaitingSigners({ row, sending, resent, problem }: { row: RequestRow; s
         <p>
           The signing email went to {reached.length} check signer{reached.length === 1 ? "" : "s"}
           {sentAt ? ` on ${formatDateTime(sentAt)}` : ""}. Once {one ? "one more signs" : "two of them sign"}, it goes to the PTA by itself and the PTA&apos;s bank mails
-          your check to {row.address}, {row.city_zip}.
+          your check to {rowAddress(row)}.
         </p>
       ) : (
         <p>The email to the check signers didn&apos;t go through.</p>
@@ -268,9 +269,12 @@ function AwaitingSigners({ row, sending, resent, problem }: { row: RequestRow; s
   );
 }
 
+/** The mailing address as the emails and the FO10 print it. */
+const rowAddress = (row: RequestRow) => formatAddress({ address: row.address, cityStateZip: row.city_zip });
+
 /** Rows from before pickup replaced mailing still carry the address the check went to. */
 function checkDelivery(row: RequestRow): string {
-  if (row.check_delivery === "mail") return `Mail to ${row.address}, ${row.city_zip}`;
+  if (row.check_delivery === "mail") return `Mail to ${rowAddress(row)}`;
   return row.check_delivery === "pickup" ? "Pickup from the PTA" : "Staff mailbox";
 }
 
