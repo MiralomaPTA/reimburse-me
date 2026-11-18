@@ -10,7 +10,8 @@
     "signed_in_at": "",
     "note": "AP team. Not asked which stipend: AP members aren't teachers and have no stipend of their own.",
     "grade": "",
-    "stipend": ""
+    "stipend": "",
+    "mailed_checks": ""
   },
   {
     "email": "admin@example.org",
@@ -23,7 +24,8 @@
     "signed_in_at": "",
     "note": "PTA tech volunteer who maintains the Users and Stipends tabs.",
     "grade": "",
-    "stipend": ""
+    "stipend": "",
+    "mailed_checks": ""
   },
   {
     "email": "grade2.teacher@example.org",
@@ -36,7 +38,8 @@
     "signed_in_at": "",
     "note": "Chooses classroom stipend, Grade 2 stipend, field trip, or none.",
     "grade": "2",
-    "stipend": ""
+    "stipend": "",
+    "mailed_checks": ""
   },
   {
     "email": "grade2.partner@example.org",
@@ -49,7 +52,8 @@
     "signed_in_at": "",
     "note": "Shares the Grade 2 stipend with grade2.teacher; each has their own classroom stipend.",
     "grade": "2",
-    "stipend": ""
+    "stipend": "",
+    "mailed_checks": ""
   },
   {
     "email": "combo.teacher@example.org",
@@ -62,7 +66,8 @@
     "signed_in_at": "",
     "note": "Combination class: chooses from the Grade 1 and Grade 2 stipends as well as classroom and field trip. List grades with commas; the Sheet turns 1/2 into a date.",
     "grade": "1, 2",
-    "stipend": ""
+    "stipend": "",
+    "mailed_checks": ""
   },
   {
     "email": "tk.teacher@example.org",
@@ -75,7 +80,8 @@
     "signed_in_at": "",
     "note": "Transitional kindergarten: draws on the Grade TK stipend.",
     "grade": "TK",
-    "stipend": ""
+    "stipend": "",
+    "mailed_checks": ""
   },
   {
     "email": "jobshare.teacher@example.org",
@@ -88,7 +94,8 @@
     "signed_in_at": "",
     "note": "Job share: their own stipend ($125) overrides the standard classroom amount.",
     "grade": "K",
-    "stipend": "125"
+    "stipend": "125",
+    "mailed_checks": ""
   },
   {
     "email": "music.teacher@example.org",
@@ -101,7 +108,8 @@
     "signed_in_at": "",
     "note": "Teaches every grade, so no grade: chooses classroom stipend, field trip, or none.",
     "grade": "",
-    "stipend": ""
+    "stipend": "",
+    "mailed_checks": ""
   },
   {
     "email": "librarian@example.org",
@@ -112,9 +120,10 @@
     "approved_by": "admin",
     "last_link_at": "",
     "signed_in_at": "",
-    "note": "Staff with their own stipend: chooses Stipend or Not from a stipend.",
+    "note": "Staff with their own stipend: chooses Stipend or Not from a stipend. Mailed checks switched on (mailed_checks: yes), so offered \"Mail it to me\" during the pilot once CHECK_SIGNERS and BILL_PAY_ACCOUNTS are set.",
     "grade": "",
-    "stipend": "300"
+    "stipend": "300",
+    "mailed_checks": "yes"
   },
   {
     "email": "volunteer@example.org",
@@ -127,6 +136,7 @@
     "signed_in_at": "",
     "note": "Approved volunteer with no stipend: never asked which stipend. Chairs the Book Fair in the Events examples.",
     "grade": "",
-    "stipend": ""
+    "stipend": "",
+    "mailed_checks": ""
   }
 ]

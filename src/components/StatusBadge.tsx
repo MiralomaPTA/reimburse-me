@@ -2,6 +2,7 @@ import type { RequestStatus } from "@/server/adapters/types";
 
 const styles: Record<RequestStatus, string> = {
   "Awaiting chair": "bg-violet-50 text-violet-800 border-violet-200",
+  "Awaiting signers": "bg-teal-50 text-teal-800 border-teal-200",
   Submitted: "bg-blue-50 text-blue-800 border-blue-200",
   Approved: "bg-emerald-50 text-emerald-800 border-emerald-200",
   Returned: "bg-amber-50 text-amber-900 border-amber-200",

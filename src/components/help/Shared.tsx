@@ -13,6 +13,26 @@ import { Section, Shot } from "@/components/help/Guide";
 
 export const linkMinutes = config.magicLinkMinutes;
 
+/**
+ * Whether the guides describe mailing the check: only once it's offered to
+ * everyone. During the pilot most readers can't see the choice, so the guides
+ * leave it out and the PTA tells the people trying it what to expect.
+ */
+export const mailingInGuides = () => config.mailedChecks === "everyone" && config.checkSigners.length >= 2 && config.billPayAccounts.length > 0;
+
+/** What a mailed check does before it reaches the PTA; nothing while the guides leave mailing out. */
+function MailStep() {
+  if (!mailingInGuides()) return null;
+  return (
+    <p>
+      <strong>If you chose Mail it to me,</strong> two of the PTA&apos;s check signers approve the payment first. <strong>My requests</strong> shows it as
+      &quot;Awaiting signers&quot; until they do. Then it goes to the accounts payable team by itself
+      {config.sendPacketsTo === "ap" ? "" : ", so there's nothing to forward"}, you get a copy, and the PTA&apos;s bank mails your check. Mailed checks take a few
+      extra days. If nobody has signed after a day, open the request and tap <strong>Resend to the check signers</strong>.
+    </p>
+  );
+}
+
 export function SignInSection({ shots, newcomers }: { shots: { signIn: StaticImageData; checkEmail: StaticImageData; almostThere: StaticImageData }; newcomers?: string }) {
   return (
     <Section title="Step 1: Sign in with your email">
@@ -108,6 +128,7 @@ export function WhatHappensNext({ check, stipendNote = false, children }: { chec
           The team checks the request and pays by check, {check}. If anything is missing, they&apos;ll send it back with a note so you can fix it.
         </p>
         <ChairStep />
+        <MailStep />
         {children}
       </Section>
     );
@@ -120,6 +141,7 @@ export function WhatHappensNext({ check, stipendNote = false, children }: { chec
         That&apos;s the PTA&apos;s accounts payable team. While the portal is new, this one forwarding step is how your request reaches them.
       </p>
       <ChairStep />
+      <MailStep />
       {stipendNote && <p>The email also spells out which stipend each line came from and what&apos;s left in it, so you have a record.</p>}
       <p>
         The team checks the request and pays by check, {check}. If anything is missing, they&apos;ll email you.
@@ -159,6 +181,15 @@ export function commonQuestions(exampleId: string) {
     event: {
       q: "It asks which PTA event this was for.",
       a: "That's for spending on a PTA event, like the Fun Run. Pick the event and its chair signs the form before it goes to the PTA. For anything else, leave it on \"Not for an event\".",
+    },
+    signersSlow: {
+      q: "My mailed check is still \"Awaiting signers\".",
+      a: (
+        <>
+          Two of the PTA&apos;s check signers approve every mailed check. Open the request from <strong>My requests</strong> to see whether one has signed.
+          Once a day you can tap <strong>Resend to the check signers</strong> to send them fresh links.
+        </>
+      ),
     },
     chairSlow: {
       q: "The event chair hasn't signed yet.",

@@ -13,6 +13,7 @@ export function ChairSignForm({
   payeeName,
   pdfHref,
   sendPacketsTo,
+  mailed,
 }: {
   requestId: string;
   token: string;
@@ -21,6 +22,8 @@ export function ChairSignForm({
   /** The packet; once signed, the same link serves the co-signed one. */
   pdfHref: string;
   sendPacketsTo: PacketRecipient;
+  /** A mailed check goes to the PTA's check signers next, not on to AP. */
+  mailed: boolean;
 }) {
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"typed" | "drawn">("typed");
@@ -67,9 +70,11 @@ export function ChairSignForm({
         <h2 className="text-lg font-semibold">Signed. Thank you!</h2>
         {done.emailed ? (
           <p className="text-sm">
-            {sendPacketsTo === "ap"
-              ? `Request ${requestId} has gone to the PTA's accounts payable team with your signature on it.`
-              : `${payeeName} has been sent the co-signed request to send on to the PTA.`}
+            {mailed
+              ? `Request ${requestId} has gone to the PTA's check signers with your signature on it. Once two of them approve it, the PTA's bank mails the check.`
+              : sendPacketsTo === "ap"
+                ? `Request ${requestId} has gone to the PTA's accounts payable team with your signature on it.`
+                : `${payeeName} has been sent the co-signed request to send on to the PTA.`}
           </p>
         ) : (
           <p className="text-sm text-amber-900">

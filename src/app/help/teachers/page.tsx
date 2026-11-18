@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { config } from "@/server/config";
 import { MailtoLink } from "@/components/MailtoLink";
 import { Guide, Questions, Section, Shot } from "@/components/help/Guide";
-import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions } from "@/components/help/Shared";
+import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions, mailingInGuides } from "@/components/help/Shared";
 import signIn from "@/images/help/teacher/sign-in.png";
 import checkEmail from "@/images/help/teacher/check-email.png";
 import almostThere from "@/images/help/teacher/almost-there.png";
@@ -54,7 +54,7 @@ export default function TeacherGuidePage() {
             <strong>What it was for</strong>, in a few words, like &quot;2nd grade art supplies&quot;.
           </li>
           <li>
-            <strong>How you&apos;d like your check:</strong> left in your staff mailbox, or picked up from the PTA.
+            <strong>How you&apos;d like your check:</strong> left in your staff mailbox, picked up from the PTA{mailingInGuides() ? ", or mailed to you" : ""}.
           </li>
         </ul>
         <p>
@@ -131,7 +131,7 @@ export default function TeacherGuidePage() {
 
       <CheckAndSignSection shots={{ checkAndSign, done: toAp ? doneAp : doneRequester }} afterSigning="The page also shows what's left in each stipend you used." />
 
-      <WhatHappensNext check="left in your staff mailbox or picked up from the PTA" stipendNote />
+      <WhatHappensNext check={mailingInGuides() ? "left in your staff mailbox, picked up or mailed, as you chose" : "left in your staff mailbox or picked up from the PTA"} stipendNote />
 
       <Section title="Keeping track of your stipends">
         <p>
@@ -163,6 +163,7 @@ export default function TeacherGuidePage() {
             q.computer,
             q.event,
             q.chairSlow,
+            ...(mailingInGuides() ? [q.signersSlow] : []),
             { q: "Who do I ask for help?", a: <>Email {ap} for anything about a payment or a stipend.</> },
           ]}
         />

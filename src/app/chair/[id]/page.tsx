@@ -58,7 +58,10 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
         <h1 className="text-2xl font-semibold">Please sign as {row.event} chair</h1>
         <p className="mt-1 text-neutral-700">
           {request.payeeName} asked the PTA to reimburse {formatMoney(t.reimbursementCents)} of {row.event} expenses. Check the request below, then sign
-          on the form&apos;s VP/Chairman line. Once you sign, it goes on to the PTA for payment.
+          on the form&apos;s VP/Chairman line.{" "}
+          {request.checkDelivery === "mail"
+            ? "Once you sign, two of the PTA's check signers approve the payment, then the PTA's bank mails the check."
+            : "Once you sign, it goes on to the PTA for payment."}
         </p>
       </div>
 
@@ -109,7 +112,15 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
         </div>
       </section>
 
-      <ChairSignForm requestId={row.request_id} token={token} event={row.event} payeeName={request.payeeName} pdfHref={pdfHref} sendPacketsTo={config.sendPacketsTo} />
+      <ChairSignForm
+        requestId={row.request_id}
+        token={token}
+        event={row.event}
+        payeeName={request.payeeName}
+        pdfHref={pdfHref}
+        sendPacketsTo={config.sendPacketsTo}
+        mailed={request.checkDelivery === "mail"}
+      />
 
       <p className="text-sm text-neutral-600">
         Something not right? Don&apos;t sign. Write to {request.payeeName} at <MailtoLink email={stored.requesterEmail} /> so they can fix it, rather than

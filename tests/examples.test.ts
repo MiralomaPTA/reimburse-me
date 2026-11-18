@@ -107,8 +107,8 @@ describe("examples/google-sheet", () => {
 
   it("holds the same people and amounts as the local examples, with the app-written dates left blank", () => {
     const sheetUsers = csv("Users.csv").rows;
-    expect(sheetUsers.map(({ email, role, status, grade, stipend, note }) => ({ email, role, status, grade, stipend, note }))).toEqual(
-      users.map(({ email, role, status, grade, stipend, note }) => ({ email, role, status, grade, stipend, note })),
+    expect(sheetUsers.map(({ email, role, status, grade, stipend, note, mailed_checks }) => ({ email, role, status, grade, stipend, note, mailed_checks }))).toEqual(
+      users.map(({ email, role, status, grade, stipend, note, mailed_checks }) => ({ email, role, status, grade, stipend, note, mailed_checks })),
     );
     for (const row of sheetUsers) expect([row.requested_at, row.approved_at, row.last_link_at, row.signed_in_at]).toEqual(["", "", "", ""]);
     expect(csv("Stipends.csv").rows).toEqual(stipends);

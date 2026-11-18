@@ -41,14 +41,21 @@ export interface FileStore {
   moveFile(id: string, folderPath: string[]): Promise<void>;
 }
 
-/** "Awaiting chair": signed by the requester, waiting for the event chair's signature before it goes on to AP. */
-export type RequestStatus = "Awaiting chair" | "Submitted" | "Approved" | "Returned" | "Paid";
+/**
+ * "Awaiting chair": signed by the requester, waiting for the event chair's
+ * signature before it goes on. "Awaiting signers": a mailed check, waiting for
+ * two of the PTA's check signers to sign its FO10 before it goes to AP.
+ */
+export type RequestStatus = "Awaiting chair" | "Awaiting signers" | "Submitted" | "Approved" | "Returned" | "Paid";
 
 /**
  * Where a request stands with its event chair. Blank when it isn't for an
  * event. The skips say why the VP/Chairman line stayed blank.
  */
 export type ChairStep = "" | "Waiting" | "Signed" | "Sent back" | "Skipped: requester is a chair" | "Skipped: no chair listed" | "Timed out";
+
+/** Where a mailed check stands with the PTA's check signers. Blank for a check left in a mailbox or picked up, and for a mailed one still with its chair. */
+export type SignersStep = "" | "Waiting" | "1 of 2 signed" | "Signed" | "Sent back";
 
 /** One row in the request log. Keys double as the Sheet's header names. */
 export interface RequestRow {
@@ -59,9 +66,13 @@ export interface RequestRow {
   payee_name: string;
   pta_position: string;
   phone: string;
-  /** "mail" is only on rows from before pickup replaced mailing the check. */
+  /** "mail": sent by the bank's bill pay once two check signers sign its FO10 (and on rows from before pickup replaced mailing). */
   check_delivery: "pickup" | "mailbox" | "mail";
-  /** Only filled on "mail" rows; new rows leave both empty so the Sheet columns keep their places. */
+  /**
+   * Only filled on "mail" rows, for display: the street address, and the city,
+   * state and ZIP. The FO10 and AP go by the request's JSON, never these, since
+   * the Sheet can be edited.
+   */
   address: string;
   city_zip: string;
   purpose: string;
@@ -114,6 +125,30 @@ export interface RequestRow {
    * is safe to clear by hand.
    */
   lock: string;
+  /** Mailed checks only, from here down. */
+  signers_step: SignersStep;
+  /** The check signers the signing emails reached, comma-separated. */
+  signers_sent_to: string;
+  /** When those emails last went out: at the start, after the first signature, or on resend. */
+  signers_sent_at: string;
+  /** The first check signer: the address their link was sent to, the name they signed under, when, and their note to AP. */
+  signer_1_email: string;
+  signer_1_name: string;
+  signer_1_signed_at: string;
+  signer_1_note: string;
+  signer_2_email: string;
+  signer_2_name: string;
+  signer_2_signed_at: string;
+  signer_2_note: string;
+  /** The values on the signed FO10, set by the first signer and locked after. */
+  budget_account: string;
+  payment_account: string;
+  /** The FO10 with the first signature on it, and its hash. */
+  fo10_file_id: string;
+  fo10_sha256: string;
+  /** The authorized packet: the FO10 signed by both, the packet they authorized, and an authorization page. */
+  authorized_pdf_file_id: string;
+  authorized_pdf_sha256: string;
 }
 
 export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
@@ -158,6 +193,23 @@ export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
   "chair_pdf_sha256",
   "request_file_id",
   "lock",
+  "signers_step",
+  "signers_sent_to",
+  "signers_sent_at",
+  "signer_1_email",
+  "signer_1_name",
+  "signer_1_signed_at",
+  "signer_1_note",
+  "signer_2_email",
+  "signer_2_name",
+  "signer_2_signed_at",
+  "signer_2_note",
+  "budget_account",
+  "payment_account",
+  "fo10_file_id",
+  "fo10_sha256",
+  "authorized_pdf_file_id",
+  "authorized_pdf_sha256",
 ];
 
 export interface RequestLog {
@@ -168,6 +220,11 @@ export interface RequestLog {
   listByEmail(email: string): Promise<RequestRow[]>;
   /** Every request; shared stipends add up across requesters. */
   list(): Promise<RequestRow[]>;
+  /**
+   * Writes only the cells `patch` names, so two writers changing different
+   * columns of a row (a signer, a resend, AP in the Sheet) can't undo each
+   * other.
+   */
   update(requestId: string, patch: Partial<RequestRow>): Promise<void>;
   /**
    * Applies `patch` only if the row, as read just before the write, passes
@@ -231,6 +288,12 @@ export interface UserRecord {
    * amount. Blank means none.
    */
   stipend: string;
+  /**
+   * Whether this account is offered "Mail it to me": "yes", "no", or blank to
+   * follow MAILED_CHECKS (not offered during the pilot, offered once it's
+   * "everyone"). Set by the admin in the Sheet.
+   */
+  mailed_checks: string;
 }
 
 export const USER_COLUMNS: (keyof UserRecord)[] = [
@@ -245,6 +308,7 @@ export const USER_COLUMNS: (keyof UserRecord)[] = [
   "note",
   "grade",
   "stipend",
+  "mailed_checks",
 ];
 
 export interface UserDirectory {
@@ -302,9 +366,71 @@ export interface EventTable {
   list(): Promise<EventRow[]>;
 }
 
+/**
+ * One claim on a check signer's signature, in the Signatures tab. Rows are only
+ * added, and each changes only its own `state` and the details filled in when
+ * it finishes. The first live claim on a signature wins: see
+ * server/requests/claims.ts.
+ */
+export interface SignatureClaim {
+  /** Random; the tab's key, so a claim can update its own row. */
+  claim_id: string;
+  request_id: string;
+  version: number;
+  /** 1 or 2: which Authorized By line. */
+  slot: number;
+  signer_email: string;
+  signer_name: string;
+  /** "sent back" is a signer returning the request instead of signing it, which ends every claim after it. */
+  state: "claimed" | "signed" | "sent back" | "lost" | "abandoned";
+  claimed_at: string;
+  signed_at: string;
+  /** "typed", "drawn", or "send back". */
+  method: string;
+  ip: string;
+  browser: string;
+  /** When this signer's link was made: when the email that carried it went out. */
+  link_sent_at: string;
+  budget_account: string;
+  payment_account: string;
+  /** The packet the signer authorized (co-signed or requester-signed). */
+  packet_sha256: string;
+  /** The FO10 this signature made: the first-signature FO10, or the fully signed one. */
+  fo10_sha256: string;
+}
+
+export const SIGNATURE_COLUMNS: (keyof SignatureClaim)[] = [
+  "claim_id",
+  "request_id",
+  "version",
+  "slot",
+  "signer_email",
+  "signer_name",
+  "state",
+  "claimed_at",
+  "signed_at",
+  "method",
+  "ip",
+  "browser",
+  "link_sent_at",
+  "budget_account",
+  "payment_account",
+  "packet_sha256",
+  "fo10_sha256",
+];
+
+export interface SignatureLog {
+  append(claim: SignatureClaim): Promise<void>;
+  /** Every claim for `requestId`, in the order they were added. Every reader sees the same order. */
+  listFor(requestId: string): Promise<SignatureClaim[]>;
+  /** Changes one claim's own cells. */
+  update(claimId: string, patch: Partial<SignatureClaim>): Promise<void>;
+}
+
 export interface Adapters {
   files: FileStore;
   log: RequestLog;
+  signatures: SignatureLog;
   users: UserDirectory;
   stipends: StipendTable;
   events: EventTable;

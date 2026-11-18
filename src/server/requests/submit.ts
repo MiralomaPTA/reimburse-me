@@ -1,14 +1,16 @@
 import type { Adapters, RequestRow } from "@/server/adapters/types";
 import type { ApprovedSession } from "@/server/auth/session";
-import { requesterSentToChairEmail } from "@/server/email/templates";
+import { requesterSentToChairEmail, requesterSentToSignersEmail } from "@/server/email/templates";
 import { buildPacket } from "@/server/pdf/build-packet";
 import { CONSENT_TEXT } from "@/server/pdf/types";
 import { sendChairRequests } from "@/server/requests/chair";
+import { MAILING_REFUSED, MailingError, mailingRefusal, signersFor } from "@/server/requests/mailing";
 import { loadReceiptFiles } from "@/server/requests/receipts";
 import { sendPacketOn } from "@/server/requests/send-on";
 import { toPacketSignature } from "@/server/requests/signature";
 import { FundingError, fundingCell, fundingEmailShares, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
-import { saveStoredRequest } from "@/server/requests/stored";
+import { sendToSigners } from "@/server/requests/signers";
+import { saveStoredRequest, type StoredRequest } from "@/server/requests/stored";
 import { chairRouting, eventBudget, findEvent, parseEvents } from "@/lib/events";
 import { fiscalYearLabel, formatRequestId, requestIdPrefix } from "@/lib/fiscal-year";
 import { moneyPlain } from "@/lib/money";
@@ -34,6 +36,8 @@ export interface SubmitResult {
   funding: FundingOptions;
   /** Set when the request went to its event's chairs to sign before going on to AP: who the email reached, and who it didn't. */
   chair: { event: string; sentTo: string[]; notReached: string[] } | null;
+  /** Set when a mailed check went straight to the check signers: how many the email reached, and how many it didn't. */
+  signers: { reached: number; notReached: number } | null;
   /** false when the row was written but an email could not be sent. */
   emailed: boolean;
   emailError?: string;
@@ -59,7 +63,9 @@ export function maxSequenceIn(rows: Pick<RequestRow, "request_id">[], prefix: st
  * A request for a PTA event whose chair isn't the requester goes to that
  * event's chairs first, as "Awaiting chair"; one of them signs the form's
  * VP/Chairman line and the co-signed packet goes on from there (see
- * chair.ts). Every other request goes on now, to wherever
+ * chair.ts). A mailed check goes to the PTA's check signers next, as
+ * "Awaiting signers", and reaches AP once two have signed its FO10 (see
+ * signers.ts). Every other request goes on now, to wherever
  * `config.sendPacketsTo` sends packets: to AP with a copy to the requester,
  * or only to the requester, who forwards it to AP by hand.
  *
@@ -99,6 +105,10 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
   const request: RequestInput = { ...input.request, event: event?.name ?? "" };
   const routing = chairRouting(event, session.email);
   const toChair = routing.step === "Waiting";
+  // The Users row as read for this submission, not when the form opened: switching mailing off takes effect at once.
+  const mailed = request.checkDelivery === "mail";
+  if (mailed && mailingRefusal(user)) throw new MailingError(MAILING_REFUSED);
+  const toSigners = mailed && !toChair;
 
   const signature = toPacketSignature(input.signature);
   const build = (requestId: string) =>
@@ -138,27 +148,29 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
   const folderPath = ["requests", fiscalYearLabel(submittedAt), requestId];
   const pdfName = `${requestId}.pdf`;
   const stored = await files.putFile({ name: pdfName, mimeType: "application/pdf", bytes: packet.bytes, folderPath });
-  const requestFileId = await saveStoredRequest(files, folderPath, {
+  const storedRequest: StoredRequest = {
     requestId,
     version: 1,
     submittedAt: submittedAt.toISOString(),
     requesterEmail: session.email,
     request,
     packet: { sha256: packet.sha256, pageCount: packet.pageCount, chairLine: packet.chairLine },
-  });
+  };
+  const requestFileId = await saveStoredRequest(files, folderPath, storedRequest);
 
   const t = totals(request);
   const row: RequestRow = {
     request_id: requestId,
-    status: toChair ? "Awaiting chair" : "Submitted",
+    status: toChair ? "Awaiting chair" : toSigners ? "Awaiting signers" : "Submitted",
     submitted_at: submittedAt.toISOString(),
     requester_email: session.email,
     payee_name: request.payeeName,
     pta_position: request.ptaPosition,
     phone: request.phone,
     check_delivery: request.checkDelivery,
-    address: "",
-    city_zip: "",
+    // For display; the FO10 and AP go by the stored request.
+    address: request.address,
+    city_zip: request.cityStateZip,
     purpose: request.purpose,
     line_count: request.items.length,
     receipt_count: receiptFiles.size,
@@ -191,6 +203,24 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     chair_pdf_sha256: "",
     request_file_id: requestFileId,
     lock: "",
+    signers_step: toSigners ? "Waiting" : "",
+    // Narrowed below to the signers the email reached.
+    signers_sent_to: toSigners ? signersFor(session.email).join(", ") : "",
+    signers_sent_at: toSigners ? submittedAt.toISOString() : "",
+    signer_1_email: "",
+    signer_1_name: "",
+    signer_1_signed_at: "",
+    signer_1_note: "",
+    signer_2_email: "",
+    signer_2_name: "",
+    signer_2_signed_at: "",
+    signer_2_note: "",
+    budget_account: "",
+    payment_account: "",
+    fo10_file_id: "",
+    fo10_sha256: "",
+    authorized_pdf_file_id: "",
+    authorized_pdf_sha256: "",
   };
   await log.append(row);
   const after = fundingOptions(user, stipendRows, [...earlierRows, row], submittedAt);
@@ -219,6 +249,7 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
   const attachment = { filename: pdfName, mimeType: "application/pdf", bytes: packet.bytes };
   let emailError: string | undefined;
   let chairs: { sent: string[]; failed: string[] } | null = null;
+  let signers: { sent: string[]; failed: string[] } | null = null;
   if (toChair) {
     const budget = event ? eventBudget(event, [...earlierRows, row], { requestId, claimedCents: t.reimbursementCents }) : null;
     const sent = await sendChairRequests({ ...emailInput, chairs: routing.chairs, attachment, budget }, mailer);
@@ -232,9 +263,23 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
       if (sent.sent.length === 0) patch.chair_sent_at = "";
     }
   }
+  if (toSigners) {
+    const sent = await sendToSigners({ row, stored: storedRequest, linkBase: input.linkBase, packetBytes: packet.bytes }, adapters);
+    signers = sent;
+    if (sent.error) {
+      emailError = sent.error;
+      console.error(`[submit] email to the check signers failed for ${requestId}: ${sent.error}`);
+      problems.push(`Email to the check signers${sent.failed.length ? ` (${sent.failed.join(", ")})` : ""} failed at submission: ${sent.error}`);
+      patch.signers_sent_to = sent.sent.join(", ");
+      if (sent.sent.length === 0) patch.signers_sent_at = "";
+    }
+  }
   try {
     if (chairs) {
       const mail = requesterSentToChairEmail(emailInput, chairs.sent, chairs.failed);
+      await mailer.send({ to: [session.email], subject: mail.subject, text: mail.text, attachments: [attachment] });
+    } else if (signers) {
+      const mail = requesterSentToSignersEmail(emailInput, signers.failed, signers.sent.length === 0);
       await mailer.send({ to: [session.email], subject: mail.subject, text: mail.text, attachments: [attachment] });
     } else {
       await sendPacketOn(emailInput, attachment, mailer);
@@ -253,6 +298,7 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     pageCount: packet.pageCount,
     funding: after,
     chair: chairs ? { event: request.event, sentTo: chairs.sent, notReached: chairs.failed } : null,
+    signers: signers ? { reached: signers.sent.length, notReached: signers.failed.length } : null,
     emailed: !emailError,
   };
   return emailError ? { ...result, emailError } : result;

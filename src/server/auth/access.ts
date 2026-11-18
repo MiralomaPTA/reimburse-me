@@ -52,6 +52,8 @@ function newRecord(email: string, now: Date): UserRecord {
     note: "",
     grade: "",
     stipend: "",
+    // Mailing is switched on by the admin in the Sheet; a new account follows MAILED_CHECKS.
+    mailed_checks: "",
   };
 }
 

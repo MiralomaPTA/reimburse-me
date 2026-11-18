@@ -14,8 +14,13 @@ import { googleAuth } from "@/server/adapters/google/auth";
  * than cached: a column AP inserts between two reads would otherwise make a
  * cached header write values into the wrong cells. Reading the whole tab in
  * one call keeps the cost at one read for `readAll` and `find`, and one read
- * plus one write for `append`, `update` and `upsert`. Cells in columns the
- * app doesn't know are read back and written back unchanged.
+ * plus one write for `append`, `update` and `upsert`.
+ *
+ * `update` and `updateIf` write only the cells their patch names, so two
+ * writers changing different columns of one row (a check signer and a resend,
+ * or the app and AP typing in the Sheet) can't undo each other. `upsert`
+ * rewrites the whole row, with cells in columns the app doesn't know read back
+ * and written back unchanged.
  */
 
 let api: sheets_v4.Sheets | null = null;
@@ -158,6 +163,16 @@ export class SheetTable<T extends object> {
     });
   }
 
+  /** Writes just the patch's cells of one row, in one call. Keys that aren't columns are ignored. */
+  private async writeCells(cols: string[], rowNumber: number, patch: Partial<T>): Promise<void> {
+    const { spreadsheetId } = googleConfig();
+    const data = Object.entries(patch as Record<string, unknown>)
+      .filter(([name, value]) => value !== undefined && cols.includes(name))
+      .map(([name, value]) => ({ range: this.range(`${columnLetter(cols.indexOf(name))}${rowNumber}`), values: [[value ?? ""]] }));
+    if (data.length === 0) return;
+    await sheets().spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: "RAW", data } });
+  }
+
   private async appendRow(cols: string[], row: T): Promise<void> {
     const { spreadsheetId } = googleConfig();
     await sheets().spreadsheets.values.append({
@@ -181,12 +196,12 @@ export class SheetTable<T extends object> {
     await this.appendRow(await this.headers(), row);
   }
 
-  /** Rewrites the found row with `patch` over its current values. */
+  /** Writes the cells `patch` names in the found row, and no others. */
   async update(keyValue: string, patch: Partial<T>): Promise<void> {
     const { cols, rows } = await this.snapshot();
     const found = this.findIn(rows, keyValue);
     if (!found) throw new Error(`No row with ${this.key}=${keyValue} in ${this.sheetName}`);
-    await this.writeRow(cols, found.rowNumber, this.toValues(cols, patch, found.raw));
+    await this.writeCells(cols, found.rowNumber, patch);
   }
 
   /** As `update`, but only when the found row passes `condition` as read; says whether it wrote. */
@@ -194,7 +209,7 @@ export class SheetTable<T extends object> {
     const { cols, rows } = await this.snapshot();
     const found = this.findIn(rows, keyValue);
     if (!found || !condition(found.row)) return false;
-    await this.writeRow(cols, found.rowNumber, this.toValues(cols, patch, found.raw));
+    await this.writeCells(cols, found.rowNumber, patch);
     return true;
   }
 

@@ -68,6 +68,24 @@ export async function verifyChairToken(token: string): Promise<ChairLink | null>
   }
 }
 
+/** The claims of a check signer's link: one signer, one version of one request. `issuedAt` is when its email went out. */
+export type SignerLink = ChairLink;
+
+/** Emailed to one check signer; lets that address look at, sign or send back one version of one request, and nothing else. */
+export const createSignerToken = (email: string, requestId: string, version: number): Promise<string> =>
+  signLink("signer", email, `${config.signerLinkDays}d`, { rid: requestId, ver: version });
+
+export async function verifySignerToken(token: string): Promise<SignerLink | null> {
+  try {
+    const { payload } = await jwtVerify(token, signingKey());
+    if (payload.purpose !== "signer" || typeof payload.sub !== "string" || typeof payload.iat !== "number") return null;
+    if (typeof payload.rid !== "string" || typeof payload.ver !== "number") return null;
+    return { email: payload.sub, issuedAt: new Date(payload.iat * 1000), requestId: payload.rid, version: payload.ver };
+  } catch {
+    return null;
+  }
+}
+
 /** Long-lived session token stored in the cookie after a link is used. */
 export async function createSessionToken(session: Session): Promise<string> {
   return new SignJWT({ purpose: "session", method: session.method, signedInAt: session.signedInAt })

@@ -49,7 +49,8 @@ A request is always in exactly one status. *Draft* from the main spec lives only
 | Status | Meaning | Set by | Sheet columns written | Email sent |
 | --- | --- | --- | --- | --- |
 | Awaiting chair | A request for a PTA event, signed by the requester and waiting for the event's chair. Built with the event chair step | The app, on submit or resubmit | `submitted_at`, `version`, `pdf_file_id`, `pdf_sha256`, `event`, `chair_step`, `chair_sent_to`, `chair_sent_at` | Signing link to each chair; copy to the teacher. Nothing to ap@ yet |
-| Submitted | Signed and sent to AP | The app, on submit or resubmit, or when the event chair signs | `submitted_at`, `version`, `pdf_file_id`, `pdf_sha256`; after a chair signs, the `chair_*` columns | Packet to ap@ (co-signed, for an event), copy to the teacher |
+| Awaiting signers | A mailed check, signed by the requester (and the chair, for an event) and waiting for two of the PTA's check signers to sign its FO10. Built with the mailed check step; see the *Mailed Check — Spec* | The app, on submit or resubmit, or when the chair signs | `signers_step`, `signers_sent_to`, `signers_sent_at`, then the `signer_*`, `budget_account`, `payment_account` and `fo10_*` columns | Signing link to each check signer; copy to the teacher. Nothing to ap@ yet |
+| Submitted | Signed and sent to AP | The app, on submit or resubmit, when the event chair signs, or, for a mailed check, when the second check signer signs | `submitted_at`, `version`, `pdf_file_id`, `pdf_sha256`; after a chair signs, the `chair_*` columns | Packet to ap@ (co-signed, for an event), copy to the teacher |
 | Approved | AP has reviewed it and will pay | AP | `approved_at`, `approved_by` | None *(default)* |
 | Returned | AP needs a change before paying | AP, note required | `returned_at`, `returned_by`, `returned_note` | Teacher: the note and a link to fix it |
 | Check written | The treasurer has written the check; it is waiting for the second signature | AP, check number and date required | `check_number`, `check_date`, `check_written_by` | None. The teacher's request page shows "Check written, awaiting second signature" |
@@ -66,7 +67,7 @@ A request is always in exactly one status. *Draft* from the main spec lives only
 | Approved | Returned | AP | Note required |
 | Check written | Paid | AP or co-signer | Date defaults to today. The Record check form has an "already signed and sent" box for when both signers are in the room, which does both steps in one go |
 | Check written | Returned | AP | Note required; the voided check number stays in the Actions tab |
-| Returned | Submitted, or Awaiting chair | Teacher | Re-signs; `version` increments, new PDF. A request for an event with a chair goes back to the chair |
+| Returned | Submitted, Awaiting chair, or Awaiting signers | Teacher | Re-signs; `version` increments, new PDF. A request for an event with a chair goes back to the chair; a mailed check goes to the check signers (after the chair), never straight to AP |
 | Paid | anything | Admin, by editing the Sheet | Paid is final in the portal. Fixing a mistake is a Sheet edit plus a note in `notes` |
 
 Every action also appends a row to an **Actions** tab: `request_id`, `action`, `by`, `at`, `note`. That is the audit trail; the Requests row holds only the latest state.

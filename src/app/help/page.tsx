@@ -21,6 +21,11 @@ const guides = [
     title: "I chair a PTA event",
     blurb: "Got an email asking you to sign someone's reimbursement? What to check, what your event's budget shows, and how to sign.",
   },
+  {
+    href: "/help/signers",
+    title: "I'm a PTA check signer",
+    blurb: "Got an email asking you to authorize a mailed check? What to check before you sign the FO10, and how to send it back.",
+  },
 ];
 
 export default function HelpPage() {

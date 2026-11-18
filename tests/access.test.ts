@@ -39,6 +39,7 @@ const row = (email: string, extra: Partial<UserRecord> = {}): UserRecord => ({
   note: "",
   grade: "",
   stipend: "",
+  mailed_checks: "",
   ...extra,
 });
 

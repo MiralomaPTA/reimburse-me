@@ -4,7 +4,8 @@ import { getAdapters } from "@/server/adapters";
 import { requireApprovedSession } from "@/server/auth/session";
 import { config } from "@/server/config";
 import { chairSending, type ChairSending, type ResendProblem } from "@/server/requests/chair";
-import { formatDateTime, parseDate } from "@/lib/dates";
+import { sentBackBy, signerSending, type SignerResendProblem, type SignerSending } from "@/server/requests/signers";
+import { formatDateTime, formatMonthDay, parseDate } from "@/lib/dates";
 import { parseEvents } from "@/lib/events";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { MailtoLink } from "@/components/MailtoLink";
@@ -16,15 +17,21 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
   const { id } = await props.params;
   const query = await props.searchParams;
   const session = await requireApprovedSession(`/requests/${id}`);
-  const { log, events } = await getAdapters();
+  const { log, events, signatures } = await getAdapters();
   const row = await log.get(id);
   if (!row || row.requester_email.toLowerCase() !== session.email.toLowerCase()) notFound();
   // Who the chair email has reached, against who the Events tab lists now.
   const sending = row.status === "Awaiting chair" ? chairSending(row, parseEvents(await events.list())) : null;
   const resendProblem = typeof query.resend === "string" && Object.hasOwn(RESEND_PROBLEMS, query.resend) ? RESEND_PROBLEMS[query.resend as ResendProblem] : null;
+  const toSigners = row.status === "Awaiting signers" ? signerSending(row) : null;
+  const signerResend = query["resend-signers"];
+  const signerProblem = typeof signerResend === "string" && Object.hasOwn(SIGNER_RESEND_PROBLEMS, signerResend) ? SIGNER_RESEND_PROBLEMS[signerResend as SignerResendProblem] : null;
+  const sentBack = row.signers_step === "Sent back" ? await sentBackBy(signatures, row) : null;
 
   const money = (s: string) => formatMoney(parseMoney(s) ?? 0);
   const cosigned = Boolean(row.chair_pdf_file_id);
+  const authorized = Boolean(row.authorized_pdf_file_id);
+  const mailTo = row.check_delivery === "mail" ? `${row.address}, ${row.city_zip}` : "";
   return (
     <div className="space-y-6">
       <div>
@@ -39,7 +46,16 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
       </div>
 
       {sending && <AwaitingChair row={row} sending={sending} resent={query.resent === "1"} problem={resendProblem} />}
-      {row.status === "Submitted" && config.sendPacketsTo === "requester" && (
+      {toSigners && <AwaitingSigners row={row} sending={toSigners} resent={query.resent === "signers"} problem={signerProblem} />}
+      {authorized && row.signers_step === "Signed" && (
+        <div className="rounded-md border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900">
+          <div className="font-medium">Authorized by {signersWho(row)}</div>
+          <p className="mt-1">
+            It went to the PTA&apos;s accounts payable team. The PTA&apos;s bank will mail your check to {mailTo}.
+          </p>
+        </div>
+      )}
+      {row.status === "Submitted" && config.sendPacketsTo === "requester" && !authorized && (
         <div className="rounded-md border border-sky-300 bg-sky-50 p-4 text-sm text-sky-900">
           The portal doesn&apos;t send requests to the PTA yet. If you haven&apos;t already, email the {cosigned ? "co-signed" : "signed"} PDF below to{" "}
           <MailtoLink email={config.apEmail} /> to be reimbursed.
@@ -47,8 +63,13 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
       )}
       {row.status === "Returned" && row.returned_note && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900">
-          <div className="font-medium">Returned by the AP team</div>
+          <div className="font-medium">
+            {row.signers_step === "Sent back"
+              ? `Sent back by ${sentBack?.signer_name ? `${sentBack.signer_name}, one of the PTA's check signers` : "one of the PTA's check signers"}`
+              : "Returned by the AP team"}
+          </div>
           <p className="mt-1 whitespace-pre-wrap text-sm">{row.returned_note}</p>
+          {row.signers_step === "Sent back" && <p className="mt-2 text-sm">This request is closed and won&apos;t be paid. Start a new request with the change.</p>}
         </div>
       )}
       {row.status === "Paid" && (
@@ -69,14 +90,21 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
         {row.funding ? <Row label="Paid from" value={row.funding} /> : null}
         {row.event ? <Row label="Event" value={row.event} /> : null}
         {chairLine(row) ? <Row label="Chair signature" value={chairLine(row)!} /> : null}
+        {row.signers_step === "1 of 2 signed" || row.signers_step === "Signed" ? <Row label="Check signers" value={signersWho(row)} /> : null}
       </dl>
 
       <div className="flex flex-wrap gap-3">
         <a href={`/requests/${row.request_id}/pdf`} target="_blank" rel="noopener" className="btn-primary">
-          {cosigned ? "Open co-signed PDF" : "Open signed PDF"}
+          {authorized ? "Open authorized PDF" : cosigned ? "Open co-signed PDF" : "Open signed PDF"}
         </a>
       </div>
       <p className="break-all text-xs text-neutral-500">
+        {authorized && (
+          <>
+            SHA-256 of the authorized file: {row.authorized_pdf_sha256}
+            <br />
+          </>
+        )}
         {cosigned ? (
           <>
             SHA-256 of the co-signed file: {row.chair_pdf_sha256}
@@ -153,6 +181,62 @@ function AwaitingChair({ row, sending, resent, problem }: { row: RequestRow; sen
         <p className="text-violet-900">You can send it again after {formatDateTime(nextAt)} if they haven&apos;t signed by then.</p>
       ) : (
         <p className="text-violet-900">{RESEND_PROBLEMS["no-chair"]}</p>
+      )}
+    </div>
+  );
+}
+
+const SIGNER_RESEND_PROBLEMS: Record<SignerResendProblem, string> = {
+  "not-found": "That request wasn't found.",
+  closed: "This request isn't waiting for the check signers any more.",
+  "too-soon": `You can resend once every ${config.signerResendHours} hours.`,
+  "no-signers": `The PTA hasn't listed enough check signers right now. Ask the PTA at ${config.apEmail} what to do.`,
+  busy: "It was already being sent. Reload this page in a minute to see when it went.",
+  failed: "The email didn't go through. Please try again in a few minutes.",
+};
+
+/** "Lillie Coit (Nov 14)", or both signers. */
+function signersWho(row: RequestRow): string {
+  const one = (name: string, at: string) => {
+    const date = parseDate(at);
+    return `${name || "A check signer"}${date ? ` (${formatMonthDay(date)})` : ""}`;
+  };
+  const first = one(row.signer_1_name, row.signer_1_signed_at);
+  return row.signers_step === "Signed" ? `${first} and ${one(row.signer_2_name, row.signer_2_signed_at)}` : first;
+}
+
+/** Who the mailed check is waiting for, and the requester's "Resend to the check signers". */
+function AwaitingSigners({ row, sending, resent, problem }: { row: RequestRow; sending: SignerSending; resent: boolean; problem: string | null }) {
+  const sentAt = parseDate(row.signers_sent_at);
+  const { reached, unreached, to, nextAt } = sending;
+  const one = row.signers_step === "1 of 2 signed";
+  return (
+    <div className="space-y-3 rounded-md border border-teal-300 bg-teal-50 p-4 text-sm text-teal-950">
+      <div className="font-medium">{one ? "One of two check signers has signed" : "Waiting for the PTA's check signers"}</div>
+      {one && <p>{signersWho(row)} signed. One more check signer signs next.</p>}
+      {reached.length > 0 ? (
+        <p>
+          The signing email went to {reached.length} check signer{reached.length === 1 ? "" : "s"}
+          {sentAt ? ` on ${formatDateTime(sentAt)}` : ""}. Once {one ? "one more signs" : "two of them sign"}, it goes to the PTA by itself and the PTA&apos;s bank mails
+          your check to {row.address}, {row.city_zip}.
+        </p>
+      ) : (
+        <p>The email to the check signers didn&apos;t go through.</p>
+      )}
+      {reached.length > 0 && unreached.length > 0 && <p>It hasn&apos;t reached {unreached.length === 1 ? "one check signer" : `${unreached.length} check signers`} yet.</p>}
+      {resent && <p className="font-medium">Sent again. The check signers have fresh links.</p>}
+      {problem && <p className="font-medium text-amber-900">{problem}</p>}
+      {to.length > 0 ? (
+        <>
+          {nextAt && <p className="text-teal-900">Resend goes to the check signers it hasn&apos;t reached now, and to all of them after {formatDateTime(nextAt)}.</p>}
+          <PostButton action={`/api/requests/${encodeURIComponent(row.request_id)}/resend-signers`} busyLabel="Sending…">
+            Resend to the check signers
+          </PostButton>
+        </>
+      ) : nextAt ? (
+        <p className="text-teal-900">You can send it again after {formatDateTime(nextAt)} if it hasn&apos;t been signed by then.</p>
+      ) : (
+        <p className="text-teal-900">{SIGNER_RESEND_PROBLEMS["no-signers"]}</p>
       )}
     </div>
   );

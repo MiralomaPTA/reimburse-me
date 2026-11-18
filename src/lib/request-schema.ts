@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EVENT_NAME_MAX } from "@/lib/events";
+import { addressProblems, oneLine } from "@/lib/mailing";
 
 /** Shared between the form (client) and the submit/preview handlers (server). */
 
@@ -33,7 +34,11 @@ export const requestInputSchema = z
     payeeName: z.string().trim().min(1, "Enter your name").max(80),
     ptaPosition: z.string().trim().min(1, "Enter your PTA position").max(80),
     phone: z.string().trim().min(7, "Enter a phone number").max(30),
-    checkDelivery: z.enum(["pickup", "mailbox"]),
+    /** "mail": the PTA's bank mails the check, once two check signers sign its FO10. Only for accounts mailing is switched on for. */
+    checkDelivery: z.enum(["pickup", "mailbox", "mail"]),
+    /** Where a mailed check goes; blank otherwise. One line each: see lib/mailing.ts. */
+    address: z.string().max(200).default(""),
+    cityStateZip: z.string().max(200).default(""),
     purpose: z.string().trim().min(1, "Say what the expenditure was for").max(60),
     /** The PTA event it was for, by its name in the Events tab; "" when it wasn't for one. Its chair signs the VP/Chairman line. */
     event: z.string().trim().max(EVENT_NAME_MAX).default(""),
@@ -45,7 +50,18 @@ export const requestInputSchema = z
     if (value.donationCents > total) {
       ctx.addIssue({ code: "custom", path: ["donationCents"], message: "You can't donate more than the total" });
     }
-  });
+    if (value.checkDelivery === "mail") {
+      const problems = addressProblems(value);
+      if (problems.address) ctx.addIssue({ code: "custom", path: ["address"], message: problems.address });
+      if (problems.cityStateZip) ctx.addIssue({ code: "custom", path: ["cityStateZip"], message: problems.cityStateZip });
+    }
+  })
+  // The address is kept only for a mailed check, tidied to one line each; any other request carries none.
+  .transform((value) =>
+    value.checkDelivery === "mail"
+      ? { ...value, address: oneLine(value.address), cityStateZip: oneLine(value.cityStateZip) }
+      : { ...value, address: "", cityStateZip: "" },
+  );
 
 export type RequestInput = z.infer<typeof requestInputSchema>;
 export type LineItem = z.infer<typeof lineItemSchema>;
@@ -120,7 +136,9 @@ export function splitPhone(phone: string): { area: string; number: string } {
   return { area: "", number: phone.trim() };
 }
 
+/** Printed on the form and in the emails. A mailed check's address is on the FO10, never the reimbursement form, which the event chair sees. */
 export const CHECK_DELIVERY_LABEL: Record<RequestInput["checkDelivery"], string> = {
   pickup: "Requester will arrange pickup with the PTA",
   mailbox: "Leave the check in the staff mailbox",
+  mail: "Mail (address on the FO10)",
 };

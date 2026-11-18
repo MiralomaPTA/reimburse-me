@@ -10,11 +10,11 @@ import type { PacketSignature } from "@/server/pdf/types";
  * (\057Helv), which pdf-lib does not decode, so set a clean DA ourselves
  * rather than going through setFontSize().
  */
-function setFontSize(field: PDFTextField, size: number) {
+export function setFontSize(field: PDFTextField, size: number) {
   field.acroField.setDefaultAppearance(`/Helv ${size} Tf 0 g`);
 }
 
-function setFitted(field: PDFTextField, font: PDFFont, text: string, max = 10) {
+export function setFitted(field: PDFTextField, font: PDFFont, text: string, max = 10) {
   const clean = winAnsi(text);
   const rect = field.acroField.getWidgets()[0].getRectangle();
   field.setText(clean);

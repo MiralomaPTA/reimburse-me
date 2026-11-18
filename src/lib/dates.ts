@@ -25,3 +25,8 @@ export function parseDate(value: string | null | undefined): Date | null {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 }
+
+/** Nov 15 */
+export function formatMonthDay(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "short", day: "numeric" }).format(date);
+}
