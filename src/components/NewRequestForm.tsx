@@ -587,17 +587,21 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
             )}
           </p>
         )}
-        {!result.emailed && signers && (
+        {/* Once a signer has it, `emailed` is only about the copy to the requester; a missed signer is shown either way. */}
+        {signers && (signers.reached === 0 || signers.notReached > 0 || !result.emailed) && (
           <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             {signers.reached === 0 ? (
               <>
                 The request was recorded, but the email to the check signers didn&apos;t go through. Open the request below and use &quot;Resend to the check
                 signers&quot; there.
               </>
-            ) : signers.notReached > 0 ? (
-              <>The request was recorded and sent to most of the check signers, but one email didn&apos;t go through. That&apos;s fine as long as two of them sign.</>
             ) : (
-              <>The request was recorded and sent to the check signers, but the copy to you didn&apos;t go through. The signed PDF is on the request below.</>
+              <>
+                {signers.notReached > 0
+                  ? `The request was recorded and sent to the check signers, but ${signers.notReached === 1 ? "one email" : `${signers.notReached} emails`} didn't go through. That's fine as long as two of them sign, and you can resend to the others from the request below.`
+                  : "The request was recorded and sent to the check signers."}
+                {!result.emailed ? " The copy to you didn't go through. The signed PDF is on the request below." : ""}
+              </>
             )}
           </p>
         )}

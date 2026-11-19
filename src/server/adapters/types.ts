@@ -319,8 +319,13 @@ export const USER_COLUMNS: (keyof UserRecord)[] = [
 
 export interface UserDirectory {
   get(email: string): Promise<UserRecord | null>;
-  /** Insert or replace the row for `record.email` (case-insensitive). */
+  /** Insert or replace the row for `record.email` (case-insensitive). For a new row: it rewrites every cell. */
   upsert(record: UserRecord): Promise<void>;
+  /**
+   * Writes only the cells `patch` names in `email`'s row, so a cell the admin
+   * changed in the Sheet since it was read (`mailed_checks`, say) is kept.
+   */
+  update(email: string, patch: Partial<UserRecord>): Promise<void>;
   /** Pending rows requested at or after `sinceIso`; bounds approval-request spam. */
   countPendingSince(sinceIso: string): Promise<number>;
 }

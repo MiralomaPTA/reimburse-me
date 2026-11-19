@@ -7,9 +7,9 @@ import { chairConsentText } from "@/server/pdf/types";
 import { BusyError, withRequestLock } from "@/server/requests/lock";
 import { sha256 } from "@/server/hash";
 import { addressList, appendNotes, ResendProblemError, versionOf } from "@/server/requests/rows";
-import { signersFor } from "@/server/requests/mailing";
+import { signersCanFinish, signersFor } from "@/server/requests/mailing";
 import { sendPacketOn } from "@/server/requests/send-on";
-import { sendToSigners, signerFlags } from "@/server/requests/signers";
+import { reachedCells, sendToSigners, signerFlags } from "@/server/requests/signers";
 import { toPacketSignature } from "@/server/requests/signature";
 import { fundingEmailShares, fundingOptions } from "@/server/requests/stipends";
 import { cosignedName, loadStoredRequest, type StoredRequest } from "@/server/requests/stored";
@@ -209,10 +209,11 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
   const { link, stored, rows } = state;
   const { request_id: requestId, event } = state.row;
   const mailed = stored.request.checkDelivery === "mail";
-  // As submit checks: a mailed check needs two check signers besides the requester, or it would wait for a second signature that can't come.
-  if (mailed && signersFor(state.row.requester_email).length < 2) {
-    console.error(`[chair] not co-signing ${requestId}: it's a mailed check, and CHECK_SIGNERS has fewer than two signers besides the requester`);
-    throw new ChairError(`This request's check is to be mailed, and the PTA doesn't have enough check signers set up to approve it right now. Please let the PTA know at ${config.apEmail}; you can sign once that's fixed.`);
+  // As submit checks: the check signers must be able to finish, or it would wait for signatures that can't come.
+  // Not whether mailing is switched on for the account: a request already on its way to the signers carries on.
+  if (mailed && !signersCanFinish(state.row.requester_email)) {
+    console.error(`[chair] not co-signing ${requestId}: it's a mailed check, and CHECK_SIGNERS or BILL_PAY_ACCOUNTS can't take it`);
+    throw new ChairError(`This request's check is to be mailed, and the PTA's check signing isn't set up to approve it right now. Please let the PTA know at ${config.apEmail}; you can sign once that's fixed.`);
   }
   const signedAt = new Date();
 
@@ -282,7 +283,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
     if (sent.error) {
       console.error(`[chair] could not send ${requestId} to the check signers: ${sent.error}`);
       problems.push(`Email to the check signers${sent.failed.length ? ` (${sent.failed.join(", ")})` : ""} failed after the chair signed: ${sent.error}`);
-      await log.update(requestId, { signers_sent_to: sent.sent.join(", "), ...(sent.sent.length === 0 ? { signers_sent_at: "" } : {}) }).catch(() => undefined);
+      await log.update(requestId, reachedCells(sent.sent)).catch(() => undefined);
     }
   } else {
     try {

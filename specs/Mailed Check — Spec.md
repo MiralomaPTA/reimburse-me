@@ -1,6 +1,6 @@
 # Mailed Check — Spec
 
-Nov 18, 2026 · Draft v0.5 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
+Nov 18, 2026 · Draft v0.6 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
 
 ## Overview
 
@@ -254,7 +254,7 @@ A lock left by a crash expires after 3 minutes, and the next press can take it. 
 
 **The Signatures tab** keeps one row per signature or send-back, added under the lock and never changed. It holds what the Requests tab and the packet leave out: the signer's IP address and browser, and the accounts as the first signer locked them. The second signature, its emails, the authorization page and AP's email take the accounts from the first signature's row, found by the FO10 hash the Requests row records, not from the Requests row, which AP can edit. No step depends on the order of rows in the tab.
 
-Every write this feature makes to the Requests tab updates only its own cells, not the whole row. Today `SheetTable.update` rewrites the row, so it needs a cell-level update. That way a resend, a reminder, a signature and AP editing another column of the same row can't overwrite each other.
+Every write this feature makes to the Requests tab updates only its own cells, not the whole row. Today `SheetTable.update` rewrites the row, so it needs a cell-level update. That way a resend, a reminder, a signature and AP editing another column of the same row can't overwrite each other. The same goes for the Users tab: signing in and deciding access write only their own cells, so they can't undo an admin's `mailed_checks` change made at the same moment.
 
 ## The FO10 and the authorized packet
 
@@ -303,9 +303,9 @@ Getting a payment sent to a different address is the usual way to steal one. The
 
 ## The requester's side
 
-The request page shows *Waiting for the PTA's check signers*, and then *One of two check signers has signed*. It shows when the emails went out, and it has a **Resend to the check signers** button that works at most once a day. Once both have signed, the page shows who signed and when, links the authorized packet, and says "The PTA's bank will mail your check to 123 Main St Apt 4, San Francisco, CA 94127." *My requests* shows the same status in the list.
+The request page shows *Waiting for the PTA's check signers*, and then *One of two check signers has signed*. It shows when the emails went out, and it has a **Resend to the check signers** button that works at most once a day. Once both have signed, the page shows who signed and when, and says "The PTA's bank will mail your check to 123 Main St Apt 4, San Francisco, CA 94127." *My requests* shows the same status in the list. The page links the authorized packet only once AP has it, after checking it against its hash. Until then, the link is to the packet as the requester or chair signed it, so the requester never holds an authorized packet that AP doesn't.
 
-If the authorized packet's email to AP fails, the page doesn't say it went. It says AP doesn't have it yet and offers **Send it to the PTA**. That sends the saved packet from Drive to AP, after checking it against its hash, so the requester never carries it. Then it sends the requester's copy. The copy goes only once AP has the packet, so it didn't go the first time. The button shows only once the failure is recorded, never because of how long it has been. A send that went through but whose time couldn't be recorded must not lead to a second packet. Until the email is recorded as sent or failed, the page says the packet is on its way and that a copy will arrive by email, and asks the requester to contact the PTA if it hasn't come by the next day.
+If the authorized packet's email to AP fails, the page doesn't say it went. It says AP doesn't have it yet and offers **Send it to the PTA**. That sends the saved packet from Drive to AP, after checking it against its hash, so the requester never carries it. Then it sends the requester's copy. The copy goes only once AP has the packet, so it didn't go the first time. The recorded failure is cleared before the send. If the send then goes but can't be recorded, the page says the packet is on its way, and the button doesn't come back to send AP a second copy. The button shows only once the failure is recorded, never because of how long it has been. A send that went through but whose time couldn't be recorded must not lead to a second packet. Until the email is recorded as sent or failed, the page says the packet is on its way and that a copy will arrive by email, and asks the requester to contact the PTA if it hasn't come by the next day.
 
 ## Data changes
 
@@ -389,7 +389,7 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 **Rules the server enforces**, whatever the form shows:
 
 - It refuses `checkDelivery: "mail"` while mailing is switched off for that requester, whether by their `mailed_checks` cell, by `MAILED_CHECKS`, or by the signer settings. It reads the Users row at signing, not from the session.
-- A mailed request goes on to the check signers only while `CHECK_SIGNERS` has two besides the requester. Submit refuses mailing otherwise. The chair's signature is refused until the PTA fixes the list, so the request never waits for a second signature that can't come.
+- A mailed request goes on to the check signers only while `CHECK_SIGNERS` has two besides the requester and `BILL_PAY_ACCOUNTS` isn't empty. Submit refuses mailing otherwise. The chair's signature is refused until the PTA fixes the settings, so the request never waits for signatures that can't come. Mailing switched off for the account, or paused with `MAILED_CHECKS=off`, doesn't stop the chair: the request was submitted as mailed and carries on.
 - Every path that sends a packet to AP sends a mailed request to the signers instead. Those paths are submit, chair signature, chair time-out, Phase 2 resubmission, and any later status tool. A single guard refuses to email AP a mailed request that has no authorized packet for its current version.
 - Each signature is made once, under the row lock (see *How a signature is recorded*).
 - The FO10 is filled from a `request.json` whose packet hash matches the row. Every FO10 and packet a signer is shown, is emailed or signs is first checked against its recorded hash, and so is the authorized packet before a resend to AP. A file that doesn't match isn't shown or sent.
@@ -438,6 +438,16 @@ Each has a default. The build follows it unless it is changed here.
 | 6 | Budget Account | The stipend first, then the event, otherwise blank. The first signer must fill it in before signing |
 | 7 | Offering mailing to everyone | `MAILED_CHECKS=everyone`, so blank cells follow along and new accounts get mailing without a row edit. The alternative is the column alone, where offering it to everyone means a `yes` in every row and on every new approval |
 | 8 | The guides during the pilot | They leave mailing out, so most readers don't look for a choice they can't see. The alternative is a line saying some accounts can have checks mailed |
+
+## Changes since v0.5
+
+From a fourth code review:
+
+- The requester's page links the authorized packet only once AP has it, checked against its hash.
+- **Send it to the PTA** clears the recorded failure before sending, so a send that went but couldn't be recorded is never offered again.
+- The flags count a request as authorized only when both signers signed it, so an old mailed request that was never approved doesn't count.
+- The chair's signature is also refused while `BILL_PAY_ACCOUNTS` is empty, but not because mailing was switched off or paused.
+- Signing in and deciding access write only their own cells in the Users tab.
 
 ## Changes since v0.4
 

@@ -20,7 +20,8 @@ import { googleAuth } from "@/server/adapters/google/auth";
  * writers changing different columns of one row (a check signer and a resend,
  * or the app and AP typing in the Sheet) can't undo each other. `upsert`
  * rewrites the whole row, with cells in columns the app doesn't know read back
- * and written back unchanged.
+ * and written back unchanged, so callers use it only to add a row, and
+ * `update` for one that exists.
  */
 
 let api: sheets_v4.Sheets | null = null;

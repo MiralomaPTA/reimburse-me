@@ -42,6 +42,13 @@ export const localUserDirectory: UserDirectory = {
     else rows[index] = record;
     await writeAll(rows);
   },
+  async update(email, patch) {
+    const rows = await readAll();
+    const index = rows.findIndex((r) => same(r.email, email));
+    if (index === -1) throw new Error(`No user ${email}`);
+    rows[index] = { ...rows[index], ...patch };
+    await writeAll(rows);
+  },
   async countPendingSince(sinceIso) {
     return (await readAll()).filter((r) => r.status === "pending" && r.requested_at >= sinceIso).length;
   },

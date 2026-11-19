@@ -1,5 +1,6 @@
 import type { UserRecord } from "@/server/adapters/types";
 import { config } from "@/server/config";
+import { lowerEmail } from "@/server/requests/rows";
 
 /**
  * Who is offered "Mail it to me". Mailing is switched on account by account at
@@ -13,9 +14,16 @@ export type MailingRefusal = "not-set-up" | "off" | "not-switched-on" | "too-few
 
 /** The check signers who may sign `requesterEmail`'s request: every one but the requester. */
 export function signersFor(requesterEmail: string): string[] {
-  const requester = requesterEmail.trim().toLowerCase();
+  const requester = lowerEmail(requesterEmail);
   return config.checkSigners.filter((signer) => signer !== requester);
 }
+
+/**
+ * Whether the check signers can take `requesterEmail`'s mailed request to the
+ * end: two signers besides the requester, and a Payment Account to pick.
+ * Whatever the account's switch says, so a request already on its way carries on.
+ */
+export const signersCanFinish = (requesterEmail: string) => config.billPayAccounts.length > 0 && signersFor(requesterEmail).length >= 2;
 
 /** Why mailing isn't offered to `user`, or null when it is. Read from the Users row each time, never the session. */
 export function mailingRefusal(user: Pick<UserRecord, "email" | "mailed_checks"> | null): MailingRefusal | null {

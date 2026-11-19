@@ -403,7 +403,8 @@ describe("the check signers' step", () => {
     expect(authorizedSending(log.rows[0])).toBe("unsent");
     const again = () => sendAuthorizedAgain({ requestId, requesterEmail: ME, linkBase: "https://portal.example" }, adapters);
     await expect(again()).rejects.toMatchObject({ problem: "failed" });
-    expect(log.rows[0]).toMatchObject({ authorized_sent_at: "", lock: "" });
+    expect(log.rows[0]).toMatchObject({ authorized_sent_at: "", authorized_send_error: "Gmail refused", lock: "" });
+    expect(authorizedSending(log.rows[0])).toBe("unsent");
     mail.failingFor = [];
     mail.sent = [];
     await again();
@@ -418,6 +419,28 @@ describe("the check signers' step", () => {
     expect(authorizedSending(log.rows[0])).toBe("sent");
     await expect(again()).rejects.toMatchObject({ problem: "already-sent" });
     await expect(sendAuthorizedAgain({ requestId, requesterEmail: "someone@example.org", linkBase: "" }, adapters)).rejects.toBeInstanceOf(AuthorizedResendError);
+  }, 30_000);
+
+  it("never offers Send it to the PTA again when its send went but couldn't be recorded", async () => {
+    const { sign, links, log, mailer: mail, requestId, adapters } = await submitted();
+    await sign(links.coit, "Lillie Coit");
+    mail.failingFor = [config.apEmail];
+    await sign(links.norton, "Joshua Norton", { slot: 2 });
+    mail.failingFor = [];
+    mail.sent = [];
+    // The write that records the send and releases the lock fails.
+    const updateIf = log.updateIf.bind(log);
+    log.updateIf = async (id, condition, patch) => {
+      if (patch.authorized_sent_at) throw new Error("Sheets timed out");
+      return updateIf(id, condition, patch);
+    };
+    const again = () => sendAuthorizedAgain({ requestId, requesterEmail: ME, linkBase: "" }, adapters);
+    await expect(again()).rejects.toThrow("Sheets timed out");
+    expect(mail.to(config.apEmail)).toHaveLength(1);
+    expect(authorizedSending(log.rows[0])).toBe("sending");
+    log.rows[0].lock = "";
+    await expect(again()).rejects.toMatchObject({ problem: "sending" });
+    expect(mail.to(config.apEmail)).toHaveLength(1);
   }, 30_000);
 
   it("never offers a second send when AP's email went but its time couldn't be recorded", async () => {
@@ -628,20 +651,36 @@ describe("the check signers' step", () => {
     expect(w.mailer.to(chair)[0].text).toContain("It has gone to the PTA's check signers");
   }, 30_000);
 
-  it("won't let the chair sign a mailed request once there aren't two check signers to approve it", async () => {
+  it("won't let the chair sign a mailed request the check signers couldn't finish, but a paused pilot doesn't stop it", async () => {
     const chair = "chair@example.org";
     const event: EventRow = { name: "Fun Run", chair_email: chair, aliases: "", budget: "", active: "", note: "" };
     const w = await setup({ events: [event], funding: "none", event: "Fun Run" });
     const { requestId } = await w.submit();
     const chairLink = w.mailer.to(chair)[0].text.match(/\/chair\/([^?\s]+)\?t=(\S+)/)!;
+    const chairSign = () => ({
+      requestId,
+      token: decodeURIComponent(chairLink[2]),
+      name: "Maya Angelou",
+      signature: { type: "typed" as const, name: "Maya Angelou" },
+      note: "",
+      ip: "",
+      userAgent: "",
+      linkBase: "https://portal.example",
+    });
     config.checkSigners = [COIT];
-    const signing = signAsChair(
-      { requestId, token: decodeURIComponent(chairLink[2]), name: "Maya Angelou", signature: { type: "typed", name: "Maya Angelou" }, note: "", ip: "", userAgent: "", linkBase: "https://portal.example" },
-      w.adapters,
-    );
+    const signing = signAsChair(chairSign(), w.adapters);
     await expect(signing).rejects.toBeInstanceOf(ChairError);
-    await expect(signing).rejects.toThrow("doesn't have enough check signers");
+    await expect(signing).rejects.toThrow("check signing isn't set up to approve it");
     expect(w.log.rows[0]).toMatchObject({ status: "Awaiting chair", chair_step: "Waiting", signers_step: "", chair_pdf_file_id: "" });
+    // No Payment Account to pick: every first signature would be refused.
+    config.checkSigners = [COIT, NORTON, ALIOTO];
+    config.billPayAccounts = [];
+    await expect(signAsChair(chairSign(), w.adapters)).rejects.toThrow("check signing isn't set up to approve it");
+    // Mailing paused for everyone after submit: the request carries on to the signers.
+    config.billPayAccounts = [...ACCOUNTS];
+    config.mailedChecks = "off";
+    await expect(signAsChair(chairSign(), w.adapters)).resolves.toMatchObject({ mailed: true });
+    expect(w.log.rows[0]).toMatchObject({ status: "Awaiting signers", signers_step: "Waiting" });
   }, 30_000);
 
   it("never sends a mailed check on to AP without its authorized packet", async () => {
@@ -696,6 +735,8 @@ describe("the FO10's Budget Account and the flags", () => {
     ];
     expect(signerFlags(row, thief, [paid, attempt("FY27-005", { status: "Returned", signers_step: "Sent back" })])).toEqual(flagged);
     expect(signerFlags(row, thief, [paid, attempt("FY27-006", { status: "Awaiting signers", signers_step: "Waiting" })])).toEqual(flagged);
+    // From before pickup replaced mailing: Submitted but never authorized or paid.
+    expect(signerFlags(row, thief, [paid, attempt("FY27-004", { status: "Submitted", signers_step: "" })])).toEqual(flagged);
     // Authorized by two signers, it counts.
     expect(signerFlags(row, thief, [paid, attempt("FY27-007", { status: "Submitted", signers_step: "Signed" })])).toEqual([]);
   });

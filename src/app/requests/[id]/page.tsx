@@ -36,6 +36,8 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
   const money = (s: string) => formatMoney(parseMoney(s) ?? 0);
   const cosigned = Boolean(row.chair_pdf_file_id);
   const authorized = Boolean(row.authorized_pdf_file_id);
+  // The PDF link serves the authorized packet only once AP has it (see the pdf route).
+  const authorizedShown = authorizedSending(row) === "sent";
   const mailTo = row.check_delivery === "mail" ? rowAddress(row) : "";
   return (
     <div className="space-y-6">
@@ -112,11 +114,11 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
 
       <div className="flex flex-wrap gap-3">
         <a href={`/requests/${row.request_id}/pdf`} target="_blank" rel="noopener" className="btn-primary">
-          {authorized ? "Open authorized PDF" : cosigned ? "Open co-signed PDF" : "Open signed PDF"}
+          {authorizedShown ? "Open authorized PDF" : cosigned ? "Open co-signed PDF" : "Open signed PDF"}
         </a>
       </div>
       <p className="break-all text-xs text-neutral-500">
-        {authorized && (
+        {authorizedShown && (
           <>
             SHA-256 of the authorized file: {row.authorized_pdf_sha256}
             <br />

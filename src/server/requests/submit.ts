@@ -9,7 +9,7 @@ import { loadReceiptFiles } from "@/server/requests/receipts";
 import { sendPacketOn } from "@/server/requests/send-on";
 import { toPacketSignature } from "@/server/requests/signature";
 import { FundingError, fundingCell, fundingEmailShares, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
-import { sendToSigners, signerFlags } from "@/server/requests/signers";
+import { reachedCells, sendToSigners, signerFlags } from "@/server/requests/signers";
 import { saveStoredRequest, type StoredRequest } from "@/server/requests/stored";
 import { chairRouting, eventBudget, findEvent, parseEvents } from "@/lib/events";
 import { fiscalYearLabel, formatRequestId, requestIdPrefix } from "@/lib/fiscal-year";
@@ -275,8 +275,7 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
       if (sent.sent.length === 0) emailError = sent.error;
       console.error(`[submit] email to the check signers failed for ${requestId}: ${sent.error}`);
       problems.push(`Email to the check signers${sent.failed.length ? ` (${sent.failed.join(", ")})` : ""} failed at submission: ${sent.error}`);
-      patch.signers_sent_to = sent.sent.join(", ");
-      if (sent.sent.length === 0) patch.signers_sent_at = "";
+      Object.assign(patch, reachedCells(sent.sent));
     }
   }
   try {

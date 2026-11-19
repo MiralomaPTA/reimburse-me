@@ -67,7 +67,7 @@ export async function requestSignIn(input: { email: string; linkBase: string; ne
     if (now.getTime() - last < config.linkCooldownSeconds * 1000) return "sent"; // the earlier link is still good
     const mail = signInEmail(signInLink(input.linkBase, await createMagicToken(email), input.next));
     await deps.mailer.send({ to: [email], subject: mail.subject, text: mail.text });
-    await deps.users.upsert({ ...record, last_link_at: now.toISOString() });
+    await deps.users.update(email, { last_link_at: now.toISOString() });
     return "sent";
   }
   if (record) return "pending"; // pending or denied: say nothing more, send nothing more
@@ -101,7 +101,7 @@ export async function completeSignIn(token: string, deps: AccessDeps): Promise<S
   if (record?.status !== "approved") return { ok: false, reason: "not-approved" };
   const lastSignIn = record.signed_in_at ? Date.parse(record.signed_in_at) : 0;
   if (verified.issuedAt.getTime() < lastSignIn) return { ok: false, reason: "used" };
-  await deps.users.upsert({ ...record, signed_in_at: clock(deps).toISOString() });
+  await deps.users.update(record.email, { signed_in_at: clock(deps).toISOString() });
   return { ok: true, email: record.email };
 }
 
@@ -147,8 +147,11 @@ export async function decideAccess(
   const base = existing ?? newRecord(email, now);
 
   if (input.decision === "deny") {
-    const denied: UserRecord = { ...base, status: "denied", approved_at: now.toISOString(), approved_by: input.decidedBy };
-    await deps.users.upsert(denied);
+    const decision = { status: "denied", approved_at: now.toISOString(), approved_by: input.decidedBy } as const;
+    const denied: UserRecord = { ...base, ...decision };
+    // Only the cells decided, so a cell the admin changed since the read is kept.
+    if (existing) await deps.users.update(email, decision);
+    else await deps.users.upsert(denied);
     return { outcome: "denied", record: denied };
   }
 
@@ -159,11 +162,13 @@ export async function decideAccess(
     // Already approved (preloaded, or by hand): no email, but role, grade or stipend may still change.
     if (role === existing.role && grade === existing.grade && stipend === existing.stipend) return { outcome: "unchanged", record: existing };
     const updated: UserRecord = { ...existing, role, grade, stipend };
-    await deps.users.upsert(updated);
+    await deps.users.update(email, { role, grade, stipend });
     return { outcome: "updated", record: updated };
   }
-  const approved: UserRecord = { ...base, status: "approved", approved_at: now.toISOString(), approved_by: input.decidedBy, last_link_at: now.toISOString(), role, grade, stipend };
-  await deps.users.upsert(approved);
+  const decision = { status: "approved", approved_at: now.toISOString(), approved_by: input.decidedBy, last_link_at: now.toISOString(), role, grade, stipend } as const;
+  const approved: UserRecord = { ...base, ...decision };
+  if (existing) await deps.users.update(email, decision);
+  else await deps.users.upsert(approved);
   const mail = approvedEmail(signInLink(input.linkBase, await createMagicToken(email)));
   await deps.mailer.send({ to: [email], subject: mail.subject, text: mail.text });
   return { outcome: "approved", record: approved };

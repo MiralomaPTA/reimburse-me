@@ -113,7 +113,7 @@ export function budgetAccountDefault(request: Pick<RequestInput, "items" | "dona
  * that was sent back, or one still waiting, can't make the next one look
  * like the account's usual.
  */
-const wentThrough = (r: RequestRow) => r.status === "Approved" || r.status === "Paid" || (r.status === "Submitted" && r.check_delivery === "mail");
+const wentThrough = (r: RequestRow) => r.status === "Approved" || r.status === "Paid" || (r.status === "Submitted" && r.signers_step === "Signed");
 
 /**
  * The signs of an account that's been taken over, which matter more once a
@@ -232,6 +232,13 @@ export interface SendToSignersInput {
   reminder?: boolean;
 }
 
+/**
+ * The cells to write after a send to the signers that missed someone: only
+ * who it reached, and no send time when it reached nobody, so the request
+ * page offers to resend to the rest at once.
+ */
+export const reachedCells = (sent: string[]): Partial<RequestRow> => ({ signers_sent_to: sent.join(", "), ...(sent.length === 0 ? { signers_sent_at: "" } : {}) });
+
 /** The check signers who may sign `row` next: every one but the requester and whoever signed the first line. */
 export function nextSigners(row: Pick<RequestRow, "requester_email" | "signer_1_email">): string[] {
   const first = lower(row.signer_1_email);
@@ -318,8 +325,6 @@ export type SignerLinkState =
       accounts: Accounts;
       /** The first signature's record, for the second signer; null for the first. */
       first: SignatureRecord | null;
-      /** What the app fills the Budget Account with, before the first signer changes it. */
-      budgetAccountFilled: string;
       flags: string[];
       chair: ReturnType<typeof chairFor>;
       /** The whole log as read, for the flags and the funding lines in AP's email, so signing doesn't read it again. */
@@ -395,7 +400,6 @@ export async function signerLinkState(requestId: string, token: string, adapters
       slot,
       accounts: currentAccounts(stored.request, first),
       first,
-      budgetAccountFilled: budgetAccountDefault(stored.request),
       flags: signerFlags(row, stored.request, rows),
       chair: chairFor(row),
       rows,
@@ -667,7 +671,7 @@ export async function signAsSigner(input: SignerSignInput, adapters: Adapters): 
     if (result.error) {
       console.error(`[signers] "one more signature" for ${requestId} failed: ${result.error}`);
       problems.push(`The "one more signature" email${result.failed.length ? ` to ${result.failed.join(", ")}` : ""} failed: ${result.error}`);
-      await log.update(requestId, { signers_sent_to: result.sent.join(", "), ...(result.sent.length === 0 ? { signers_sent_at: "" } : {}) }).catch(() => undefined);
+      await log.update(requestId, reachedCells(result.sent)).catch(() => undefined);
     }
   } else {
     // The row as the lock wrote it, with this authorized packet: nothing is read between the signature and AP's email,
@@ -946,7 +950,8 @@ function authorizedResendProblem(row: RequestRow): AuthorizedResendError | null 
  * Drive, checked against its hash, to AP, then the requester's copy, which
  * didn't go the first time because it only follows AP's. The requester never
  * carries the packet to AP. Runs under the row's lock, so a double click
- * sends it once.
+ * sends it once, and clears the recorded failure before sending, so a send
+ * whose success can't be written down is never offered again.
  */
 export async function sendAuthorizedAgain(
   input: { requestId: string; requesterEmail: string; linkBase: string },
@@ -975,11 +980,19 @@ export async function sendAuthorizedAgain(
         if (error instanceof SignerError) throw new AuthorizedResendError("mismatch", error.message);
         throw error;
       }
+      // Cleared before the send, so the row says "sending" from here on. If the send can't be recorded after it
+      // goes (the lock's release write failing), the button doesn't come back to send AP a second packet.
+      await log.update(row.request_id, { authorized_send_error: "" });
       try {
         const sent = await sendAuthorizedPacket(sending, adapters);
-        return { patch: { authorized_sent_at: sent.sentAt.toISOString(), authorized_send_error: "" }, result: sent.copyError };
+        return { patch: { authorized_sent_at: sent.sentAt.toISOString() }, result: sent.copyError };
       } catch (error) {
-        console.error(`[signers] resend of ${row.request_id}'s authorized packet failed: ${error instanceof Error ? error.message : error}`);
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[signers] resend of ${row.request_id}'s authorized packet failed: ${message}`);
+        // Known to have failed, so it's offered again.
+        await log
+          .update(row.request_id, { authorized_send_error: message || "failed" })
+          .catch((e: unknown) => console.error(`[signers] couldn't record that ${row.request_id}'s resend failed: ${e instanceof Error ? e.message : e}`));
         throw new AuthorizedResendError("failed", "The email didn't go through. Please try again in a few minutes.");
       }
     });

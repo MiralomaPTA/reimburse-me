@@ -13,6 +13,11 @@ class MemoryUsers implements UserDirectory {
     if (i === -1) this.rows.push(record);
     else this.rows[i] = record;
   }
+  async update(email: string, patch: Partial<UserRecord>) {
+    const i = this.rows.findIndex((r) => r.email === email.toLowerCase());
+    if (i === -1) throw new Error(`no user ${email}`);
+    this.rows[i] = { ...this.rows[i], ...patch };
+  }
   async countPendingSince(since: string) {
     return this.rows.filter((r) => r.status === "pending" && r.requested_at >= since).length;
   }
@@ -125,6 +130,27 @@ describe("completeSignIn", () => {
     mailer = new MemoryMailer();
     // Tokens carry the real time they were made, so the clock has to be real too.
     clock = new Date(Date.now() + 1000);
+  });
+
+  it("keeps a cell the admin changed in the Sheet while the app was signing someone in or deciding their access", async () => {
+    await users.upsert(row("ok@example.org", { mailed_checks: "" }));
+    const get = users.get.bind(users);
+    // The admin switches mailing on just after each read.
+    users.get = async (email: string) => {
+      const found = await get(email);
+      const read = found && { ...found };
+      users.rows[0] = { ...users.rows[0], mailed_checks: "yes" };
+      return read;
+    };
+    expect(await completeSignIn(await createMagicToken("ok@example.org"), deps())).toEqual({ ok: true, email: "ok@example.org" });
+    expect(users.rows[0]).toMatchObject({ mailed_checks: "yes", signed_in_at: clock.toISOString() });
+    users.rows[0].mailed_checks = "";
+    clock = new Date(clock.getTime() + 120_000);
+    expect(await requestSignIn({ email: "ok@example.org", linkBase: BASE }, deps())).toBe("sent");
+    expect(users.rows[0]).toMatchObject({ mailed_checks: "yes", last_link_at: clock.toISOString() });
+    users.rows[0].mailed_checks = "";
+    expect((await decideAccess({ email: "ok@example.org", decision: "approve", decidedBy: "test", linkBase: BASE, role: "teacher" }, deps())).outcome).toBe("updated");
+    expect(users.rows[0]).toMatchObject({ mailed_checks: "yes", role: "teacher" });
   });
 
   it("signs an approved address in, and refuses the same link a second time", async () => {

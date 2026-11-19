@@ -119,7 +119,7 @@ export class MemoryMailer implements Mailer {
   }
 }
 
-export const users: UserDirectory = { async get() { return null; }, async upsert() {}, async countPendingSince() { return 0; } };
+export const users: UserDirectory = { async get() { return null; }, async upsert() {}, async update() {}, async countPendingSince() { return 0; } };
 export const tab: StipendRow[] = [
   { name: "Classroom", amount: "250", note: "" },
   { name: "Grade 2", amount: "1200", note: "" },
