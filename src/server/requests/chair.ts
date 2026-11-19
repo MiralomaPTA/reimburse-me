@@ -88,7 +88,7 @@ export type ChairLinkState =
   /** The address is no longer listed as a chair of the request's event. */
   | { kind: "not-chair"; row: RequestRow; link: ChairLink }
   | { kind: "signed"; row: RequestRow; link: ChairLink }
-  /** No longer waiting for a chair: sent back, timed out, or changed by hand in the Sheet. */
+  /** No longer waiting for a chair: sent back, or changed by hand in the Sheet. */
   | { kind: "closed"; row: RequestRow }
   | {
       kind: "ready";
@@ -171,9 +171,7 @@ export function chairStateMessage(state: Exclude<ChairLinkState, { kind: "ready"
           "so there's nothing to sign. If they fix it and sign it again, the chairs get a new email."
         );
       }
-      return state.row.chair_step === "Timed out"
-        ? "This request went on to the PTA without a chair signature, because it wasn't signed in time."
-        : "This request isn't waiting for a chair's signature any more.";
+      return "This request isn't waiting for a chair's signature any more.";
   }
 }
 
