@@ -201,8 +201,6 @@ export function chairFor(row: RequestRow): ChairSignature | { skipped: string } 
       return { skipped: `The requester chairs ${row.event}, so no chair signed the form's VP/Chairman line.` };
     case "Skipped: no chair listed":
       return { skipped: `No chair was listed for ${row.event}, so no chair signed the form's VP/Chairman line.` };
-    case "Timed out":
-      return { skipped: `The ${row.event} chair didn't sign in time, so the form's VP/Chairman line is blank.` };
     default:
       return null;
   }

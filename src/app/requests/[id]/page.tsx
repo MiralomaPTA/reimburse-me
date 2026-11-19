@@ -168,8 +168,6 @@ function chairLine(row: RequestRow): string | null {
       return "Not asked: you're a chair of this event";
     case "Skipped: no chair listed":
       return "Not asked: no chair was listed for this event";
-    case "Timed out":
-      return "Not signed in time; sent on without it";
     case "Sent back":
       return "Sent back by the chair";
     default:

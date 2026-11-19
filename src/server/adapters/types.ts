@@ -52,7 +52,7 @@ export type RequestStatus = "Awaiting chair" | "Awaiting signers" | "Submitted" 
  * Where a request stands with its event chair. Blank when it isn't for an
  * event. The skips say why the VP/Chairman line stayed blank.
  */
-export type ChairStep = "" | "Waiting" | "Signed" | "Sent back" | "Skipped: requester is a chair" | "Skipped: no chair listed" | "Timed out";
+export type ChairStep = "" | "Waiting" | "Signed" | "Sent back" | "Skipped: requester is a chair" | "Skipped: no chair listed";
 
 /** Where a mailed check stands with the PTA's check signers. Blank for a check left in a mailbox or picked up, and for a mailed one still with its chair. */
 export type SignersStep = "" | "Waiting" | "1 of 2 signed" | "Signed" | "Sent back";

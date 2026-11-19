@@ -210,7 +210,8 @@ export function commonQuestions(exampleId: string) {
         <>
           Open the request from <strong>My requests</strong>. It says who it was sent to and when, and once a day has passed you can tap{" "}
           <strong>Resend to the chair</strong> to send them a fresh link. If the email didn&apos;t reach one of the chairs, you can send it to them
-          right away.
+          right away. If the chair can&apos;t sign, because they&apos;ve stepped down or are away, ask the PTA at {ap} to change the event&apos;s chair. Once
+          they have, the request page lets you send it to the new chair right away.
         </>
       ),
     },
