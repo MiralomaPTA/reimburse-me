@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getAdapters } from "@/server/adapters";
 import { requireApprovedSession } from "@/server/auth/session";
+import { isAp } from "@/server/auth/roles";
 import { currentFunding } from "@/server/requests/stipends";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney, parseMoney } from "@/lib/money";
@@ -53,6 +54,14 @@ export default async function RequestsPage() {
         </ul>
       )}
       <p className="mt-4 text-sm text-neutral-500">Signed in as {session.email}.</p>
+      {isAp(session.user) && (
+        <p className="mt-2 text-sm">
+          <Link href="/ap" className="underline">
+            Open the AP dashboard
+          </Link>{" "}
+          to see every request.
+        </p>
+      )}
     </div>
   );
 }

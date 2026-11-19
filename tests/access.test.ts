@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { approvalLinkIsStale, completeSignIn, decideAccess, requestSignIn } from "@/server/auth/access";
+import { afterSignIn, approvalLinkIsStale, completeSignIn, decideAccess, requestSignIn } from "@/server/auth/access";
 import { createMagicToken, verifyApprovalToken, verifyMagicToken } from "@/server/auth/tokens";
 import type { MailMessage, Mailer, UserDirectory, UserRecord } from "@/server/adapters/types";
 
@@ -142,7 +142,7 @@ describe("completeSignIn", () => {
       users.rows[0] = { ...users.rows[0], mailed_checks: "yes" };
       return read;
     };
-    expect(await completeSignIn(await createMagicToken("ok@example.org"), deps())).toEqual({ ok: true, email: "ok@example.org" });
+    expect(await completeSignIn(await createMagicToken("ok@example.org"), deps())).toEqual({ ok: true, email: "ok@example.org", role: "requester" });
     expect(users.rows[0]).toMatchObject({ mailed_checks: "yes", signed_in_at: clock.toISOString() });
     users.rows[0].mailed_checks = "";
     clock = new Date(clock.getTime() + 120_000);
@@ -156,7 +156,7 @@ describe("completeSignIn", () => {
   it("signs an approved address in, and refuses the same link a second time", async () => {
     await users.upsert(row("ok@example.org"));
     const token = await createMagicToken("ok@example.org");
-    expect(await completeSignIn(token, deps())).toEqual({ ok: true, email: "ok@example.org" });
+    expect(await completeSignIn(token, deps())).toEqual({ ok: true, email: "ok@example.org", role: "requester" });
     expect(users.rows[0].signed_in_at).toBe(clock.toISOString());
     clock = new Date(clock.getTime() + 1000);
     expect(await completeSignIn(token, deps())).toEqual({ ok: false, reason: "used" });
@@ -251,6 +251,17 @@ describe("decideAccess", () => {
     await users.upsert(row("p@example.org", { role: "teacher", status: "pending", grade: "K", stipend: "300" }));
     await decideAccess({ email: "p@example.org", decision: "approve", decidedBy: "link", linkBase: BASE }, { users, mailer });
     expect(users.rows[0]).toMatchObject({ status: "approved", role: "teacher", grade: "K", stipend: "300" });
+  });
+});
+
+describe("afterSignIn", () => {
+  it("lands on the page the link was for, else the AP dashboard for AP and admin, else a new request", () => {
+    expect(afterSignIn("ap", null)).toBe("/ap");
+    expect(afterSignIn("admin", undefined)).toBe("/ap");
+    expect(afterSignIn("teacher", null)).toBe("/requests/new");
+    expect(afterSignIn("requester", "")).toBe("/requests/new");
+    expect(afterSignIn("ap", "/requests/FY27-001")).toBe("/requests/FY27-001");
+    expect(afterSignIn("teacher", "//evil.example")).toBe("/requests/new");
   });
 });
 

@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { EVENT_COLUMNS, REQUEST_COLUMNS, STIPEND_COLUMNS, USER_COLUMNS, type EventRow, type StipendRow, type UserRecord } from "@/server/adapters/types";
+import { CATEGORY_COLUMNS, EVENT_COLUMNS, REQUEST_COLUMNS, STIPEND_COLUMNS, USER_COLUMNS, type CategoryRow, type EventRow, type StipendRow, type UserRecord } from "@/server/adapters/types";
+import { activeCategories, isAp } from "@/server/ap/dashboard";
 import { chairRouting, parseEvents } from "@/lib/events";
 import { fundingOptions, GRADES, parseAmount, parseFunding, parseGrades } from "@/server/requests/stipends";
 
@@ -14,6 +15,7 @@ const load = <T>(name: string): T[] => JSON.parse(readFileSync(path.join(process
 const users = load<UserRecord>("users.json");
 const stipends = load<StipendRow>("stipends.json");
 const events = load<EventRow>("events.json");
+const categories = load<CategoryRow>("categories.json");
 const options = (email: string) => fundingOptions(users.find((u) => u.email === email)!, stipends, [], new Date()).stipends.map((s) => s.label);
 
 describe("examples/local-data", () => {
@@ -49,6 +51,15 @@ describe("examples/local-data", () => {
     expect(chairRouting(byName("Fall Festival"), "volunteer@example.org").step).toBe("Waiting");
     expect(chairRouting(byName("Book Fair"), "volunteer@example.org").step).toBe("Skipped: requester is a chair");
     expect(byName("Book Fair").budgetCents).toBeNull();
+  });
+
+  it("categories.json has every Categories column, with one inactive category left out of the dropdown, and an AP user to try it as", () => {
+    for (const row of categories) expect(Object.keys(row).sort()).toEqual([...CATEGORY_COLUMNS].sort());
+    const active = activeCategories(categories);
+    expect(active).toHaveLength(categories.length - 1);
+    expect(active).not.toContain("Spring Gala");
+    expect(active[0]).toBe("Classroom supplies");
+    expect(isAp(users.find((u) => u.email === "treasurer@example.org")!)).toBe(true);
   });
 
   it("shows each kind of requester the choices its note describes", () => {
@@ -102,6 +113,7 @@ describe("examples/google-sheet", () => {
     expect(csv("Users.csv").header).toEqual(USER_COLUMNS);
     expect(csv("Stipends.csv").header).toEqual(STIPEND_COLUMNS);
     expect(csv("Events.csv").header).toEqual(EVENT_COLUMNS);
+    expect(csv("Categories.csv").header).toEqual(CATEGORY_COLUMNS);
     expect(csv("Requests.csv")).toEqual({ header: REQUEST_COLUMNS, rows: [] });
   });
 
@@ -113,5 +125,6 @@ describe("examples/google-sheet", () => {
     for (const row of sheetUsers) expect([row.requested_at, row.approved_at, row.last_link_at, row.signed_in_at]).toEqual(["", "", "", ""]);
     expect(csv("Stipends.csv").rows).toEqual(stipends);
     expect(csv("Events.csv").rows).toEqual(events);
+    expect(csv("Categories.csv").rows).toEqual(categories);
   });
 });

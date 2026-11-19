@@ -1,0 +1,11 @@
+[
+  { "name": "Classroom supplies", "active": "yes", "order": "1" },
+  { "name": "Grade-level programs", "active": "yes", "order": "2" },
+  { "name": "Field trips", "active": "yes", "order": "3" },
+  { "name": "Fun Run", "active": "yes", "order": "4" },
+  { "name": "Fall Festival", "active": "yes", "order": "5" },
+  { "name": "Book Fair", "active": "yes", "order": "6" },
+  { "name": "Library", "active": "yes", "order": "7" },
+  { "name": "Staff appreciation", "active": "yes", "order": "8" },
+  { "name": "Spring Gala", "active": "no", "order": "9" }
+]

@@ -168,5 +168,7 @@ export function googleConfig() {
     stipendsSheetName: env.GOOGLE_STIPENDS_SHEET_NAME ?? "Stipends",
     eventsSheetName: env.GOOGLE_EVENTS_SHEET_NAME ?? "Events",
     signaturesSheetName: env.GOOGLE_SIGNATURES_SHEET_NAME ?? "Signatures",
+    categoriesSheetName: env.GOOGLE_CATEGORIES_SHEET_NAME ?? "Categories",
+    actionsSheetName: env.GOOGLE_ACTIONS_SHEET_NAME ?? "Actions",
   };
 }

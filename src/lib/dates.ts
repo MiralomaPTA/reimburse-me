@@ -26,6 +26,11 @@ export function parseDate(value: string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** 2026-11-15, the date in Pacific time: for file names. */
+export function formatIsoDate(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
 /** Nov 15 */
 export function formatMonthDay(date: Date): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "short", day: "numeric" }).format(date);
