@@ -3,8 +3,9 @@ import { config } from "@/server/config";
 import { BusyError, withRequestLock } from "@/server/requests/lock";
 import { lowerEmail as lower, versionOf } from "@/server/requests/rows";
 import { sentBackBy } from "@/server/requests/signers";
-import { packetName, requestFolder, saveStoredRequest, type ReturnAnswered, type StoredRequest } from "@/server/requests/stored";
+import { packetName, requestFolder, saveStoredRequest, type ReturnAnswered, type ReturnSource, type StoredRequest } from "@/server/requests/stored";
 import { buildSignedPacket, checkSubmission, requestCells, sendSigned, stepCells, submitResult, type SubmitInput, type SubmitResult } from "@/server/requests/submit";
+import { parseDate } from "@/lib/dates";
 
 /**
  * "Fix and re-sign". A returned request, whoever sent it back (its event
@@ -35,15 +36,37 @@ export function fixProblem(row: RequestRow | null, email: string): string | null
   return null;
 }
 
+/** Who sent `row` back: its event chair or a check signer, by their step; otherwise AP (Phase 2's Return with a note, or a status set by hand in the Sheet). */
+export function returnSource(row: Pick<RequestRow, "chair_step" | "signers_step">): ReturnSource {
+  if (row.chair_step === "Sent back") return "chair";
+  if (row.signers_step === "Sent back") return "signer";
+  return "ap";
+}
+
 /** Who sent `row` back, in the requester's words: "the Fun Run chair (lillie@example.org)". */
 export async function returnedBy(row: RequestRow, signatures: Adapters["signatures"]): Promise<string> {
-  if (row.chair_step === "Sent back") return `the ${row.event} chair${row.returned_by ? ` (${row.returned_by})` : ""}`;
-  if (row.signers_step === "Sent back") {
-    const record = await sentBackBy(signatures, row);
-    return record?.signer_name ? `${record.signer_name}, one of the PTA's check signers` : "one of the PTA's check signers";
+  switch (returnSource(row)) {
+    case "chair":
+      return `the ${row.event} chair${row.returned_by ? ` (${row.returned_by})` : ""}`;
+    case "signer": {
+      const record = await sentBackBy(signatures, row);
+      return record?.signer_name ? `${record.signer_name}, one of the PTA's check signers` : "one of the PTA's check signers";
+    }
+    case "ap":
+      return "the PTA's accounts payable team";
   }
-  // Phase 2's Return with a note, or a status set by hand in the Sheet.
-  return "the PTA's accounts payable team";
+}
+
+/**
+ * When `row` was sent back, if the row records it for this version; blank
+ * otherwise. The cell is kept when the requester signs again, and setting the
+ * status by hand in the Sheet leaves it as it was, so a `returned_at` from
+ * before this version was signed belongs to an earlier return.
+ */
+export function returnedAtOf(row: Pick<RequestRow, "returned_at" | "submitted_at">): string {
+  const at = parseDate(row.returned_at);
+  const signed = parseDate(row.submitted_at);
+  return at && (!signed || at > signed) ? row.returned_at : "";
 }
 
 export interface ResubmitInput extends SubmitInput {
@@ -75,7 +98,7 @@ export async function resubmitRequest(input: ResubmitInput, adapters: Adapters):
     checkSubmission(input, adapters, submittedAt, { requestId, event: returned.event }),
     returnedBy(returned, signatures),
   ]);
-  const answers: ReturnAnswered = { note: returned.returned_note, by, at: returned.returned_at };
+  const answers: ReturnAnswered = { note: returned.returned_note, by, from: returnSource(returned), at: returnedAtOf(returned) };
   // Built before the lock, which it doesn't need, so the lock is held only while the row is checked and written.
   const packet = await buildSignedPacket(input, checked, requestId, version, submittedAt);
 

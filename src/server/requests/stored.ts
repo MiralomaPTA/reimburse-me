@@ -3,11 +3,20 @@ import { fiscalYearLabel } from "@/lib/fiscal-year";
 import type { RequestInput } from "@/lib/request-schema";
 import type { LineBox } from "@/server/pdf/types";
 
+/** Who sent a request back: its event chair, a check signer, or AP (a status set by hand in the Sheet until Phase 2b's Return). */
+export type ReturnSource = "chair" | "signer" | "ap";
+
 /** The return a re-signed version answers: why it was sent back, by whom (in words, "the Fun Run chair (lillie@example.org)"), and when. */
 export interface ReturnAnswered {
   note: string;
   by: string;
-  /** ISO; blank when the row didn't record it (a status set by hand in the Sheet). */
+  /**
+   * Who it was. The event chair is shown the note only when a chair sent it
+   * back: a check signer's or AP's may name the requester's home address or
+   * stipends, which the chair never sees (see answersForChair).
+   */
+  from: ReturnSource;
+  /** ISO; blank when the row doesn't record it for this version (a status set by hand in the Sheet). */
   at: string;
 }
 
@@ -38,6 +47,8 @@ export const packetName = (requestId: string, version: number) => `${requestId}$
 export const storedRequestName = (requestId: string, version: number) => `${requestId}${suffix(version)}.json`;
 /** FY27-042-cosigned.pdf, FY27-042-v2-cosigned.pdf */
 export const cosignedName = (requestId: string, version: number) => `${requestId}${suffix(version)}-cosigned.pdf`;
+/** The FO10 as filled in so far, as emailed and shown to the check signers: FY27-042-fo10.pdf, FY27-042-v2-fo10.pdf */
+export const fo10AttachmentName = (requestId: string, version: number) => `${requestId}${suffix(version)}-fo10.pdf`;
 /** The FO10 with the first check signer's signature: FY27-042-fo10-1.pdf, FY27-042-v2-fo10-1.pdf */
 export const fo10Name = (requestId: string, version: number) => `${requestId}${suffix(version)}-fo10-1.pdf`;
 /** The packet AP pays a mailed check from: FY27-042-authorized.pdf, FY27-042-v2-authorized.pdf */

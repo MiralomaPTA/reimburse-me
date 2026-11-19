@@ -15,6 +15,8 @@ export interface CountersignInput {
   packet: Uint8Array;
   requesterSha256: string;
   requestId: string;
+  /** 2 and up for a returned request signed again; named on the added page and footers. 1 when left out. */
+  version?: number;
   /** Where the VP/Chairman line is, as recorded when the packet was built. */
   chairLine: LineBox;
   event: string;
@@ -44,6 +46,8 @@ export interface CountersignedPacket {
 export async function countersignPacket(input: CountersignInput): Promise<CountersignedPacket> {
   const doc = await PDFDocument.load(input.packet);
   const requesterPages = doc.getPageCount();
+  // "FY27-042 v2", as the requester's packet names itself.
+  const label = (input.version ?? 1) > 1 ? `${input.requestId} v${input.version}` : input.requestId;
   doc.setModificationDate(input.signedAt);
   const helv = await doc.embedFont(StandardFonts.Helvetica);
   const oblique = await doc.embedFont(StandardFonts.HelveticaOblique);
@@ -65,7 +69,7 @@ export async function countersignPacket(input: CountersignInput): Promise<Counte
   }
 
   await appendCountersignaturePage(doc, {
-    requestId: input.requestId,
+    requestId: label,
     event: input.event,
     payeeName: input.payeeName,
     name: input.name,
@@ -78,7 +82,7 @@ export async function countersignPacket(input: CountersignInput): Promise<Counte
     requesterPages,
     note: input.note,
   });
-  await stampAddedFooters(doc, requesterPages, input.requestId, input.signedAt);
+  await stampAddedFooters(doc, requesterPages, label, input.signedAt);
 
   const bytes = await doc.save({ useObjectStreams: true });
   return { bytes, sha256: sha256(bytes), pageCount: doc.getPageCount() };

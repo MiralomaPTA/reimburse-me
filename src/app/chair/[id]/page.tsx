@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getAdapters } from "@/server/adapters";
 import { config } from "@/server/config";
+import { answersForChair } from "@/server/email/templates";
 import { chairLinkState, chairStateMessage } from "@/server/requests/chair";
 import { formatDateTime } from "@/lib/dates";
 import type { EventBudget } from "@/lib/events";
@@ -8,6 +9,7 @@ import { formatMoney } from "@/lib/money";
 import { CHECK_DELIVERY_LABEL, totals } from "@/lib/request-schema";
 import { ChairSignForm } from "@/components/ChairSignForm";
 import { MailtoLink } from "@/components/MailtoLink";
+import { VersionNote } from "@/components/VersionNote";
 
 export const metadata: Metadata = {
   title: "Sign as event chair · Miraloma PTA Reimbursements",
@@ -55,6 +57,8 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
 
   const { row, link, stored, budget } = state;
   const { request } = stored;
+  // A chair's own note, but only who sent it back when a check signer or AP did.
+  const answers = answersForChair(stored.answers);
   const t = totals(request);
   return (
     <div className="space-y-6">
@@ -71,15 +75,7 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
             ? "Once you sign, two of the PTA's check signers approve the payment, then the PTA's bank mails the check."
             : "Once you sign, it goes on to the PTA for payment."}
         </p>
-        {stored.version > 1 && stored.answers && (
-          <div className="mt-3 space-y-1 rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-950">
-            <p>
-              This is version {stored.version}. It was sent back by {stored.answers.by}, and {request.payeeName} changed it and signed it again.
-              {stored.answers.note.trim() ? " The note it answers:" : ""}
-            </p>
-            {stored.answers.note.trim() && <p className="whitespace-pre-wrap italic">{stored.answers.note.trim()}</p>}
-          </div>
-        )}
+        {stored.version > 1 && answers && <VersionNote version={stored.version} answers={answers} payeeName={request.payeeName} />}
       </div>
 
       {budget && <BudgetPanel event={row.event} budget={budget} />}

@@ -257,11 +257,25 @@ export function fundingOptions(
   return { fiscalYear, stipends };
 }
 
-/** `user`'s stipends this fiscal year; the caller has already loaded the Users row. */
-export async function currentFunding(user: UserRecord | null): Promise<FundingOptions> {
+/**
+ * The date to count `requestId`'s stipends as of. A request counts toward the
+ * fiscal year in its ID, so a returned one signed again after June 30 is still
+ * checked and reported with its own year's requests: `at` when that is its
+ * year, else the last day of it. The amounts are the Stipends tab's, which
+ * holds the current year's only.
+ */
+export function fundingAsOf(requestId: string, at: Date): Date {
+  const year = /^FY(\d{2})-/.exec(requestId)?.[1];
+  if (!year || fiscalYearLabel(at) === `FY${year}`) return at;
+  // Noon on June 30 in California.
+  return new Date(Date.UTC(2000 + Number(year), 5, 30, 19));
+}
+
+/** `user`'s stipends this fiscal year (or the year `asOf` falls in); the caller has already loaded the Users row. */
+export async function currentFunding(user: UserRecord | null, asOf = new Date()): Promise<FundingOptions> {
   const { stipends, log } = await getAdapters();
   const [stipendRows, requests] = await Promise.all([stipends.list(), log.list()]);
-  return fundingOptions(user, stipendRows, requests, new Date());
+  return fundingOptions(user, stipendRows, requests, asOf);
 }
 
 /**

@@ -10,6 +10,18 @@ import type { ReturnAnswered } from "@/server/requests/stored";
 /** "FY27-042", or "FY27-042, version 2" once it has been re-signed. */
 const idLabel = (requestId: string, version: number) => (version > 1 ? `${requestId}, version ${version}` : requestId);
 
+/**
+ * The return a version answers, as the event chair may see it. A chair's own
+ * note goes back to the chairs as it was. A check signer's or AP's doesn't: it
+ * may name the requester's home address, which the chair never sees, or their
+ * stipends, which the chair's emails leave out. The chair is told only who
+ * sent it back.
+ */
+export function answersForChair(answers: ReturnAnswered | undefined): ReturnAnswered | undefined {
+  if (!answers || answers.from === "chair") return answers;
+  return { ...answers, note: "", by: answers.from === "signer" ? "one of the PTA's check signers" : "the PTA's accounts payable team" };
+}
+
 /** The return a version answers, as one line: who sent it back, when, and their note. */
 function answersLine(answers: ReturnAnswered): string {
   const at = parseDate(answers.at);
@@ -294,22 +306,22 @@ export function chairRequestEmail(input: ChairRequestEmailInput): { subject: str
       `If something isn't right, don't sign. Send it back from the same page with a note saying what needs to change; ${request.payeeName} gets the note and can fix it. Please don't forward or reply to this email, which holds your link. A reply goes to the PTA.`,
       `New to this? ${input.linkBase}/help/chairs explains it.`,
       "",
-      ...summary({ ...input, funding: [] }),
+      ...summary({ ...input, answers: answersForChair(input.answers), funding: [] }),
     ].join("\n"),
   };
 }
 
 /** To the chair who signed: done, with the co-signed packet for their records. */
-export function chairSignedEmail(input: { requestId: string; event: string; payeeName: string; sha256: string; mailed?: boolean }): { subject: string; text: string } {
+export function chairSignedEmail(input: { requestId: string; version: number; event: string; payeeName: string; sha256: string; mailed?: boolean }): { subject: string; text: string } {
   const next = input.mailed
     ? "It has gone to the PTA's check signers, who approve the payment before the PTA's bank mails the check."
     : config.sendPacketsTo === "ap"
       ? `It has gone to the PTA's accounts payable team (${config.apEmail}).`
       : `${input.payeeName} has been sent the co-signed PDF to send on to the PTA.`;
   return {
-    subject: `Signed: ${input.event} reimbursement for ${input.payeeName} (${input.requestId})`,
+    subject: `Signed: ${input.event} reimbursement for ${input.payeeName} (${idLabel(input.requestId, input.version)})`,
     text: [
-      `Thanks for signing request ${input.requestId} as ${input.event} chair. ${next}`,
+      `Thanks for signing request ${idLabel(input.requestId, input.version)} as ${input.event} chair. ${next}`,
       "",
       `The co-signed PDF is attached for your records. SHA-256: ${input.sha256}`,
     ].join("\n"),
@@ -451,6 +463,7 @@ export function signerRequestEmail(input: SignerRequestEmailInput): { subject: s
 /** To a check signer just after they sign, at their own address: a receipt, so a signature made with a forwarded link doesn't go unnoticed. */
 export function signerReceiptEmail(input: {
   requestId: string;
+  version: number;
   slot: 1 | 2;
   name: string;
   payeeName: string;
@@ -469,9 +482,9 @@ export function signerReceiptEmail(input: {
         ? `That was the second signature, but the email to the PTA's accounts payable team didn't go through. ${input.payeeName} can send it again from their request page.`
         : "That was the second signature. It has gone to the PTA's accounts payable team, who set up the payment.";
   return {
-    subject: `You signed: mailed check to ${input.payeeName}, ${formatMoney(input.amountCents)} (${input.requestId})`,
+    subject: `You signed: mailed check to ${input.payeeName}, ${formatMoney(input.amountCents)} (${idLabel(input.requestId, input.version)})`,
     text: [
-      `You signed the ${input.slot === 1 ? "first" : "second"} Authorized By line of the FO10 for request ${input.requestId}, as ${input.name}.`,
+      `You signed the ${input.slot === 1 ? "first" : "second"} Authorized By line of the FO10 for request ${idLabel(input.requestId, input.version)}, as ${input.name}.`,
       "",
       `Pay to: ${input.payeeName}`,
       `Amount: ${formatMoney(input.amountCents)}`,

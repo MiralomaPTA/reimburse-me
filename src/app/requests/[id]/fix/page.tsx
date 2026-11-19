@@ -6,7 +6,7 @@ import { config } from "@/server/config";
 import { mailingOffered } from "@/server/requests/mailing";
 import { fixProblem, returnedBy } from "@/server/requests/resubmit";
 import { versionOf } from "@/server/requests/rows";
-import { currentFunding, parseGrades } from "@/server/requests/stipends";
+import { currentFunding, fundingAsOf, parseGrades } from "@/server/requests/stipends";
 import { loadStoredRequest } from "@/server/requests/stored";
 import { findEvent, parseEvents, toFormEvent } from "@/lib/events";
 import { gradeLabel } from "@/lib/pta-position";
@@ -36,7 +36,13 @@ export default async function FixRequestPage(props: PageProps<"/requests/[id]/fi
     );
   }
 
-  const [stored, by, funding, eventRows] = await Promise.all([loadStoredRequest(files, row.request_file_id), returnedBy(row, signatures), currentFunding(session.user), events.list()]);
+  const [stored, by, funding, eventRows] = await Promise.all([
+    loadStoredRequest(files, row.request_file_id),
+    returnedBy(row, signatures),
+    // As of the request's own fiscal year, which it counts toward even when fixed after June 30.
+    currentFunding(session.user, fundingAsOf(row.request_id, new Date())),
+    events.list(),
+  ]);
   // Read from the account's Users row now; the server checks it again when the requester signs.
   const mailing = mailingOffered(session.user);
   const requester: Requester = { teacher: session.user.role === "teacher", grade: gradeLabel(parseGrades(session.user.grade)) };

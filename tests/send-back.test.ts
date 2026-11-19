@@ -1,16 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import type { EventRow, MailMessage, UserRecord } from "@/server/adapters/types";
+import type { EventRow, MailMessage, RequestRow, UserRecord } from "@/server/adapters/types";
 import { config } from "@/server/config";
+import { answersForChair } from "@/server/email/templates";
 import { ChairError, chairLinkState, chairStateMessage, sendBackAsChair, signAsChair } from "@/server/requests/chair";
 import { lockTiming } from "@/server/requests/lock";
 import { loadReceiptFiles, ReceiptError } from "@/server/requests/receipts";
-import { fixProblem, ResubmitError, resubmitRequest } from "@/server/requests/resubmit";
+import { fixProblem, ResubmitError, resubmitRequest, returnedAtOf } from "@/server/requests/resubmit";
 import { sendBackAsSigner, signAsSigner, signerLinkState } from "@/server/requests/signers";
+import { fundingAsOf, fundingOptions } from "@/server/requests/stipends";
 import { loadStoredRequest, requestFolder } from "@/server/requests/stored";
 import { submitRequest } from "@/server/requests/submit";
+import { fiscalYearLabel } from "@/lib/fiscal-year";
 import type { RequestInput } from "@/lib/request-schema";
-import { jpeg, ME, request, session, teacher, world } from "./support";
+import { jpeg, ME, request, session, tab, teacher, world } from "./support";
 
 const LILLIE = "lillie@example.org";
 const NORTON = "norton@example.org";
@@ -345,9 +348,111 @@ describe("sending back and fixing a request", () => {
       expect(toCoit.subject).toBe(`Please authorize: mailed check to Pat Teacher, $10.00 (${requestId}, version 2)`);
       expect(toCoit.text).toContain("It needs two signatures again");
       expect(toCoit.text).toContain("Mail the check to: 123 Main St Apt 5, San Francisco, CA 94127");
-      expect(toCoit.attachments?.map((a) => a.filename)).toEqual([`${requestId}-v2.pdf`, `${requestId}-fo10.pdf`]);
+      expect(toCoit.attachments?.map((a) => a.filename)).toEqual([`${requestId}-v2.pdf`, `${requestId}-v2-fo10.pdf`]);
       const state = await signerLinkState(requestId, linkIn(toCoit, "signers").token, w.adapters);
       expect(state).toMatchObject({ kind: "ready", slot: 1, accounts: { locked: false } });
+    }, 30_000);
+
+    it("for an event, goes back to the chair, who is told a check signer sent it back but not the note, which may hold the address", async () => {
+      const w = await setup({ events: [funRun()], user: { ...teacher, mailed_checks: "yes" } });
+      const mailed = { ...request(["r1"], "grade:2", 0, "Fun Run"), checkDelivery: "mail" as const, ...ADDRESS };
+      const { requestId } = await w.submit(mailed);
+      await w.sign(linkIn(w.mailer.to(LILLIE)[0]));
+      expect(w.log.rows[0]).toMatchObject({ status: "Awaiting signers", chair_step: "Signed" });
+      const alioto = linkIn(w.mailer.to(ALIOTO)[0], "signers");
+      w.mailer.sent = [];
+      const note = "Mail it to 123 Main St Apt 5 instead; Apt 4 was a typo.";
+      await sendBackAsSigner({ ...alioto, slot: 1, version: 1, ip: "", userAgent: "", linkBase: LINK_BASE, name: "Joseph Alioto", note }, w.adapters);
+      expect(w.mailer.to(ME)[0].text).toContain("The new version needs the Fun Run chair and then two of the PTA's check signers to sign it again.");
+
+      w.mailer.sent = [];
+      await w.resubmit(requestId, { ...mailed, address: "123 Main St Apt 5" });
+      expect(w.log.rows[0]).toMatchObject({ status: "Awaiting chair", chair_step: "Waiting", chair_signed_by: "", chair_pdf_file_id: "", signers_step: "", version: 2 });
+      expect(await loadStoredRequest(w.files, w.log.rows[0].request_file_id)).toMatchObject({ answers: { from: "signer", note, by: "Joseph Alioto, one of the PTA's check signers" } });
+
+      // The chair is told who sent it back, but never the note: it names the home address the chair doesn't see.
+      const [toChair] = w.mailer.to(LILLIE);
+      expect(toChair.text).toContain("Sent back by one of the PTA's check signers on");
+      expect(toChair.text).not.toContain(note);
+      expect(toChair.text).not.toContain("Apt");
+      expect(toChair.text).not.toContain("Joseph Alioto");
+
+      // Once the chair signs version 2, the check signers get it with the note.
+      w.mailer.sent = [];
+      await w.sign(linkIn(toChair));
+      expect(w.mailer.to(LILLIE)[0].subject).toBe(`Signed: Fun Run reimbursement for Pat Teacher (${requestId}, version 2)`);
+      expect(w.log.rows[0]).toMatchObject({ status: "Awaiting signers", chair_step: "Signed", signers_step: "Waiting" });
+      const [toSigner] = w.mailer.to(COIT);
+      expect(toSigner.text).toContain(`Sent back by Joseph Alioto, one of the PTA's check signers on`);
+      expect(toSigner.text).toContain(note);
+      expect(toSigner.attachments?.map((a) => a.filename)).toEqual([`${requestId}-v2-cosigned.pdf`, `${requestId}-v2-fo10.pdf`]);
+    }, 30_000);
+  });
+
+  describe("a request fixed after June 30", () => {
+    it("counts its stipends with its own fiscal year's requests, by its ID", () => {
+      const july = new Date("2026-07-03T18:00:00.000Z");
+      const asOf = fundingAsOf("FY26-031", july);
+      expect(fiscalYearLabel(asOf)).toBe("FY26");
+      expect(asOf.toISOString()).toBe("2026-06-30T19:00:00.000Z");
+      expect(fundingAsOf("FY27-002", july)).toBe(july);
+      expect(fundingAsOf("hand-typed", july)).toBe(july);
+
+      // A FY26 request still counts against FY26's classroom stipend, not FY27's.
+      const rows = [{ request_id: "FY26-031", requester_email: ME, status: "Awaiting chair", funding: "Classroom stipend", reimbursement_claimed: "40.00" } as RequestRow];
+      const classroom = (at: Date) => fundingOptions(teacher, tab, rows, at).stipends.find((s) => s.id === "classroom")!.usedCents;
+      expect(classroom(asOf)).toBe(4000);
+      expect(classroom(july)).toBe(0);
+    });
+  });
+
+  describe("which return a version answers", () => {
+    it("tells the chair a check signer's or AP's return only by who sent it", () => {
+      const chair = { note: "Wrong event.", by: `the Fun Run chair (${LILLIE})`, from: "chair" as const, at: "" };
+      expect(answersForChair(chair)).toBe(chair);
+      expect(answersForChair({ ...chair, from: "signer", by: "Joseph Alioto, one of the PTA's check signers" })).toEqual({ ...chair, from: "signer", by: "one of the PTA's check signers", note: "" });
+      expect(answersForChair({ ...chair, from: "ap", by: "the PTA's accounts payable team" })).toMatchObject({ by: "the PTA's accounts payable team", note: "" });
+      expect(answersForChair(undefined)).toBeUndefined();
+    });
+
+    it("dates a return only when the row records it for this version", () => {
+      expect(returnedAtOf({ returned_at: "2026-11-20T18:00:00.000Z", submitted_at: "2026-11-19T18:00:00.000Z" })).toBe("2026-11-20T18:00:00.000Z");
+      // Set by hand in the Sheet after version 2 was signed: the cell is still the first return's.
+      expect(returnedAtOf({ returned_at: "2026-11-14T18:00:00.000Z", submitted_at: "2026-11-19T18:00:00.000Z" })).toBe("");
+      expect(returnedAtOf({ returned_at: "", submitted_at: "2026-11-19T18:00:00.000Z" })).toBe("");
+    });
+
+    it("an AP return of version 2, set by hand, answered by version 3 with no stale date and no note for the chair", async () => {
+      const { log, mailer, files, submit, resubmit, sendBack, sign } = await setup();
+      const { requestId } = await submit();
+      await sendBack(linkIn(mailer.to(LILLIE)[0]));
+      const chairReturnedAt = log.rows[0].returned_at;
+      mailer.sent = [];
+      await resubmit(requestId, request(["r1"], "none", 0, "Fun Run"));
+      await sign(linkIn(mailer.to(LILLIE)[0]));
+      expect(log.rows[0]).toMatchObject({ status: "Submitted", version: 2 });
+
+      // AP returns it by hand: status and note only.
+      Object.assign(log.rows[0], { status: "Returned", returned_note: "This puts you $40 over your classroom stipend." });
+      mailer.sent = [];
+      await resubmit(requestId, request(["r1"], "none", 0, "Fun Run"), 2);
+      const row = log.rows[0];
+      expect(row).toMatchObject({ status: "Awaiting chair", version: 3, returned_at: chairReturnedAt });
+      expect((await loadStoredRequest(files, row.request_file_id)).answers).toEqual({
+        note: "This puts you $40 over your classroom stipend.",
+        by: "the PTA's accounts payable team",
+        from: "ap",
+        at: "",
+      });
+
+      // No date from the chair's earlier return, in any email about version 3.
+      const [toMe] = mailer.to(ME);
+      expect(toMe.text).toContain("Sent back by the PTA's accounts payable team, with this note: This puts you $40 over your classroom stipend.");
+      // The chair is told AP sent it back, but not AP's note, which is about stipends.
+      const [toChair] = mailer.to(LILLIE);
+      expect(toChair.subject).toContain(`${requestId}, version 3`);
+      expect(toChair.text).toContain("Sent back by the PTA's accounts payable team.");
+      expect(toChair.text).not.toContain("stipend");
     }, 30_000);
   });
 });

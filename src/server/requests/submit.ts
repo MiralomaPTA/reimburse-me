@@ -9,7 +9,7 @@ import { loadReceiptFiles, type LoadedReceipt } from "@/server/requests/receipts
 import { appendNotes, versionOf } from "@/server/requests/rows";
 import { sendPacketOn } from "@/server/requests/send-on";
 import { toPacketSignature } from "@/server/requests/signature";
-import { FundingError, fundingCell, fundingEmailShares, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
+import { FundingError, fundingAsOf, fundingCell, fundingEmailShares, fundingOptions, parseFundingChoice, type FundingOptions } from "@/server/requests/stipends";
 import { reachedCells, sendToSigners, signerFlags } from "@/server/requests/signers";
 import { packetName, requestFolder, saveStoredRequest, type StoredRequest } from "@/server/requests/stored";
 import { chairRouting, eventBudget, findEvent, parseEvents, type ChairRouting, type PtaEvent } from "@/lib/events";
@@ -101,7 +101,8 @@ export async function checkSubmission(
     log.list(),
     events.list(),
   ]);
-  const choices = fundingOptions(session.user, stipendRows, rows, at).stipends;
+  // A returned request is checked with its own fiscal year's requests, even when signed again after June 30.
+  const choices = fundingOptions(session.user, stipendRows, rows, returned ? fundingAsOf(returned.requestId, at) : at).stipends;
   const shares = fundingSplit(input.request);
   for (const share of shares) {
     if (share.funding !== "none" && !choices.some((s) => s.id === share.funding)) {
@@ -296,7 +297,7 @@ export async function sendSigned(
   const when = version > 1 ? `when version ${version} was signed` : "at submission";
   // The log with this version in place of the row as read, so it counts against its stipends and the event's budget.
   const rows = [...checked.rows.filter((r) => r.request_id !== requestId), row];
-  const after = fundingOptions(args.user, checked.stipendRows, rows, submittedAt);
+  const after = fundingOptions(args.user, checked.stipendRows, rows, fundingAsOf(requestId, submittedAt));
 
   const problems: string[] = [];
   const patch: Partial<RequestRow> = {};

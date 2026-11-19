@@ -11,7 +11,7 @@ import { signersCanFinish, signersFor } from "@/server/requests/mailing";
 import { sendPacketOn } from "@/server/requests/send-on";
 import { reachedCells, sendToSigners, signerFlags } from "@/server/requests/signers";
 import { toPacketSignature } from "@/server/requests/signature";
-import { fundingEmailShares, fundingOptions } from "@/server/requests/stipends";
+import { fundingAsOf, fundingEmailShares, fundingOptions } from "@/server/requests/stipends";
 import { cosignedName, loadStoredRequest, packetName, requestFolder, type ReturnAnswered, type StoredRequest } from "@/server/requests/stored";
 import { formatDateTime, formatMonthDay, parseDate } from "@/lib/dates";
 import { eventBudget, findEvent, parseEvents, type EventBudget, type PtaEvent } from "@/lib/events";
@@ -241,6 +241,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
       packet: original,
       requesterSha256: actual,
       requestId,
+      version: versionOf(row),
       chairLine: stored.packet.chairLine,
       event,
       payeeName: row.payee_name,
@@ -297,7 +298,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
     try {
       const [user, stipendRows] = await Promise.all([users.get(row.requester_email), stipends.list()]);
       // The log as read before signing: a request counts against its stipend the same while it waits for the chair.
-      const funding = fundingEmailShares(fundingOptions(user, stipendRows, rows, submittedAt), stored.request);
+      const funding = fundingEmailShares(fundingOptions(user, stipendRows, rows, fundingAsOf(requestId, submittedAt)), stored.request);
       await sendPacketOn(
         {
           requestId,
@@ -323,7 +324,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
   }
   let chairCopied = true;
   try {
-    const mail = chairSignedEmail({ requestId, event, payeeName: row.payee_name, sha256: packet.sha256, mailed });
+    const mail = chairSignedEmail({ requestId, version: versionOf(row), event, payeeName: row.payee_name, sha256: packet.sha256, mailed });
     await mailer.send({ to: [link.email], subject: mail.subject, text: mail.text, attachments: [attachment] });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
