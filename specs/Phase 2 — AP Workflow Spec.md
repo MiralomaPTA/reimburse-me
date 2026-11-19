@@ -1,6 +1,6 @@
 # Phase 2 — AP Workflow Spec
 
-Oct 15, 2026, updated Nov 19, 2026 · Draft v0.3 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Event Chair Signature — Spec*, which stay the source of truth for decisions already made.
+Oct 15, 2026, updated Nov 19, 2026 · Draft v0.4 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Event Chair Signature — Spec*, which stay the source of truth for decisions already made.
 
 ## Overview
 
@@ -125,11 +125,27 @@ One row per request, latest version only, UTF-8 with a byte-order mark so Excel 
 
 Columns: `request_id`, `status`, `submitted_at`, `check_date`, `check_number`, `paid_date`, `budget_category`, `payee_name`, `pta_position`, `requester_email`, `purpose`, `event`, `chair_signed_by`, `total_expense`, `donation_to_pta`, `reimbursement_claimed`, `check_delivery`, `line_count`, `receipt_count`, `version`, `approved_by`, `paid_by`, `pdf_sha256`.
 
-If the treasurer's bookkeeping software has an import format, the export should match it instead. *(Open question 6)*
+### QuickBooks bills
+
+The PTA keeps its books in QuickBooks (answered Nov 19). Beside the CSV, the dashboard offers a **QuickBooks bills** file that QuickBooks Online imports under *Settings > Import data > Bills*, on the Essentials, Plus or Advanced plan. Each request becomes one bill with one line:
+
+| QuickBooks column | From the request |
+| --- | --- |
+| Bill no. | `request_id` |
+| Supplier | `payee_name` |
+| Bill Date | The date it reached AP (after the chair and the check signers, when it had them) |
+| Due Date | The same date |
+| Account | `budget_category` |
+| Line Amount | `reimbursement_claimed` |
+| Line Tax Code | Empty, but the column must be there |
+
+The purpose, and the event for an event request, go in the bill's memo or line description, whichever Intuit's sample import file names; check the sample when building. The file follows the dashboard's filters like the CSV, uses the latest version, and leaves out Returned requests.
+
+The treasurer imports it with *Add new suppliers that don't already exist* ticked, then pays each bill in QuickBooks using the check number the portal recorded. QuickBooks never creates an account during an import, so every name in the Categories tab must match a QuickBooks account exactly. Intuit recommends at most 100 bills per file, about two months at this volume. *(defaults; Open question 6)*
 
 ## Budget categories
 
-A **Categories** tab in the Sheet: `name`, `active` (yes/no), `order`. The treasurer edits it each fiscal year; inactive names stay on old requests but disappear from the dropdown. The app writes a starter header row on first use and shows an "Uncategorized" option until the tab has rows. *(default)*
+A **Categories** tab in the Sheet: `name`, `active` (yes/no), `order`. The treasurer edits it each fiscal year; inactive names stay on old requests but disappear from the dropdown. The app writes a starter header row on first use and shows an "Uncategorized" option until the tab has rows. Each name is the QuickBooks account the expense goes to, spelled as in QuickBooks' chart of accounts, so the QuickBooks file imports cleanly. *(default)*
 
 ## Data changes
 
@@ -148,7 +164,7 @@ Drive: after a return, a request folder gains additional PDF and JSON versions. 
 
 ## Rollout
 
-1. **2a — See.** Role check, the dashboard list and detail pages read-only, the category dropdown, and CSV export. Lets the treasurer start using it immediately.
+1. **2a — See.** Role check, the dashboard list and detail pages read-only, the category dropdown, and the CSV and QuickBooks exports. Lets the treasurer start using it immediately.
 2. **2b — Act.** Approve, Return with note, Record check, Mark sent, the teacher emails, and the resubmission flow with versions. The resubmission flow is built (Nov 19, with step 2 of the event chair spec).
 3. **2c — Nudge.** The weekly digest.
 
@@ -167,7 +183,7 @@ Each has a default. The build follows it unless changed here.
 | 3 | Category required | Must be set before Record check |
 | 4 | Who acted | Every action records the AP member's email and time in an Actions tab |
 | 5 | The PDF after payment | Untouched. Check number, dates and category live in the Sheet. The alternative is a second "paid" copy with the treasurer block filled in for the audit binder |
-| 6 | CSV format | Generic columns above. Which bookkeeping software does the treasurer use, so the export can match its import? |
+| 6 | Export format | The PTA uses QuickBooks (answered Nov 19). Default: QuickBooks Online on a plan that imports bills, with the generic CSV and the QuickBooks bills file above. Still open: Online or Desktop, which plan, and does the treasurer pay bills in QuickBooks or enter each check directly? On Desktop the file would be an IIF of checks instead. On a plan that can't import bills, only the generic CSV is offered |
 | 7 | What a returned teacher can change | Anything, with a fresh signature; the new version gets its own PDF and a fresh email to AP |
 | 8 | Weekly digest | Monday 8 AM Pacific; requests not Paid and older than 7 days; skipped when empty |
 | 9 | Acting on your own request | Blocked for every action; another AP member must do it |
@@ -175,6 +191,10 @@ Each has a default. The build follows it unless changed here.
 | 12 | Who marks a check sent | Whoever puts it in the mailbox or hands it over at pickup. The co-signer may be given the `ap` role to do it right after signing |
 | 13 | Voiding a written check | Return it with a note; the check number stays in the Actions tab and the new check gets a new Record check entry |
 | 11 | VP/Chairman signature line | Answered: for a request for a PTA event, the event's chair signs it in the portal before the request reaches AP (*Event Chair Signature — Spec*). Otherwise it stays blank |
+
+## Changes since v0.3
+
+- The PTA uses QuickBooks. The export gains a QuickBooks bills file for QuickBooks Online, and the Categories tab's names match QuickBooks accounts. Open question 6 now asks only which edition and plan, and how the treasurer records checks.
 
 ## Changes since v0.2
 

@@ -1,6 +1,6 @@
 # Teacher Reimbursement Portal — Product Spec
 
-Nov 19, 2026 · @Russ · Draft v0.7
+Nov 19, 2026 · @Russ · Draft v0.8
 
 ## Overview
 
@@ -125,7 +125,7 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 - Returned requests go back to the teacher with a note; they edit and re-sign. The event chair and the check signers can send a request back too. **Fix and re-sign** opens the form filled in as the request was signed, receipts included, and signing again makes a new version (`FY27-042-v2.pdf`) under the same ID, which goes the way a new request does. Built with the event chair step; see *Event Chair Signature — Spec*, *Fixing a returned request*.
 - AP records the check number and date when the check is written, and marks it Paid once both signatures are on it and it has gone out.
 - The request-log Sheet may be edited directly. The app finds rows by request ID and columns by header name, so sorting, filtering and adding columns are safe; renaming a header breaks it. Status changes should still be made in the dashboard, because that is what sends the teacher's email and writes the audit trail; a status typed into the Sheet sends nothing.
-- CSV export for bookkeeping.
+- CSV export for bookkeeping, and a bills file for QuickBooks, which the PTA uses. See *Phase 2 — AP Workflow Spec*.
 
 ### 6. Notifications
 
@@ -263,11 +263,15 @@ Each has a proposed default. The build follows the default unless it is changed 
 | Resubmission after Return | Built: keeps the request ID and makes a new version (`FY27-042-v2.pdf` and its JSON) beside the earlier files, which stay in Drive. The new version goes the way a new request does: to the event's chairs, the check signers, or AP, marked with its version and the note it answers |
 | Drafts | Built: form state lives in the browser until signing; receipts upload to a pending folder as they are added; signed packets are kept forever. Not built yet: deleting pending uploads with no signed packet after 30 days |
 | What "locked" means | Built: SHA-256 hash of the signed file in the Sheet and both emails; the app never rewrites the file. Not built yet: marking the file read-only in Drive. No certificate-based PDF signature |
-| CSV export | One row per request with the Sheet's columns. Which bookkeeping software does the treasurer use, so the columns match its import? |
+| CSV export | One row per request with the Sheet's columns, plus a bills file for QuickBooks Online. The PTA uses QuickBooks (answered Nov 19). Still open: Online or Desktop, and how the treasurer records checks in it. See *Phase 2 — AP Workflow Spec*, question 6 |
 | Emails | PDF attached to both the AP email and the requester's copy; the body summarizes name, total, line items, check delivery and the stipend |
 | Weekly digest | Monday morning; lists anything not Paid seven days after submission |
 | Request ID | Sequential per PTA fiscal year, e.g. FY27-042 |
 | Signatures | Drawn or typed fresh each time; never stored for reuse |
+
+## Changes since v0.7
+
+- The PTA uses QuickBooks, so the CSV export gains a bills file QuickBooks Online can import. The open question narrows to which edition, and how the treasurer records checks.
 
 ## Changes since v0.6
 

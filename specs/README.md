@@ -6,10 +6,10 @@ What each document in this folder covers and how far the build has got. Updated 
 
 | Spec | Version | Status |
 | --- | --- | --- |
-| [Teacher Reimbursement Portal — Product Spec](<Teacher Reimbursement Portal — Product Spec.md>) | Draft v0.7, Nov 19 | **Phase 1 built.** The overview of the whole portal, and the source of truth for anything the other specs don't decide |
+| [Teacher Reimbursement Portal — Product Spec](<Teacher Reimbursement Portal — Product Spec.md>) | Draft v0.8, Nov 19 | **Phase 1 built.** The overview of the whole portal, and the source of truth for anything the other specs don't decide |
 | [Event Chair Signature — Spec](<Event Chair Signature — Spec.md>) | Draft v0.4, Nov 19 | **Done.** Steps 1 and 2 built (step 1 merged Nov 12, PR #1; step 2 merged Nov 19, PR #3). Step 3, reminders and a time-out, won't be built. No open questions |
 | [Mailed Check — Spec](<Mailed Check — Spec.md>) | Draft v0.8, Nov 19 | **Steps 1 and 2 of 3 built** (step 1 merged Nov 19, PR #2; step 2 merged Nov 19 with the chair's, PR #3). Ready for its pilot, which starts with one board member |
-| [Phase 2 — AP Workflow Spec](<Phase 2 — AP Workflow Spec.md>) | Draft v0.3, Nov 19 | **Not started**, except 2b's resubmission flow, merged with the chair's step 2 (PR #3) |
+| [Phase 2 — AP Workflow Spec](<Phase 2 — AP Workflow Spec.md>) | Draft v0.4, Nov 19 | **Not started**, except 2b's resubmission flow, merged with the chair's step 2 (PR #3) |
 | [Code Review — Oct 2026](<Code Review — Oct 2026.md>) | Oct 16 | **Closed.** Every finding was fixed on Oct 16 except item 23, a note about commit history. Kept for the record |
 
 ## Roadmap
@@ -24,7 +24,7 @@ In build order. The specs ask for the chair and mailed check steps before Phase 
 | ✅ | *Send back* and *Fix and re-sign*, with versions | Event Chair step 2, Mailed Check step 2, Phase 2b | Built Nov 19 (PR #3). One shared flow for the chair's, a check signer's and AP's returns. Phase 2b still needs AP's **Return with a note** button and its email |
 | ⬜ | A daily cron job: reminders to the check signers at 3 and 7 days | Mailed Check step 3 | Not built. The same job can later send the Phase 2 weekly digest and clean up `pending/` |
 | ➖ | Chair reminders at 3 and 7 days, and the 14-day time-out | Event Chair step 3 | Won't be built (Nov 19). The requester's Resend and the Events tab chase a slow chair instead |
-| ⬜ | Phase 2a — *See*: the AP dashboard (read-only), budget categories, CSV export | Phase 2 | Not built |
+| ⬜ | Phase 2a — *See*: the AP dashboard (read-only), budget categories, the CSV and QuickBooks exports | Phase 2 | Not built |
 | ⬜ | Phase 2b — *Act*: approve, return with a note, record the check, mark it sent, emails to the requester | Phase 2 | Not built, except *Fix and re-sign* (above) |
 | ⬜ | Phase 2c — *Nudge*: the weekly digest to AP | Phase 2 | Not built |
 | ⬜ | Phase 3 — receipt OCR to fill in line items | Product | An idea only. No spec yet |
@@ -36,7 +36,7 @@ Smaller things the product spec lists as not built: deleting uploads in `pending
 Every open question has a proposed default, and the build follows the default unless the PTA changes it in the spec. These are the ones still waiting for an answer:
 
 - **Who can add the DNS record** for reimburse.miralomasf.com? (Product Spec)
-- **Which bookkeeping software** does the PTA use, so the CSV export can match its import? (Product Spec and Phase 2, question 6)
+- **Which QuickBooks**: Online or Desktop, on which plan, and does the treasurer pay bills in it or enter each check directly? The PTA uses QuickBooks, and the answer decides the export's QuickBooks file. (Product Spec and Phase 2, question 6)
 
 To review the rest of the defaults, see the *Open questions* section of each spec: 11 in the Product Spec, 13 in Phase 2 and 8 in Mailed Check. The Event Chair spec has none left.
 
