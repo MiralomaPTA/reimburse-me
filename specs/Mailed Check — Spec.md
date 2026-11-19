@@ -390,7 +390,7 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 
 - It refuses `checkDelivery: "mail"` while mailing is switched off for that requester, whether by their `mailed_checks` cell, by `MAILED_CHECKS`, or by the signer settings. It reads the Users row at signing, not from the session.
 - A mailed request goes on to the check signers only while `CHECK_SIGNERS` has two besides the requester and `BILL_PAY_ACCOUNTS` isn't empty. Submit refuses mailing otherwise. The chair's signature is refused until the PTA fixes the settings, so the request never waits for signatures that can't come. Mailing switched off for the account, or paused with `MAILED_CHECKS=off`, doesn't stop the chair: the request was submitted as mailed and carries on.
-- Every path that sends a packet to AP sends a mailed request to the signers instead. Those paths are submit, chair signature, chair time-out, Phase 2 resubmission, and any later status tool. A single guard refuses to email AP a mailed request that has no authorized packet for its current version.
+- Every path that sends a packet to AP sends a mailed request to the signers instead. Those paths are submit, chair signature, chair time-out, a returned request signed again (*Fix and re-sign*), and any later status tool. A single guard refuses to email AP a mailed request that has no authorized packet for its current version.
 - Each signature is made once, under the row lock (see *How a signature is recorded*).
 - The FO10 is filled from a `request.json` whose packet hash matches the row. Every FO10 and packet a signer is shown, is emailed or signs is first checked against its recorded hash, and so is the authorized packet before a resend to AP. A file that doesn't match isn't shown or sent.
 

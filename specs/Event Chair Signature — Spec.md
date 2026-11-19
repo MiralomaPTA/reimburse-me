@@ -248,7 +248,7 @@ Step 2 adds three of Phase 2's columns early, appended the same way:
 
 - **Status model.** Phase 2's status table gains *Awaiting chair* before *Submitted*. "Returned → Submitted" becomes "Returned → Awaiting chair" when the chair step applies.
 - **Dashboard.** Requests awaiting the chair haven't reached AP yet, so the default view leaves them out. The status filter can show them, so AP can see what's coming and chase a slow chair. For a Submitted request, the age counts from when it was sent on, not from when the requester signed.
-- **Resubmission.** The *Fix and re-sign* flow is the same build Phase 2b describes, and whichever ships first builds it. Step 1 already writes every request's JSON file, so every request submitted from then on can be refilled.
+- **Resubmission.** This stage built the *Fix and re-sign* flow Phase 2b describes, in step 2 (see *Fixing a returned request*). Phase 2b adds AP's **Return with a note** and its email to the teacher, which should set `returned_at` and `returned_by` the way the chair's send-back does. Requests submitted before step 1, which wrote the first request JSON files, can't be refilled; their request page says to start a new request.
 - **Weekly digest.** Adds a section for requests that have been awaiting the chair for more than 7 days.
 - **Actions tab.** Once it exists, each chair signature, send-back, resend and time-out adds a row.
 - **The VP/Chairman question.** Both earlier specs leave open what happens to the VP/Chairman line (Phase 2 open question 11). This stage answers it for event requests. Other requests keep the line blank.

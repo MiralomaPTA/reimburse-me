@@ -1,6 +1,6 @@
 # Phase 2 — AP Workflow Spec
 
-Oct 15, 2026, updated Nov 12, 2026 · Draft v0.2 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Event Chair Signature — Spec*, which stay the source of truth for decisions already made.
+Oct 15, 2026, updated Nov 19, 2026 · Draft v0.3 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Event Chair Signature — Spec*, which stay the source of truth for decisions already made.
 
 ## Overview
 
@@ -52,7 +52,7 @@ A request is always in exactly one status. *Draft* from the main spec lives only
 | Awaiting signers | A mailed check, signed by the requester (and the chair, for an event) and waiting for two of the PTA's check signers to sign its FO10. Built with the mailed check step; see the *Mailed Check — Spec* | The app, on submit or resubmit, or when the chair signs | `signers_step`, `signers_sent_to`, `signers_sent_at`, then the `signer_*`, `budget_account`, `payment_account` and `fo10_*` columns | Signing link to each check signer; copy to the teacher. Nothing to ap@ yet |
 | Submitted | Signed and sent to AP | The app, on submit or resubmit, when the event chair signs, or, for a mailed check, when the second check signer signs | `submitted_at`, `version`, `pdf_file_id`, `pdf_sha256`; after a chair signs, the `chair_*` columns | Packet to ap@ (co-signed, for an event), copy to the teacher |
 | Approved | AP has reviewed it and will pay | AP | `approved_at`, `approved_by` | None *(default)* |
-| Returned | AP needs a change before paying | AP, note required | `returned_at`, `returned_by`, `returned_note` | Teacher: the note and a link to fix it |
+| Returned | AP needs a change before paying | AP, note required. The event chair and the check signers can send a request back too, before it reaches AP (see their specs) | `returned_at`, `returned_by`, `returned_note` | Teacher: the note and a link to fix it |
 | Check written | The treasurer has written the check; it is waiting for the second signature | AP, check number and date required | `check_number`, `check_date`, `check_written_by` | None. The teacher's request page shows "Check written, awaiting second signature" |
 | Paid | Both signatures are on the check and it has gone out, to the staff mailbox or handed over at pickup | AP or the co-signer | `paid_date` (the date it went out), `paid_by` | Teacher: check number, date, and where the check went |
 
@@ -81,7 +81,7 @@ When a request is returned:
 1. The teacher gets an email with the AP note and a link to the request.
 2. Opening the request shows the note at the top and a **Fix and re-sign** button. The form opens filled in exactly as last submitted: details, line items and receipts.
 3. The teacher may change anything: edit lines, remove or add receipts, change the amount. *(default)*
-4. They preview and sign again. The app builds a new packet, stores it as `FY27-042-v2.pdf` beside the earlier one, sets `version` to 2, points `pdf_file_id` and `pdf_sha256` at the new file, keeps the previous file ids in `previous_pdf_file_ids`, and sets status back to Submitted. A request for an event with a chair goes back to *Awaiting chair* instead, the chair signs version 2, and it reaches AP from there.
+4. They preview and sign again. The app builds a new packet, stores it as `FY27-042-v2.pdf` beside the earlier one, sets `version` to 2, points `pdf_file_id` and `pdf_sha256` at the new file, keeps the previous file ids in `previous_pdf_file_ids`, and sets status back to Submitted. A request for an event with a chair goes back to *Awaiting chair* instead, the chair signs version 2, and it reaches AP from there. A mailed check goes to the check signers (after the chair, for an event) and needs both signatures again.
 5. AP receives a new packet email marked *version 2* that includes the return note it answers.
 
 To refill the form, the app saves the exact request content as JSON in the request's Drive folder at every submission (`FY27-042.json`, `FY27-042-v2.json`; `request_file_id` on the row). Receipts already in Drive are reused by id; nothing is re-uploaded unless the teacher adds a new one.
@@ -149,7 +149,7 @@ Drive: after a return, a request folder gains additional PDF and JSON versions. 
 ## Rollout
 
 1. **2a — See.** Role check, the dashboard list and detail pages read-only, the category dropdown, and CSV export. Lets the treasurer start using it immediately.
-2. **2b — Act.** Approve, Return with note, Record check, Mark sent, the teacher emails, and the resubmission flow with versions.
+2. **2b — Act.** Approve, Return with note, Record check, Mark sent, the teacher emails, and the resubmission flow with versions. The resubmission flow is built (Nov 19, with step 2 of the event chair spec).
 3. **2c — Nudge.** The weekly digest.
 
 Each step is usable on its own. Pilot 2a with the treasurer on live data; nothing in it writes to the Sheet except the category.
@@ -175,3 +175,8 @@ Each has a default. The build follows it unless changed here.
 | 12 | Who marks a check sent | Whoever puts it in the mailbox or hands it over at pickup. The co-signer may be given the `ap` role to do it right after signing |
 | 13 | Voiding a written check | Return it with a note; the check number stays in the Actions tab and the new check gets a new Record check entry |
 | 11 | VP/Chairman signature line | Answered: for a request for a PTA event, the event's chair signs it in the portal before the request reaches AP (*Event Chair Signature — Spec*). Otherwise it stays blank |
+
+## Changes since v0.2
+
+- The resubmission flow (*Fix and re-sign*, with versions) is built, with step 2 of the event chair spec, and works for any Returned request. Until 2b's **Return with a note**, AP can return a request by setting `status` and `returned_note` in the Sheet; nothing emails the teacher.
+- `returned_at`, `returned_by` and `previous_pdf_file_ids` already exist. The event chair and the check signers can also return a request, before it reaches AP.
