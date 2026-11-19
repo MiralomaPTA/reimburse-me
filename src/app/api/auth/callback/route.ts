@@ -1,10 +1,9 @@
 import { cookies } from "next/headers";
 import { getAdapters } from "@/server/adapters";
-import { completeSignIn } from "@/server/auth/access";
+import { afterSignIn, completeSignIn } from "@/server/auth/access";
 import { seeOther } from "@/server/http";
 import { createSessionToken } from "@/server/auth/tokens";
 import { SESSION_COOKIE, sessionCookieOptions } from "@/server/auth/session";
-import { safeNextPath } from "@/lib/next-path";
 
 /**
  * The sign-in page POSTs the token here (a click, not a GET), so link
@@ -21,5 +20,5 @@ export async function POST(request: Request) {
 
   const session = await createSessionToken({ email: result.email, method: "email-link", signedInAt: new Date().toISOString() });
   (await cookies()).set(SESSION_COOKIE, session, sessionCookieOptions);
-  return seeOther(safeNextPath(form.get("next")) ?? "/requests/new");
+  return seeOther(afterSignIn(result.role, form.get("next")));
 }
