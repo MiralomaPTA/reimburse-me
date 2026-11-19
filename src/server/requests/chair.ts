@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { Adapters, MailAttachment, Mailer, RequestRow } from "@/server/adapters/types";
 import { config } from "@/server/config";
 import { createChairToken, verifyChairToken, type ChairLink } from "@/server/auth/tokens";
@@ -6,7 +5,11 @@ import { chairRequestEmail, chairSignedEmail } from "@/server/email/templates";
 import { countersignPacket } from "@/server/pdf/countersign";
 import { chairConsentText } from "@/server/pdf/types";
 import { BusyError, withRequestLock } from "@/server/requests/lock";
+import { sha256 } from "@/server/hash";
+import { addressList, appendNotes, ResendProblemError, versionOf } from "@/server/requests/rows";
+import { signersCanFinish, signersFor } from "@/server/requests/mailing";
 import { sendPacketOn } from "@/server/requests/send-on";
+import { reachedCells, sendToSigners, signerFlags } from "@/server/requests/signers";
 import { toPacketSignature } from "@/server/requests/signature";
 import { fundingEmailShares, fundingOptions } from "@/server/requests/stipends";
 import { cosignedName, loadStoredRequest, type StoredRequest } from "@/server/requests/stored";
@@ -21,20 +24,12 @@ import type { RequestInput, SignatureInput } from "@/lib/request-schema";
  * goes on to AP; each chair gets their own link, good for one version of one
  * request. Any one of them signs the form's VP/Chairman line, which makes a
  * co-signed copy of the packet, and that copy goes on to AP the way every
- * packet does (see config.sendPacketsTo).
+ * packet does (see config.sendPacketsTo), or, for a mailed check, to the
+ * PTA's check signers (see signers.ts).
  */
 
 /** The page a chair's link opens. */
 export const chairLinkPath = (requestId: string, token: string) => `/chair/${encodeURIComponent(requestId)}?t=${encodeURIComponent(token)}`;
-
-const versionOf = (row: RequestRow) => Number(row.version) || 1;
-
-/** A comma-separated address cell as lower-case addresses. */
-const addresses = (cell: string) =>
-  String(cell ?? "")
-    .split(",")
-    .map((part) => part.trim().toLowerCase())
-    .filter(Boolean);
 
 /**
  * Who may sign `row` as chair now: its event's chairs in the Events tab, or,
@@ -46,10 +41,8 @@ const addresses = (cell: string) =>
 export function signingChairs(row: Pick<RequestRow, "event" | "chair_sent_to" | "requester_email">, events: PtaEvent[]): string[] {
   const event = findEvent(events, row.event);
   const requester = row.requester_email.trim().toLowerCase();
-  return (event ? event.chairs : addresses(row.chair_sent_to)).filter((chair) => chair !== requester);
+  return (event ? event.chairs : addressList(row.chair_sent_to)).filter((chair) => chair !== requester);
 }
-
-const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 export interface ChairRequestInput {
   requestId: string;
@@ -196,15 +189,18 @@ export interface ChairSignResult {
   emailed: boolean;
   /** false when the chair's own copy didn't go out. */
   chairCopied: boolean;
+  /** A mailed check: it went to the check signers, not on to AP. */
+  mailed: boolean;
 }
 
 /**
  * Signs as chair: stamps the chair's signature on a copy of the requester's
  * packet, saves it beside the original, marks the request Submitted, and
- * sends the co-signed packet on. Everything up to marking it Submitted runs
- * under the row's lock, so a co-chair signing at the same moment is refused
- * rather than sending AP a second packet. Email trouble after that is noted
- * on the row, never retried.
+ * sends the co-signed packet on. A mailed check becomes "Awaiting signers"
+ * instead, and the co-signed packet goes to the check signers. Everything up
+ * to the status change runs under the row's lock, so a co-chair signing at
+ * the same moment is refused rather than sending AP a second packet. Email
+ * trouble after that is noted on the row, never retried.
  */
 export async function signAsChair(input: ChairSignInput, adapters: Adapters): Promise<ChairSignResult> {
   const { files, log, users, stipends, mailer } = adapters;
@@ -212,6 +208,13 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
   if (state.kind !== "ready") throw new ChairError(chairStateMessage(state));
   const { link, stored, rows } = state;
   const { request_id: requestId, event } = state.row;
+  const mailed = stored.request.checkDelivery === "mail";
+  // As submit checks: the check signers must be able to finish, or it would wait for signatures that can't come.
+  // Not whether mailing is switched on for the account: a request already on its way to the signers carries on.
+  if (mailed && !signersCanFinish(state.row.requester_email)) {
+    console.error(`[chair] not co-signing ${requestId}: it's a mailed check, and CHECK_SIGNERS or BILL_PAY_ACCOUNTS can't take it`);
+    throw new ChairError(`This request's check is to be mailed, and the PTA's check signing isn't set up to approve it right now. Please let the PTA know at ${config.apEmail}; you can sign once that's fixed.`);
+  }
   const signedAt = new Date();
 
   const signed = await withRequestLock(log, requestId, async (row) => {
@@ -243,8 +246,11 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
     });
     const filename = cosignedName(requestId, versionOf(row));
     const saved = await files.putFile({ name: filename, mimeType: "application/pdf", bytes: packet.bytes, folderPath: ["requests", fiscalYearLabel(new Date(row.submitted_at)), requestId] });
+    // A mailed check goes to the check signers next; it reaches AP only with their FO10.
     const patch: Partial<RequestRow> = {
-      status: "Submitted",
+      ...(mailed
+        ? { status: "Awaiting signers", signers_step: "Waiting", signers_sent_to: signersFor(row.requester_email).join(", "), signers_sent_at: signedAt.toISOString() }
+        : { status: "Submitted" }),
       chair_step: "Signed",
       chair_signed_by: link.email,
       chair_name: input.name,
@@ -256,46 +262,59 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
       chair_pdf_file_id: saved.id,
       chair_pdf_sha256: packet.sha256,
     };
-    return { patch, result: { row, packet, filename } };
+    return { patch, result: { row: { ...row, ...patch }, packet, filename } };
   }).catch((error: unknown) => {
     if (error instanceof BusyError) throw new ChairError("This request is being signed right now, perhaps by a co-chair. Reload the page in a minute to see whether it went through.");
     throw error;
   });
 
-  // From here on the signature is recorded; email trouble is noted on the row.
+  // From here on the signature is recorded; email trouble is noted on the row. `row` is as just written.
   const { row, packet, filename } = signed;
   const submittedAt = new Date(row.submitted_at);
   const attachment = { filename, mimeType: "application/pdf", bytes: packet.bytes };
   const problems: string[] = [];
   let emailed = true;
-  try {
-    const [user, stipendRows] = await Promise.all([users.get(row.requester_email), stipends.list()]);
-    // The log as read before signing: a request counts against its stipend the same while it waits for the chair.
-    const funding = fundingEmailShares(fundingOptions(user, stipendRows, rows, submittedAt), stored.request);
-    await sendPacketOn(
-      {
-        requestId,
-        request: stored.request,
-        requesterEmail: row.requester_email,
-        submittedAt,
-        sha256: packet.sha256,
-        version: versionOf(row),
-        funding,
-        linkBase: input.linkBase,
-        chair: { event, name: input.name, email: link.email, signedAt, note: input.note, requesterSha256: row.pdf_sha256 },
-      },
-      attachment,
-      mailer,
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[chair] could not send ${requestId} on: ${message}`);
-    problems.push(`Email failed after the chair signed: ${message}`);
-    emailed = false;
+  if (mailed) {
+    // The log as read for the budget, so the flags don't need another read.
+    const flags = signerFlags(row, stored.request, rows);
+    const sent = await sendToSigners({ row, stored, linkBase: input.linkBase, packetBytes: packet.bytes, flags, first: null }, adapters);
+    // On its way as long as one signer has it; the rest are noted, and the requester can resend to them.
+    emailed = sent.sent.length > 0;
+    if (sent.error) {
+      console.error(`[chair] could not send ${requestId} to the check signers: ${sent.error}`);
+      problems.push(`Email to the check signers${sent.failed.length ? ` (${sent.failed.join(", ")})` : ""} failed after the chair signed: ${sent.error}`);
+      await log.update(requestId, reachedCells(sent.sent)).catch(() => undefined);
+    }
+  } else {
+    try {
+      const [user, stipendRows] = await Promise.all([users.get(row.requester_email), stipends.list()]);
+      // The log as read before signing: a request counts against its stipend the same while it waits for the chair.
+      const funding = fundingEmailShares(fundingOptions(user, stipendRows, rows, submittedAt), stored.request);
+      await sendPacketOn(
+        {
+          requestId,
+          request: stored.request,
+          requesterEmail: row.requester_email,
+          submittedAt,
+          sha256: packet.sha256,
+          version: versionOf(row),
+          funding,
+          linkBase: input.linkBase,
+          chair: { event, name: input.name, email: link.email, signedAt, note: input.note, requesterSha256: row.pdf_sha256 },
+        },
+        attachment,
+        mailer,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[chair] could not send ${requestId} on: ${message}`);
+      problems.push(`Email failed after the chair signed: ${message}`);
+      emailed = false;
+    }
   }
   let chairCopied = true;
   try {
-    const mail = chairSignedEmail({ requestId, event, payeeName: row.payee_name, sha256: packet.sha256 });
+    const mail = chairSignedEmail({ requestId, event, payeeName: row.payee_name, sha256: packet.sha256, mailed });
     await mailer.send({ to: [link.email], subject: mail.subject, text: mail.text, attachments: [attachment] });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -303,20 +322,13 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
     problems.push(`The chair's copy (to ${link.email}) failed: ${message}`);
     chairCopied = false;
   }
-  if (problems.length > 0) await log.update(requestId, { notes: [row.notes, ...problems].filter(Boolean).join(" | ") }).catch(() => undefined);
-  return { sha256: packet.sha256, emailed, chairCopied };
+  await appendNotes(log, requestId, problems);
+  return { sha256: packet.sha256, emailed, chairCopied, mailed };
 }
 
 export type ResendProblem = "not-found" | "closed" | "too-soon" | "no-chair" | "requester-chair" | "busy" | "failed";
 
-export class ResendError extends Error {
-  constructor(
-    readonly problem: ResendProblem,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export class ResendError extends ResendProblemError<ResendProblem> {}
 
 /** When the requester may resend to every chair: `chairResendHours` after the last send, or now if none went out. */
 export function nextResendAt(row: Pick<RequestRow, "chair_sent_at">): Date | null {
@@ -342,7 +354,7 @@ export interface ChairSending {
 
 export function chairSending(row: Pick<RequestRow, "event" | "chair_sent_to" | "chair_sent_at" | "requester_email">, events: PtaEvent[], now = new Date()): ChairSending {
   const chairs = signingChairs(row, events);
-  const reached = addresses(row.chair_sent_to);
+  const reached = addressList(row.chair_sent_to);
   const unreached = chairs.filter((chair) => !reached.includes(chair));
   const next = nextResendAt(row);
   const everyone = !next || next <= now;

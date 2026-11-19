@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { config } from "@/server/config";
-import type { UserDirectory, UserRecord } from "@/server/adapters/types";
+import { USER_COLUMNS, type UserDirectory, type UserRecord } from "@/server/adapters/types";
 
 /** Development stand-in for the Users tab: a JSON array in .data/users.json. */
 
@@ -9,9 +9,16 @@ function usersPath() {
   return path.join(process.cwd(), config.localDataDir, "users.json");
 }
 
+/** Rows written before a column existed read it as blank, the way the Sheet does. */
+function withEveryColumn(row: UserRecord): UserRecord {
+  const filled = { ...row } as Record<string, unknown>;
+  for (const col of USER_COLUMNS) filled[col] ??= "";
+  return filled as unknown as UserRecord;
+}
+
 async function readAll(): Promise<UserRecord[]> {
   try {
-    return JSON.parse(await fs.readFile(usersPath(), "utf8")) as UserRecord[];
+    return (JSON.parse(await fs.readFile(usersPath(), "utf8")) as UserRecord[]).map(withEveryColumn);
   } catch {
     return [];
   }
@@ -33,6 +40,13 @@ export const localUserDirectory: UserDirectory = {
     const index = rows.findIndex((r) => same(r.email, record.email));
     if (index === -1) rows.push(record);
     else rows[index] = record;
+    await writeAll(rows);
+  },
+  async update(email, patch) {
+    const rows = await readAll();
+    const index = rows.findIndex((r) => same(r.email, email));
+    if (index === -1) throw new Error(`No user ${email}`);
+    rows[index] = { ...rows[index], ...patch };
     await writeAll(rows);
   },
   async countPendingSince(sinceIso) {

@@ -62,3 +62,8 @@ export const CONSENT_TEXT =
 export const chairConsentText = (event: string) =>
   `I agree to sign this reimbursement request electronically as chair of ${event}. ` +
   `I confirm that, to my knowledge, the expenses listed were made for ${event}.`;
+
+/** What a check signer agrees to by signing an Authorized By line of the FO10. */
+export const SIGNER_CONSENT_TEXT =
+  "I agree to sign this Authorization for Payment via Electronic Services electronically, as an authorized check signer of the Miraloma Elementary PTA. " +
+  "I have checked the request and its receipts, and I authorize paying the amount on the form to the payee, at the address on it, by bank bill pay.";

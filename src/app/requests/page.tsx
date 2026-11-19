@@ -40,6 +40,7 @@ export default async function RequestsPage() {
                   <div className="text-sm text-neutral-500">
                     {row.request_id} · {formatDateTime(new Date(row.submitted_at))}
                     {row.funding ? ` · ${row.funding}` : ""}
+                    {row.status === "Awaiting signers" && row.signers_step === "1 of 2 signed" ? " · 1 of 2 check signers signed" : ""}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { config } from "@/server/config";
 import { MailtoLink } from "@/components/MailtoLink";
 import { Guide, Questions, Section, Shot } from "@/components/help/Guide";
-import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions } from "@/components/help/Shared";
+import { CheckAndSignSection, EventQuestion, SignInSection, WhatHappensNext, commonQuestions, mailingInGuides, statusList } from "@/components/help/Shared";
 import signIn from "@/images/help/volunteer/sign-in.png";
 import checkEmail from "@/images/help/volunteer/check-email.png";
 import almostThere from "@/images/help/volunteer/almost-there.png";
@@ -48,7 +48,8 @@ export default function VolunteerGuidePage() {
             <strong>What it was for</strong>, in a few words, like &quot;Fall Festival decorations&quot;, and which PTA event, if it was for one.
           </li>
           <li>
-            <strong>How you&apos;d like your check:</strong> left in a staff mailbox at school, or picked up from the PTA.
+            <strong>How you&apos;d like your check:</strong> left in a staff mailbox at school, picked up from the PTA
+            {mailingInGuides() ? ", or mailed to you" : ""}.
           </li>
         </ul>
         <p>One more thing: the first time you use the portal, the PTA approves your email address once, usually within a day. After that, signing in is instant.</p>
@@ -90,9 +91,9 @@ export default function VolunteerGuidePage() {
 
       <CheckAndSignSection shots={{ checkAndSign, done: toAp ? doneAp : doneRequester }} doneAlt="The Sent to the Fall Festival chair page" />
 
-      <WhatHappensNext check="picked up from the PTA or left in the staff mailbox you chose">
+      <WhatHappensNext check={mailingInGuides() ? "picked up, left in the staff mailbox or mailed, as you chose" : "picked up from the PTA or left in the staff mailbox you chose"}>
         <p>
-          You can see every request you&apos;ve sent under <strong>My requests</strong>, with its status: Awaiting chair, Submitted, Approved, Returned or Paid.
+          You can see every request you&apos;ve sent under <strong>My requests</strong>, with its status: {statusList()}.
         </p>
         <Shot src={myRequests} alt="The My requests page, listing one request with its amount and status" />
         <p>Tap a request to see its details and open the signed PDF again at any time.</p>
@@ -109,6 +110,7 @@ export default function VolunteerGuidePage() {
             q.computer,
             q.event,
             q.chairSlow,
+            ...(mailingInGuides() ? [q.signersSlow] : []),
             {
               q: "Each line asks me which stipend paid for it.",
               a: "That shows up when the PTA has given you a yearly stipend of your own. Choose it for purchases that should come out of it, and \"Not from a stipend\" for anything else.",

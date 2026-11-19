@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { LEGACY_DRAFT_KEY, readDraft, removeDraft, writeDraft } from "@/lib/draft";
 import { chairRouting, findEvent, guessEvents, type FormEvent } from "@/lib/events";
+import { addressProblems, formatAddress } from "@/lib/mailing";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { DEFAULT_POSITION, GRADE_LABELS, otherPosition, parseTeacherPosition, teacherPosition } from "@/lib/pta-position";
 import { DESCRIPTION_MAX, fundingSplit, type FundingShare, type RequestInput } from "@/lib/request-schema";
@@ -40,7 +41,10 @@ interface FormState {
   grade: string;
   room: string;
   phone: string;
-  checkDelivery: "pickup" | "mailbox";
+  checkDelivery: "pickup" | "mailbox" | "mail";
+  /** Kept while another choice is picked, so switching back to mail doesn't mean typing it again. */
+  address: string;
+  cityStateZip: string;
   purpose: string;
   /** The event picked by hand ("" for "Not for an event"), or null to go by the guess from the description. */
   event: string | null;
@@ -53,8 +57,10 @@ interface FormState {
  * drafts from before pickup replaced mailing may still say "mail", and drafts from before
  * teachers were asked for grade and room have neither.
  */
-type SavedForm = Omit<FormState, "checkDelivery" | "grade" | "room" | "event"> & {
+type SavedForm = Omit<FormState, "checkDelivery" | "grade" | "room" | "event" | "address" | "cityStateZip"> & {
   checkDelivery?: string;
+  address?: string;
+  cityStateZip?: string;
   event?: string | null;
   grade?: string;
   room?: string;
@@ -82,6 +88,8 @@ const emptyForm = (profile: Profile | null, requester: Requester): FormState => 
     room: last?.room ?? "",
     phone: profile?.phone ?? "",
     checkDelivery: profile?.checkDelivery ?? "mailbox",
+    address: profile?.address ?? "",
+    cityStateZip: profile?.cityStateZip ?? "",
     purpose: "",
     event: null,
     items: [newItem()],
@@ -107,7 +115,10 @@ function loadDraft(email: string, requester: Requester): FormState | null {
       grade: draft.grade ?? requester.grade,
       room: draft.room ?? "",
       event: draft.event ?? null,
-      checkDelivery: draft.checkDelivery === "mailbox" ? "mailbox" : "pickup",
+      // A draft from before pickup replaced mailing also says "mail"; either way, the form asks again if mailing isn't offered now.
+      checkDelivery: draft.checkDelivery === "mailbox" ? "mailbox" : draft.checkDelivery === "mail" ? "mail" : "pickup",
+      address: draft.address ?? "",
+      cityStateZip: draft.cityStateZip ?? "",
       items: items.length > 0 ? items : [newItem()],
     };
   } catch {
@@ -129,19 +140,36 @@ function chosenEvent(form: FormState, events: FormEvent[]): { event: string; gue
   return { event: guessed.length === 1 ? guessed[0] : "", guessed };
 }
 
-/** What happens after signing, for the form and the preview step; null when the request isn't for an event. */
-function afterSigning(eventName: string, events: FormEvent[], email: string): string | null {
+/** What happens after signing, under the event question; null when the request isn't for an event. A mailed check goes to the check signers before the PTA. */
+function afterSigning(eventName: string, events: FormEvent[], email: string, mailed = false): string | null {
   const event = findEvent(events, eventName);
   if (!event) return null;
   const routing = chairRouting(event, email);
-  if (routing.step === "Skipped: requester is a chair") return `You're a ${event.name} chair, so this goes straight to the PTA.`;
-  if (routing.step !== "Waiting") return `No chair is listed for ${event.name}, so this goes straight to the PTA.`;
+  const pta = mailed ? "two of the PTA's check signers" : "the PTA";
+  if (routing.step === "Skipped: requester is a chair") return `You're a ${event.name} chair, so this goes straight to ${pta}.`;
+  if (routing.step !== "Waiting") return `No chair is listed for ${event.name}, so this goes straight to ${pta}.`;
   const who = routing.chairs.length === 1 ? `the ${event.name} chair (${routing.chairs[0]})` : `the ${event.name} chairs (${routing.chairs.join(", ")})`;
-  return `After you sign, this goes to ${who} to sign, then to the PTA.`;
+  return `After you sign, this goes to ${who} to sign, then to ${pta}.`;
+}
+
+/** The preview step's line about what happens after signing; null when it's the same as always. */
+function afterSigningPreview(input: RequestInput, events: FormEvent[], email: string): string | null {
+  if (input.checkDelivery !== "mail") return afterSigning(input.event, events, email);
+  const event = findEvent(events, input.event);
+  const routing = event ? chairRouting(event, email) : null;
+  const mailTo = `Then the PTA's bank mails your check to ${formatAddress(input)}.`;
+  if (event && routing?.step === "Waiting") return `After you sign, this goes to the ${event.name} chair to sign, then to two of the PTA's check signers. ${mailTo}`;
+  return `After you sign, two of the PTA's check signers approve the payment. ${mailTo}`;
 }
 
 /** Converts form state to the API payload, collecting user-facing problems. */
-function toRequestInput(form: FormState, stipends: StipendStatus[], requester: Requester, events: FormEvent[]): { input: RequestInput | null; problems: string[] } {
+function toRequestInput(
+  form: FormState,
+  stipends: StipendStatus[],
+  requester: Requester,
+  events: FormEvent[],
+  mailing: boolean,
+): { input: RequestInput | null; problems: string[] } {
   const problems: string[] = [];
   const items: RequestInput["items"] = [];
   form.items.forEach((item, i) => {
@@ -172,6 +200,14 @@ function toRequestInput(form: FormState, stipends: StipendStatus[], requester: R
     if (!form.room.trim()) problems.push("Enter your room number.");
   }
   if (form.phone.replace(/\D/g, "").length < 7) problems.push("Enter a phone number.");
+  const mailed = form.checkDelivery === "mail";
+  // A draft may have chosen mail before mailing was switched off for the account.
+  if (mailed && !mailing) problems.push("Mailing the check isn't available for your account right now. Choose the staff mailbox or pickup.");
+  if (mailed && mailing) {
+    const found = addressProblems(form);
+    if (found.address) problems.push(found.address);
+    if (found.cityStateZip) problems.push(found.cityStateZip);
+  }
   if (!form.purpose.trim()) problems.push("Say what the expenditure was for.");
   // A draft may name an event that has since come off the list.
   const { event } = chosenEvent(form, events);
@@ -183,6 +219,8 @@ function toRequestInput(form: FormState, stipends: StipendStatus[], requester: R
       ptaPosition: requester.teacher ? teacherPosition(form.grade, form.room) : otherPosition(form.ptaPosition),
       phone: form.phone.trim(),
       checkDelivery: form.checkDelivery,
+      address: mailed ? form.address.trim() : "",
+      cityStateZip: mailed ? form.cityStateZip.trim() : "",
       purpose: form.purpose.trim(),
       event,
       items,
@@ -218,6 +256,7 @@ export function NewRequestForm({
   email,
   apEmail,
   sendPacketsTo,
+  mailing,
   profile,
   requester,
   funding,
@@ -226,6 +265,8 @@ export function NewRequestForm({
   email: string;
   apEmail: string;
   sendPacketsTo: PacketRecipient;
+  /** Whether "Mail it to me" is offered to this account. */
+  mailing: boolean;
   profile: Profile | null;
   requester: Requester;
   funding: FundingOptions;
@@ -240,6 +281,7 @@ export function NewRequestForm({
       email={email}
       apEmail={apEmail}
       sendPacketsTo={sendPacketsTo}
+      mailing={mailing}
       profile={profile}
       requester={requester}
       funding={funding}
@@ -255,6 +297,7 @@ interface RequestFormProps {
   apEmail: string;
   /** Whether the signed packet went to AP, or only to the requester to forward by hand. */
   sendPacketsTo: PacketRecipient;
+  mailing: boolean;
   profile: Profile | null;
   requester: Requester;
   /** The requester's stipends before this request; none means the form doesn't ask. */
@@ -265,7 +308,7 @@ interface RequestFormProps {
   prefilled: boolean;
 }
 
-function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, funding: initialFunding, events, initialForm, prefilled }: RequestFormProps) {
+function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requester, funding: initialFunding, events, initialForm, prefilled }: RequestFormProps) {
   const [form, setForm] = useState<FormState>(initialForm);
   // After a submission, "Start another" prefills from what was just sent.
   const latestProfile = useRef<Profile | null>(profile);
@@ -279,7 +322,15 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
   const [consent, setConsent] = useState(false);
   const [signMode, setSignMode] = useState<"typed" | "drawn">("typed");
   const [typedName, setTypedName] = useState("");
-  const [result, setResult] = useState<{ requestId: string; emailed: boolean; shares: FundingShare[]; chair: { event: string; sentTo: string[]; notReached: string[] } | null } | null>(null);
+  const [result, setResult] = useState<{
+    requestId: string;
+    emailed: boolean;
+    shares: FundingShare[];
+    chair: { event: string; sentTo: string[]; notReached: string[] } | null;
+    signers: { reached: number; notReached: number } | null;
+    /** Set for a mailed check: where it goes. */
+    mailTo: string | null;
+  } | null>(null);
   const padRef = useRef<SignaturePadHandle>(null);
 
   useEffect(() => {
@@ -361,7 +412,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
   );
 
   async function preview() {
-    const { input, problems: found } = toRequestInput(form, funding.stipends, requester, events);
+    const { input, problems: found } = toRequestInput(form, funding.stipends, requester, events, mailing);
     setProblems(found);
     if (!input) {
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -418,14 +469,25 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
         return;
       }
       removeDraft(email);
+      const mailed = requestInput.checkDelivery === "mail";
       latestProfile.current = {
         payeeName: requestInput.payeeName,
         ptaPosition: requestInput.ptaPosition,
         phone: requestInput.phone,
         checkDelivery: requestInput.checkDelivery,
+        // The address stays for next time even when this request wasn't mailed.
+        address: mailed ? requestInput.address : form.address,
+        cityStateZip: mailed ? requestInput.cityStateZip : form.cityStateZip,
       };
       if (body.funding) setFunding(body.funding);
-      setResult({ requestId: body.requestId, emailed: body.emailed, shares: fundingSplit(requestInput), chair: body.chair ?? null });
+      setResult({
+        requestId: body.requestId,
+        emailed: body.emailed,
+        shares: fundingSplit(requestInput),
+        chair: body.chair ?? null,
+        signers: body.signers ?? null,
+        mailTo: mailed ? formatAddress(requestInput) : null,
+      });
       setStep("done");
       window.scrollTo({ top: 0 });
     } catch {
@@ -469,18 +531,28 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
 
   if (step === "done" && result) {
     const toAp = sendPacketsTo === "ap";
-    const chair = result.chair;
+    const { chair, signers, mailTo } = result;
     return (
       <div className="mx-auto max-w-lg space-y-4">
-        <h1 className="text-2xl font-semibold">{chair ? `Sent to the ${chair.event} chair` : toAp ? "Sent to the PTA" : "Signed and ready to send"}</h1>
+        <h1 className="text-2xl font-semibold">
+          {chair ? `Sent to the ${chair.event} chair` : signers ? "Sent to the PTA's check signers" : toAp ? "Sent to the PTA" : "Signed and ready to send"}
+        </h1>
         {chair ? (
           <p className="text-neutral-700">
             Your request <strong>{result.requestId}</strong> is signed and{" "}
             {chair.sentTo.length > 0 ? `on its way to the ${chair.event} chair (${chair.sentTo.join(", ")})` : `waits for the ${chair.event} chair`} to sign on
             the form&apos;s VP/Chairman line.{" "}
-            {toAp
-              ? "Once they sign, it goes to the PTA's accounts payable team by itself."
-              : "Once they sign, you'll get the co-signed PDF by email to forward to the PTA."}
+            {mailTo
+              ? `Once they sign, two of the PTA's check signers approve the payment. Then the PTA's bank mails your check to ${mailTo}.`
+              : toAp
+                ? "Once they sign, it goes to the PTA's accounts payable team by itself."
+                : "Once they sign, you'll get the co-signed PDF by email to forward to the PTA."}
+            {result.emailed ? ` A copy of what you signed went to ${email}.` : ""}
+          </p>
+        ) : signers && mailTo ? (
+          <p className="text-neutral-700">
+            Your request <strong>{result.requestId}</strong> is signed and on its way to the PTA&apos;s check signers. Two of them approve the payment, then it goes
+            to the PTA by itself and the PTA&apos;s bank mails your check to {mailTo}. Mailed checks take a few extra days.
             {result.emailed ? ` A copy of what you signed went to ${email}.` : ""}
           </p>
         ) : toAp ? (
@@ -515,13 +587,31 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
             )}
           </p>
         )}
-        {!result.emailed && !chair && toAp && (
+        {/* Once a signer has it, `emailed` is only about the copy to the requester; a missed signer is shown either way. */}
+        {signers && (signers.reached === 0 || signers.notReached > 0 || !result.emailed) && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            {signers.reached === 0 ? (
+              <>
+                The request was recorded, but the email to the check signers didn&apos;t go through. Open the request below and use &quot;Resend to the check
+                signers&quot; there.
+              </>
+            ) : (
+              <>
+                {signers.notReached > 0
+                  ? `The request was recorded and sent to the check signers, but ${signers.notReached === 1 ? "one email" : `${signers.notReached} emails`} didn't go through. That's fine as long as two of them sign, and you can resend to the others from the request below.`
+                  : "The request was recorded and sent to the check signers."}
+                {!result.emailed ? " The copy to you didn't go through. The signed PDF is on the request below." : ""}
+              </>
+            )}
+          </p>
+        )}
+        {!result.emailed && !chair && !signers && toAp && (
           <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             The request was recorded, but the email to the AP team didn&apos;t go through. Please let <MailtoLink email={apEmail} /> know your
             request number so they can pick it up from the log.
           </p>
         )}
-        {!result.emailed && !chair && !toAp && (
+        {!result.emailed && !chair && !signers && !toAp && (
           <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             The request was recorded, but the email with your PDF didn&apos;t go through. Open the request below, download the signed PDF and
             email it to <MailtoLink email={apEmail} /> yourself.
@@ -555,7 +645,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
         <div>
           <h1 className="text-2xl font-semibold">Check and sign</h1>
           <p className="text-neutral-600">This is the packet the PTA will receive. If anything is wrong, go back and fix it.</p>
-          {afterSigning(requestInput.event, events, email) && <p className="mt-2 font-medium text-neutral-800">{afterSigning(requestInput.event, events, email)}</p>}
+          {afterSigningPreview(requestInput, events, email) && <p className="mt-2 font-medium text-neutral-800">{afterSigningPreview(requestInput, events, email)}</p>}
         </div>
         {problemBox}
         <div className="card p-2">
@@ -684,19 +774,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
             <input id="requesterEmail" className="field bg-neutral-100" value={email} readOnly />
           </div>
         </div>
-        <fieldset>
-          <legend className="label">How should you get the check?</legend>
-          <div className="flex flex-wrap gap-4 text-sm">
-            <label className="flex items-center gap-2">
-              <input type="radio" name="checkDelivery" checked={form.checkDelivery === "mailbox"} onChange={() => update("checkDelivery", "mailbox")} />
-              Leave it in my staff mailbox
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="radio" name="checkDelivery" checked={form.checkDelivery === "pickup"} onChange={() => update("checkDelivery", "pickup")} />
-              Arrange pickup with the PTA
-            </label>
-          </div>
-        </fieldset>
+        <CheckDelivery form={form} mailing={mailing} update={update} />
       </section>
 
       <section className="card space-y-4">
@@ -708,7 +786,9 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
           <input id="purpose" className="field" placeholder="2nd grade art supplies" maxLength={60} value={form.purpose} onChange={(e) => update("purpose", e.target.value)} />
         </div>
         {/* Also shown with no events listed when a draft names one that has gone, so it can be cleared. */}
-        {(events.length > 0 || form.event) && <EventChoice form={form} events={events} email={email} onChange={(event) => update("event", event)} />}
+        {(events.length > 0 || form.event) && (
+          <EventChoice form={form} events={events} email={email} mailed={mailing && form.checkDelivery === "mail"} onChange={(event) => update("event", event)} />
+        )}
       </section>
 
       <section className="space-y-4">
@@ -824,9 +904,9 @@ function RequestForm({ email, apEmail, sendPacketsTo, profile, requester, fundin
  * the one event the description names; once the requester picks, the guess
  * stops changing it.
  */
-function EventChoice({ form, events, email, onChange }: { form: FormState; events: FormEvent[]; email: string; onChange: (event: string) => void }) {
+function EventChoice({ form, events, email, mailed, onChange }: { form: FormState; events: FormEvent[]; email: string; mailed: boolean; onChange: (event: string) => void }) {
   const { event, guessed } = chosenEvent(form, events);
-  const next = afterSigning(event, events, email);
+  const next = afterSigning(event, events, email, mailed);
   const list = new Intl.ListFormat("en", { type: "disjunction" });
   // A draft's event that has come off the list stays shown, so the select matches the form and choosing another changes it.
   const gone = event && !findEvent(events, event) ? event : null;
@@ -917,5 +997,64 @@ function StipendAfter({ stipend, claimedCents }: { stipend: StipendStatus; claim
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * How the check gets to the requester. "Mail it to me" appears only for an
+ * account mailing is switched on for, with the address fields under it. A
+ * draft that chose mail before mailing was switched off shows no choice
+ * picked, and a note to choose again; its address is kept.
+ */
+function CheckDelivery({ form, mailing, update }: { form: FormState; mailing: boolean; update: <K extends keyof FormState>(key: K, value: FormState[K]) => void }) {
+  const mailGone = form.checkDelivery === "mail" && !mailing;
+  const radio = (value: FormState["checkDelivery"], label: string) => (
+    <label className="flex items-center gap-2">
+      <input type="radio" name="checkDelivery" checked={form.checkDelivery === value} onChange={() => update("checkDelivery", value)} />
+      {label}
+    </label>
+  );
+  return (
+    <fieldset className="space-y-3">
+      <legend className="label">How should you get the check?</legend>
+      <div className="flex flex-wrap gap-4 text-sm">
+        {radio("mailbox", "Leave it in my staff mailbox")}
+        {radio("pickup", "Arrange pickup with the PTA")}
+        {mailing && radio("mail", "Mail it to me")}
+      </div>
+      {mailGone && <p className="text-xs text-amber-800">Mailing the check isn&apos;t available for your account right now. Choose the staff mailbox or pickup.</p>}
+      {form.checkDelivery === "mail" && mailing && (
+        <div className="space-y-3">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="address" className="label">
+                Street address
+              </label>
+              <input
+                id="address"
+                className="field"
+                autoComplete="address-line1"
+                placeholder="123 Main St Apt 4"
+                value={form.address}
+                onChange={(e) => update("address", e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="cityStateZip" className="label">
+                City, state and ZIP
+              </label>
+              <input
+                id="cityStateZip"
+                className="field"
+                placeholder="San Francisco, CA 94127"
+                value={form.cityStateZip}
+                onChange={(e) => update("cityStateZip", e.target.value)}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-neutral-500">Mailed checks take a few extra days. Two PTA check signers approve the payment first, then the PTA&apos;s bank mails it.</p>
+        </div>
+      )}
+    </fieldset>
   );
 }

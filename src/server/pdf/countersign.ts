@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256 } from "@/server/hash";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { formatDateShort } from "@/lib/dates";
 import { eventLabel } from "@/lib/events";
@@ -81,5 +81,5 @@ export async function countersignPacket(input: CountersignInput): Promise<Counte
   await stampAddedFooters(doc, requesterPages, input.requestId, input.signedAt);
 
   const bytes = await doc.save({ useObjectStreams: true });
-  return { bytes, sha256: createHash("sha256").update(bytes).digest("hex"), pageCount: doc.getPageCount() };
+  return { bytes, sha256: sha256(bytes), pageCount: doc.getPageCount() };
 }

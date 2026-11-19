@@ -3,6 +3,7 @@ import { parseEvents, toFormEvent } from "@/lib/events";
 import { getAdapters } from "@/server/adapters";
 import { requireApprovedSession } from "@/server/auth/session";
 import { config } from "@/server/config";
+import { mailingOffered } from "@/server/requests/mailing";
 import { currentFunding, parseGrades } from "@/server/requests/stipends";
 import { lastProfile } from "@/server/requests/profile";
 import { NewRequestForm, type Requester } from "@/components/NewRequestForm";
@@ -10,13 +11,16 @@ import { NewRequestForm, type Requester } from "@/components/NewRequestForm";
 export default async function NewRequestPage() {
   const session = await requireApprovedSession("/requests/new");
   const { events } = await getAdapters();
-  const [profile, funding, eventRows] = await Promise.all([lastProfile(session.email), currentFunding(session.user), events.list()]);
+  // Read from the account's Users row now; the server checks it again when the requester signs.
+  const mailing = mailingOffered(session.user);
+  const [profile, funding, eventRows] = await Promise.all([lastProfile(session.email, mailing), currentFunding(session.user), events.list()]);
   const requester: Requester = { teacher: session.user.role === "teacher", grade: gradeLabel(parseGrades(session.user.grade)) };
   return (
     <NewRequestForm
       email={session.email}
       apEmail={config.apEmail}
       sendPacketsTo={config.sendPacketsTo}
+      mailing={mailing}
       profile={profile}
       requester={requester}
       funding={funding}

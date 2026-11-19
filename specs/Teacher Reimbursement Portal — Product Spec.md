@@ -1,6 +1,6 @@
 # Teacher Reimbursement Portal — Product Spec
 
-Nov 12, 2026 · @Russ · Draft v0.5
+Nov 17, 2026 · @Russ · Draft v0.6
 
 ## Overview
 
@@ -66,7 +66,7 @@ Fields map one-to-one to the PTA's *Payment Authorization / Request for Reimburs
 | --- | --- | --- | --- |
 | Name of Payee | payee_name | Text | |
 | PTA Position | pta_position | Teachers: grade and room, written as "Teacher - 2nd - Room 106". Everyone else: free text, optional; blank becomes "Volunteer" | The grade starts from the Users row |
-| Check delivery | — | Choice: pickup from the PTA or staff mailbox | Not on the form; printed in the form's margin and in the email to AP |
+| Check delivery | — | Choice: pickup from the PTA, staff mailbox, or mailed, for accounts mailing is switched on for | Not on the form; printed in the form's margin and in the email to AP. A mailed check's address goes on the FO10 (see the *Mailed Check — Spec*), never on this form |
 | Address, City/Zip | address, city_zip | — | No longer collected; the template fields stay blank |
 | Telephone | phone_area_code, phone_number | Text, required | |
 | Email | email | Prefilled | From the sign-in link |
@@ -121,7 +121,7 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 
 - AP dashboard: list of requests with status, amount, category, age; filter by status.
 - AP assigns the budget category at review. It lives in the Sheet and the CSV export, not on the teacher's form.
-- Statuses: Draft → (Awaiting chair, for a request for a PTA event) → Submitted → Approved / Returned → Check written → Paid. *Check written* covers the gap while a check waits for the PTA's required second signature; the teacher is emailed only at Paid, when it has gone out.
+- Statuses: Draft → (Awaiting chair, for a request for a PTA event) → (Awaiting signers, for a mailed check) → Submitted → Approved / Returned → Check written → Paid. *Check written* covers the gap while a check waits for the PTA's required second signature; the teacher is emailed only at Paid, when it has gone out.
 - Returned requests go back to the teacher with a note; they edit and re-sign.
 - AP records the check number and date when the check is written, and marks it Paid once both signatures are on it and it has gone out.
 - The request-log Sheet may be edited directly. The app finds rows by request ID and columns by header name, so sorting, filtering and adding columns are safe; renaming a header breaks it. Status changes should still be made in the dashboard, because that is what sends the teacher's email and writes the audit trail; a status typed into the Sheet sends nothing.
@@ -219,7 +219,7 @@ Success measures: share of requests submitted online, requests returned for miss
 | Events | An Events tab lists each PTA event, its chairs (comma-separated for co-chairs, any one signs), aliases and an optional budget. Chairs need no Users row |
 | Signing method | Built-in electronic signature; no DocuSign or other paid service |
 | Routing | Every completed request goes to ap@miralomasf.com (includes the treasurer) |
-| Payment | Paper check, unchanged |
+| Payment | Paper check. Mailed checks go through the bank's bill pay, with an FO10 signed by two check signers |
 | Budget category | Assigned by AP at review, not collected from the teacher |
 | Teachers | Marked by `role` = teacher in the Users tab, set on the approval page or in the Sheet |
 | Stipends | Classroom (one standard amount per teacher), grade-level (one shared fund per grade), field trip (one fund for the whole school, not per grade), and staff stipends (per person). Each request names one, or "Not from a stipend" |
@@ -244,7 +244,7 @@ Success measures: share of requests submitted online, requests returned for miss
 | Uploads | Browser to Drive directly; HEIC converted in the browser |
 | Request-log Sheet | AP may edit it directly; status changes go through the dashboard |
 | Environments | No separate pilot environment |
-| Check delivery | Teacher chooses: picked up from the PTA or left in the staff mailbox |
+| Check delivery | Teacher chooses: picked up from the PTA, left in the staff mailbox, or mailed. Mailing is offered account by account through the Users tab's `mailed_checks` column, and to everyone once `MAILED_CHECKS` is `everyone` |
 | Treasurer-use block | Left blank on the PDF for AP |
 | Advances | None; advance and refund fields hidden and set to $0 |
 | Retention | Keep records forever |
@@ -266,6 +266,10 @@ Each has a proposed default. The build follows the default unless it is changed 
 | Weekly digest | Monday morning; lists anything not Paid seven days after submission |
 | Request ID | Sequential per PTA fiscal year, e.g. FY27-042 |
 | Signatures | Drawn or typed fresh each time; never stored for reuse |
+
+## Changes since v0.5
+
+- Mailed checks come back, through the bank's bill pay: the form offers *Mail it to me* to accounts mailing is switched on for (the Users tab gains `mailed_checks`), and two of the PTA's check signers sign an FO10 before the packet goes straight to AP, as *Awaiting signers*. Detailed in the new *Mailed Check — Spec*.
 
 ## Changes since v0.4
 

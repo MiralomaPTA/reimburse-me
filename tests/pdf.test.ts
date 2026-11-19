@@ -29,6 +29,8 @@ function request(itemCount: number, receiptsPerItem: (i: number) => string[]): R
     ptaPosition: "Teacher, Room 12",
     phone: "(415) 555-1234",
     checkDelivery: "pickup",
+    address: "",
+    cityStateZip: "",
     purpose: "2nd grade art supplies",
     event: "",
     donationCents: 500,

@@ -42,18 +42,77 @@ function packetRecipient(): PacketRecipient {
   throw new Error(`SEND_PACKETS_TO must be "requester" or "ap", not "${value}"`);
 }
 
+export type MailedChecks = "off" | "pilot" | "everyone";
+
+/**
+ * Who is offered "Mail it to me". "pilot" (the default): only accounts whose
+ * Users row says `mailed_checks` = yes. "everyone": every account not set to
+ * no. "off": nobody, whatever the rows say. A typo must not quietly offer
+ * mailing to everyone, or to no one.
+ */
+function mailedChecks(): MailedChecks {
+  const value = (env.MAILED_CHECKS ?? "").trim().toLowerCase() || "pilot";
+  if (value === "off" || value === "pilot" || value === "everyone") return value;
+  throw new Error(`MAILED_CHECKS must be "off", "pilot" or "everyone", not "${env.MAILED_CHECKS}"`);
+}
+
+const list = (value: string | undefined) =>
+  String(value ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+const ADDRESS = /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/;
+
+/**
+ * The board's check signers, each by their own address: every one is emailed
+ * a link of their own for a mailed check, and any two of them sign its FO10.
+ * Refuses an entry that isn't an address, the same address twice, or one of
+ * the app's shared mailboxes, where whoever reads the link could sign with it.
+ */
+export function parseCheckSigners(value: string | undefined, shared: string[]): string[] {
+  const signers = list(value).map((entry) => entry.toLowerCase());
+  for (const signer of signers) {
+    if (!ADDRESS.test(signer)) throw new Error(`CHECK_SIGNERS has "${signer}", which isn't an email address. List each check signer's own address, separated by commas.`);
+  }
+  const twice = signers.find((signer, i) => signers.indexOf(signer) !== i);
+  if (twice) throw new Error(`CHECK_SIGNERS lists ${twice} twice. Each check signer is listed once, by their own address.`);
+  const mailbox = signers.find((signer) => shared.some((s) => s.trim().toLowerCase() === signer));
+  if (mailbox) {
+    throw new Error(`CHECK_SIGNERS includes ${mailbox}, which is AP_EMAIL, APPROVER_EMAIL or FROM_EMAIL. A signing link sent to a shared mailbox could be used by anyone who reads it.`);
+  }
+  return signers;
+}
+
+/**
+ * The PTA accounts bill pay can draw from, by nickname or last four digits
+ * ("Bill pay checking ••1234"). The first is the default. Refuses an entry
+ * with more than four digits in a row, which looks like a full account number:
+ * the app keeps none.
+ */
+export function parseBillPayAccounts(value: string | undefined): string[] {
+  const accounts = list(value);
+  const full = accounts.find((account) => /\d{5,}/.test(account));
+  if (full) throw new Error(`BILL_PAY_ACCOUNTS has "${full}", which looks like a full account number. Use a nickname or the last four digits, like "Bill pay checking ••1234".`);
+  return accounts;
+}
+
+const apEmail = env.AP_EMAIL ?? "ap@miralomasf.com";
+const approverEmail = env.APPROVER_EMAIL ?? env.AP_EMAIL ?? "ap@miralomasf.com";
+const fromEmail = env.FROM_EMAIL ?? "fs@miralomasf.com";
+
 export const config = {
   /** Public base URL used in emailed links, e.g. https://reimburse.miralomasf.com */
   appUrl: (env.APP_URL ?? "http://localhost:3000").replace(/\/$/, ""),
   /** "local" writes to ./.data; "google" uses Drive, Sheets and Gmail as fs@. */
   adapters: adapterKind(),
   /** The PTA's accounts payable address: where packets go when sendPacketsTo is "ap", and the contact shown to requesters. */
-  apEmail: env.AP_EMAIL ?? "ap@miralomasf.com",
+  apEmail,
   /** "requester": only the signer gets the packet, to forward to AP by hand. "ap": AP gets it, the signer a copy. */
   sendPacketsTo: packetRecipient(),
   /** Where "please approve this new user" emails go. */
-  approverEmail: env.APPROVER_EMAIL ?? env.AP_EMAIL ?? "ap@miralomasf.com",
-  fromEmail: env.FROM_EMAIL ?? "fs@miralomasf.com",
+  approverEmail,
+  fromEmail,
   fromName: env.FROM_NAME ?? "Miraloma PTA Reimbursements",
   localDataDir: env.LOCAL_DATA_DIR ?? ".data",
   sessionDays: 30,
@@ -63,6 +122,16 @@ export const config = {
   chairLinkDays: 14,
   /** The requester's "Resend to the chair" works once in this many hours. */
   chairResendHours: 24,
+  /** The check signers' own addresses (CHECK_SIGNERS). Mailing is offered only when this and billPayAccounts are both set. */
+  checkSigners: parseCheckSigners(env.CHECK_SIGNERS, [apEmail, approverEmail, fromEmail]),
+  /** The PTA accounts bill pay can draw from (BILL_PAY_ACCOUNTS); the first is the default. */
+  billPayAccounts: parseBillPayAccounts(env.BILL_PAY_ACCOUNTS),
+  /** Who is offered "Mail it to me" (MAILED_CHECKS): "off", "pilot" or "everyone". */
+  mailedChecks: mailedChecks(),
+  /** How long the link in a check signer's email works, for that signer, request and version. */
+  signerLinkDays: 14,
+  /** The requester's "Resend to the check signers" works once in this many hours. */
+  signerResendHours: 24,
   /** Durable per-address gap between sign-in emails. */
   linkCooldownSeconds: 60,
   /** New pending access requests allowed per 24 hours; bounds approver inbox and Sheet growth. */
@@ -98,5 +167,6 @@ export function googleConfig() {
     usersSheetName: env.GOOGLE_USERS_SHEET_NAME ?? "Users",
     stipendsSheetName: env.GOOGLE_STIPENDS_SHEET_NAME ?? "Stipends",
     eventsSheetName: env.GOOGLE_EVENTS_SHEET_NAME ?? "Events",
+    signaturesSheetName: env.GOOGLE_SIGNATURES_SHEET_NAME ?? "Signatures",
   };
 }

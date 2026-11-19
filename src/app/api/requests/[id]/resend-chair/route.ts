@@ -5,6 +5,9 @@ import { getApprovedSession } from "@/server/auth/session";
 import { seeOther } from "@/server/http";
 import { ResendError, resendToChair } from "@/server/requests/chair";
 
+// Under the row lock it reads the Sheet and Drive and sends emails with the packet attached; lock.ts counts on 60 seconds.
+export const maxDuration = 60;
+
 /** The requester's "Resend to the chair" button on their request page. */
 export async function POST(request: NextRequest, ctx: RouteContext<"/api/requests/[id]/resend-chair">) {
   const { id } = await ctx.params;

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256 } from "@/server/hash";
 import { PDFDocument } from "pdf-lib";
 import { fillForm } from "@/server/pdf/fill-form";
 import { appendFormPages } from "@/server/pdf/form-pages";
@@ -42,5 +42,5 @@ export async function buildPacket(input: PacketInput): Promise<Packet> {
   await stampFooters(doc, requestId, submittedAt, !signature);
 
   const bytes = await doc.save({ useObjectStreams: true });
-  return { bytes, sha256: createHash("sha256").update(bytes).digest("hex"), pageCount: doc.getPageCount(), chairLine };
+  return { bytes, sha256: sha256(bytes), pageCount: doc.getPageCount(), chairLine };
 }

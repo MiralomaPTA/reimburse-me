@@ -6,8 +6,10 @@ import type { LineBox } from "@/server/pdf/types";
  * What the request's JSON file in Drive holds: the request exactly as it was
  * signed, and where its VP/Chairman line landed in the packet. Written at
  * every submission. The chair step reads it to stamp the chair's signature
- * and to show the chair what they are signing; Phase 2's "Fix and re-sign"
- * will read it to refill the form.
+ * and to show the chair what they are signing, the check signers' step fills
+ * the FO10 from it (a mailed check's address and amount come from here, never
+ * the editable row), and Phase 2's "Fix and re-sign" will read it to refill
+ * the form.
  */
 export interface StoredRequest {
   requestId: string;
@@ -23,6 +25,10 @@ const suffix = (version: number) => (version > 1 ? `-v${version}` : "");
 export const storedRequestName = (requestId: string, version: number) => `${requestId}${suffix(version)}.json`;
 /** FY27-042-cosigned.pdf, FY27-042-v2-cosigned.pdf */
 export const cosignedName = (requestId: string, version: number) => `${requestId}${suffix(version)}-cosigned.pdf`;
+/** The FO10 with the first check signer's signature: FY27-042-fo10-1.pdf, FY27-042-v2-fo10-1.pdf */
+export const fo10Name = (requestId: string, version: number) => `${requestId}${suffix(version)}-fo10-1.pdf`;
+/** The packet AP pays a mailed check from: FY27-042-authorized.pdf, FY27-042-v2-authorized.pdf */
+export const authorizedName = (requestId: string, version: number) => `${requestId}${suffix(version)}-authorized.pdf`;
 
 export async function saveStoredRequest(files: FileStore, folderPath: string[], stored: StoredRequest): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(stored, null, 2));
@@ -40,5 +46,6 @@ export async function loadStoredRequest(files: FileStore, fileId: string): Promi
   if (!line || ![line.page, line.x, line.y, line.width, line.height].every(Number.isFinite)) {
     throw new Error(`The stored request ${fileId} has no VP/Chairman line position`);
   }
-  return { ...raw, request: { ...raw.request, event: raw.request.event ?? "" } };
+  // Requests saved before a field existed read it as blank.
+  return { ...raw, request: { ...raw.request, event: raw.request.event ?? "", address: raw.request.address ?? "", cityStateZip: raw.request.cityStateZip ?? "" } };
 }

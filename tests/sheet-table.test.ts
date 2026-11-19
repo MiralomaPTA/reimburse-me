@@ -4,7 +4,7 @@ const api = vi.hoisted(() => ({
   spreadsheets: {
     get: vi.fn(),
     batchUpdate: vi.fn(),
-    values: { get: vi.fn(), update: vi.fn(), append: vi.fn() },
+    values: { get: vi.fn(), update: vi.fn(), append: vi.fn(), batchUpdate: vi.fn() },
   },
 }));
 vi.mock("@googleapis/sheets", () => ({ sheets: () => api }));
@@ -81,13 +81,32 @@ describe("SheetTable rows", () => {
     expect(api.spreadsheets.values.update).not.toHaveBeenCalled();
   });
 
-  it("updates a found row in place with one read and one write, keeping cells in columns it doesn't know", async () => {
+  it("updates only the patched cells of a found row, with one read and one write", async () => {
     api.spreadsheets.values.get.mockResolvedValue({ data: { values: [["a", "b", "ap_only", "c", "n"], ["k1", "x", "", "y", 1], ["k2", "p", "AP wrote this", "q", 2]] } });
-    await table().update("K2", { b: "changed" });
+    await table().update("K2", { b: "changed", n: 0, c: undefined });
     expect(api.spreadsheets.values.get).toHaveBeenCalledTimes(1);
-    expect(api.spreadsheets.values.update).toHaveBeenCalledTimes(1);
-    expect(api.spreadsheets.values.update).toHaveBeenCalledWith(
-      expect.objectContaining({ range: "'Requests'!A3:E3", requestBody: { values: [["k2", "changed", "AP wrote this", "q", 2]] } }),
+    expect(api.spreadsheets.values.update).not.toHaveBeenCalled();
+    expect(api.spreadsheets.values.batchUpdate).toHaveBeenCalledTimes(1);
+    // Columns found by header name; the cells nobody patched (ap_only, c) aren't written at all, so a change made since the read survives.
+    expect(api.spreadsheets.values.batchUpdate).toHaveBeenCalledWith({
+      spreadsheetId: "sheet-id",
+      requestBody: {
+        valueInputOption: "RAW",
+        data: [
+          { range: "'Requests'!B3", values: [["changed"]] },
+          { range: "'Requests'!E3", values: [[0]] },
+        ],
+      },
+    });
+  });
+
+  it("updateIf writes the patched cells only when the row passes", async () => {
+    api.spreadsheets.values.get.mockResolvedValue({ data: { values: [["a", "b", "c", "n"], ["k1", "free", "y", 1]] } });
+    expect(await table().updateIf("k1", (row) => row.b === "held", { c: "z" })).toBe(false);
+    expect(api.spreadsheets.values.batchUpdate).not.toHaveBeenCalled();
+    expect(await table().updateIf("k1", (row) => row.b === "free", { c: "z" })).toBe(true);
+    expect(api.spreadsheets.values.batchUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ requestBody: { valueInputOption: "RAW", data: [{ range: "'Requests'!C2", values: [["z"]] }] } }),
     );
   });
 

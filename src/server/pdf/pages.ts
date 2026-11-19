@@ -126,8 +126,8 @@ export async function appendAuditPage(doc: PDFDocument, input: AuditPageInput): 
   w.field("Pages", `${input.pagesBeforeAudit} before this record: the PTA form (${input.formPages} page${input.formPages === 1 ? "" : "s"}), then the receipts`);
   w.space(6);
   w.sub("Integrity");
-  // A request for an event goes to its chair first, so the email carrying the hash isn't always the one to AP.
-  const emailedTo = request.event
+  // A request for an event goes to its chair first, and a mailed check to the check signers, so the email carrying the hash isn't always the one to AP.
+  const emailedTo = request.event || request.checkDelivery === "mail"
     ? "the emails sent when it was signed"
     : config.sendPacketsTo === "ap"
       ? `the submission email to ${config.apEmail}`
@@ -188,6 +188,84 @@ export async function appendCountersignaturePage(doc: PDFDocument, input: Counte
   w.paragraph(
     "That is the hash recorded when the requester signed; their file is kept unchanged beside this one. " +
       "The SHA-256 of this co-signed file is recorded in the PTA's request log and in the email that sent it on.",
+  );
+}
+
+/** One check signer, as the authorization page records them. */
+export interface SignerRecord {
+  slot: 1 | 2;
+  /** The name they signed under. */
+  name: string;
+  /** The address their link was emailed to. */
+  email: string;
+  linkSentAt: Date | null;
+  signedAt: Date;
+  signature: { type: "typed"; name: string } | { type: "drawn" };
+}
+
+export interface SignersPageInput {
+  requestId: string;
+  payeeName: string;
+  /** "123 Main St Apt 4, San Francisco, CA 94127" */
+  mailingAddress: string;
+  amountCents: number;
+  budgetAccount: string;
+  paymentAccount: string;
+  /** What the app filled the Budget Account with, when the first signer changed it; null when they kept it. */
+  budgetAccountFilled: string | null;
+  signers: SignerRecord[];
+  consentText: string;
+  /** The packet the signers authorized, and which one it is. */
+  packetSha256: string;
+  packetKind: "co-signed" | "requester-signed";
+  /** The FO10 as the first signer signed it. */
+  fo10Sha256: string;
+  /** How many pages the authorized packet holds, after the FO10. */
+  packetPages: number;
+}
+
+/**
+ * The last page of the authorized packet: what the check signers authorized,
+ * who they were and how they signed. The requester gets a copy of this file,
+ * so it leaves out the signers' IP addresses and browsers (in the Signatures
+ * tab), their notes to AP, and the "worth a second look" flags they were
+ * shown (both in AP's email): the flags are the PTA's checks for a stolen
+ * account, and whoever holds one shouldn't learn them.
+ */
+export async function appendSignersPage(doc: PDFDocument, input: SignersPageInput): Promise<void> {
+  const w = await writer(doc);
+  w.heading("Check signers' authorization");
+  w.paragraph(
+    `This page was added by the Miraloma PTA reimbursement portal when two of the PTA's check signers authorized request ${input.requestId} for payment by bank bill pay. ` +
+      `Page 1 is the Authorization for Payment via Electronic Services (FO10) they signed. The ${input.packetPages} pages after it are the ${input.packetKind} packet they authorized, unchanged.`,
+  );
+  w.space(6);
+  w.sub("Payment");
+  w.field("Pay to", input.payeeName);
+  w.field("Mail to", input.mailingAddress);
+  w.field("Amount", formatMoney(input.amountCents));
+  w.field("Budget Account", input.budgetAccount);
+  if (input.budgetAccountFilled !== null) w.field("Filled in as", `${input.budgetAccountFilled || "(blank)"}, changed by the first signer`);
+  w.field("Payment Account", input.paymentAccount);
+  for (const signer of input.signers) {
+    w.space(6);
+    w.sub(`Check signer ${signer.slot}`);
+    w.field("Name", signer.name);
+    w.field("Signing link", `Emailed to ${signer.email}${signer.linkSentAt ? ` on ${formatDateTime(signer.linkSentAt)}` : ""}; the link works only for this request`);
+    w.field("Signed at", `${formatDateTime(signer.signedAt)} (${signer.signedAt.toISOString()})`);
+    w.field("Method", signer.signature.type === "typed" ? `Typed name: "${signer.signature.name}"` : "Drawn with finger or mouse");
+  }
+  w.space(6);
+  w.field("Signed from", "The IP addresses and browsers are kept in the PTA's records, not in this file");
+  w.field("Consent", input.consentText);
+  w.field("For the PTA", "The signers' notes, and anything they were asked to look at twice, went to the PTA's accounts payable team with this file, not in it");
+  w.space(6);
+  w.sub("Integrity");
+  w.field(`Packet authorized`, `SHA-256 ${input.packetSha256} (the ${input.packetKind} packet, pages 2 to ${input.packetPages + 1})`);
+  w.field("FO10, first signature", `SHA-256 ${input.fo10Sha256}`);
+  w.paragraph(
+    "Pay only to the address and amount on the signed FO10. A change to either needs a new request, signed again. " +
+      "The SHA-256 of this file is recorded in the PTA's request log and in the email that sent it to the PTA.",
   );
 }
 

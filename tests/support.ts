@@ -1,5 +1,19 @@
 import sharp from "sharp";
-import type { Adapters, EventRow, FileStore, MailMessage, Mailer, RequestLog, RequestRow, StipendRow, StoredFileMeta, UserDirectory, UserRecord } from "@/server/adapters/types";
+import type {
+  Adapters,
+  EventRow,
+  FileStore,
+  MailMessage,
+  Mailer,
+  RequestLog,
+  RequestRow,
+  SignatureLog,
+  SignatureRecord,
+  StipendRow,
+  StoredFileMeta,
+  UserDirectory,
+  UserRecord,
+} from "@/server/adapters/types";
 import type { ApprovedSession } from "@/server/auth/session";
 import { maxSequenceIn } from "@/server/requests/submit";
 import { requestIdPrefix } from "@/lib/fiscal-year";
@@ -78,6 +92,19 @@ export class MemoryLog implements RequestLog {
   }
 }
 
+export class MemorySignatures implements SignatureLog {
+  records: SignatureRecord[] = [];
+  /** Fail the next appends, as a Sheets outage would. */
+  failing = false;
+  async append(record: SignatureRecord) {
+    if (this.failing) throw new Error("Sheets refused");
+    this.records.push({ ...record });
+  }
+  async listFor(requestId: string) {
+    return this.records.filter((r) => r.request_id === requestId).map((r) => ({ ...r }));
+  }
+}
+
 export class MemoryMailer implements Mailer {
   sent: MailMessage[] = [];
   failing = false;
@@ -92,14 +119,27 @@ export class MemoryMailer implements Mailer {
   }
 }
 
-export const users: UserDirectory = { async get() { return null; }, async upsert() {}, async countPendingSince() { return 0; } };
+export const users: UserDirectory = { async get() { return null; }, async upsert() {}, async update() {}, async countPendingSince() { return 0; } };
 export const tab: StipendRow[] = [
   { name: "Classroom", amount: "250", note: "" },
   { name: "Grade 2", amount: "1200", note: "" },
 ];
 
 export const ME = "pat@example.org";
-export const teacher: UserRecord = { email: ME, role: "teacher", status: "approved", requested_at: "", approved_at: "", approved_by: "", last_link_at: "", signed_in_at: "", note: "", grade: "2", stipend: "" };
+export const teacher: UserRecord = {
+  email: ME,
+  role: "teacher",
+  status: "approved",
+  requested_at: "",
+  approved_at: "",
+  approved_by: "",
+  last_link_at: "",
+  signed_in_at: "",
+  note: "",
+  grade: "2",
+  stipend: "",
+  mailed_checks: "",
+};
 export const session = (user: UserRecord): ApprovedSession => ({ email: user.email, method: "email-link", signedInAt: "2026-10-16T19:00:00.000Z", user });
 export const prefix = requestIdPrefix(new Date());
 export const otherRow = (request_id: string): RequestRow => ({ request_id, requester_email: "other@example.org", status: "Submitted", funding: "", reimbursement_claimed: "5.00" }) as RequestRow;
@@ -115,6 +155,8 @@ export function request(fileIds: string[], funding: string | string[] = "none", 
     ptaPosition: "Teacher, Room 12",
     phone: "(415) 555-1234",
     checkDelivery: "mailbox",
+    address: "",
+    cityStateZip: "",
     purpose: "Art supplies",
     event,
     donationCents,
@@ -130,9 +172,10 @@ export function request(fileIds: string[], funding: string | string[] = "none", 
 export function world() {
   const files = new MemoryFiles();
   const log = new MemoryLog();
+  const signatures = new MemorySignatures();
   const mailer = new MemoryMailer();
   const eventRows: EventRow[] = [];
-  const adapters: Adapters = { files, log, mailer, users, stipends: { async list() { return tab; } }, events: { async list() { return eventRows; } } };
-  return { files, log, mailer, adapters, eventRows };
+  const adapters: Adapters = { files, log, signatures, mailer, users, stipends: { async list() { return tab; } }, events: { async list() { return eventRows; } } };
+  return { files, log, signatures, mailer, adapters, eventRows };
 }
 

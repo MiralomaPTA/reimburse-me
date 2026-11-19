@@ -31,6 +31,9 @@ export const googleUserDirectory: UserDirectory = {
   async upsert(record) {
     await users().upsert({ ...record, email: record.email.trim().toLowerCase() });
   },
+  async update(email, patch) {
+    await users().update(email, patch);
+  },
   async countPendingSince(sinceIso) {
     return (await users().readAll()).map((r) => normalize(r.row)).filter((r) => r.status === "pending" && r.requested_at >= sinceIso).length;
   },
