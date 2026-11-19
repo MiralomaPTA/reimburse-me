@@ -7,8 +7,8 @@ What each document in this folder covers and how far the build has got. Updated 
 | Spec | Version | Status |
 | --- | --- | --- |
 | [Teacher Reimbursement Portal — Product Spec](<Teacher Reimbursement Portal — Product Spec.md>) | Draft v0.7, Nov 19 | **Phase 1 built.** The overview of the whole portal, and the source of truth for anything the other specs don't decide |
-| [Event Chair Signature — Spec](<Event Chair Signature — Spec.md>) | Draft v0.3, Nov 19 | **Steps 1 and 2 of 3 built** (step 1 merged Nov 12, PR #1; step 2 merged Nov 19, PR #3). No open questions |
-| [Mailed Check — Spec](<Mailed Check — Spec.md>) | Draft v0.7, Nov 19 | **Steps 1 and 2 of 3 built** (step 1 merged Nov 19, PR #2; step 2 merged Nov 19 with the chair's, PR #3). Ready for its pilot, which starts with one board member |
+| [Event Chair Signature — Spec](<Event Chair Signature — Spec.md>) | Draft v0.4, Nov 19 | **Done.** Steps 1 and 2 built (step 1 merged Nov 12, PR #1; step 2 merged Nov 19, PR #3). Step 3, reminders and a time-out, won't be built. No open questions |
+| [Mailed Check — Spec](<Mailed Check — Spec.md>) | Draft v0.8, Nov 19 | **Steps 1 and 2 of 3 built** (step 1 merged Nov 19, PR #2; step 2 merged Nov 19 with the chair's, PR #3). Ready for its pilot, which starts with one board member |
 | [Phase 2 — AP Workflow Spec](<Phase 2 — AP Workflow Spec.md>) | Draft v0.3, Nov 19 | **Not started**, except 2b's resubmission flow, merged with the chair's step 2 (PR #3) |
 | [Code Review — Oct 2026](<Code Review — Oct 2026.md>) | Oct 16 | **Closed.** Every finding was fixed on Oct 16 except item 23, a note about commit history. Kept for the record |
 
@@ -22,7 +22,8 @@ In build order. The specs ask for the chair and mailed check steps before Phase 
 | ✅ | Chair step 1 — *Sign*: the Events tab, the event question, the chair signs the VP/Chairman line | Event Chair | Built Nov 12 |
 | ✅ | Mailed check step 1 — *Mail and sign*: *Mail it to me*, the FO10, two check signers, the authorized packet | Mailed Check | Built Nov 19 |
 | ✅ | *Send back* and *Fix and re-sign*, with versions | Event Chair step 2, Mailed Check step 2, Phase 2b | Built Nov 19 (PR #3). One shared flow for the chair's, a check signer's and AP's returns. Phase 2b still needs AP's **Return with a note** button and its email |
-| ⬜ | A daily cron job: reminders at 3 and 7 days, and the chair's 14-day time-out | Event Chair step 3, Mailed Check step 3 | Not built. The same job can later send the Phase 2 weekly digest and clean up `pending/` |
+| ⬜ | A daily cron job: reminders to the check signers at 3 and 7 days | Mailed Check step 3 | Not built. The same job can later send the Phase 2 weekly digest and clean up `pending/` |
+| ➖ | Chair reminders at 3 and 7 days, and the 14-day time-out | Event Chair step 3 | Won't be built (Nov 19). The requester's Resend and the Events tab chase a slow chair instead |
 | ⬜ | Phase 2a — *See*: the AP dashboard (read-only), budget categories, CSV export | Phase 2 | Not built |
 | ⬜ | Phase 2b — *Act*: approve, return with a note, record the check, mark it sent, emails to the requester | Phase 2 | Not built, except *Fix and re-sign* (above) |
 | ⬜ | Phase 2c — *Nudge*: the weekly digest to AP | Phase 2 | Not built |

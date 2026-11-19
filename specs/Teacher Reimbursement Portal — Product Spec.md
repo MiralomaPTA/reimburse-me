@@ -205,7 +205,7 @@ The app holds no data of its own: receipts and signed PDFs go to a Workspace Dri
 
 1. **Phase 0 — Setup.** The Workspace super admin creates a Google Cloud project under the miralomasf.com organization, enables the Drive, Sheets and Gmail APIs, creates the service account and authorizes its domain-wide delegation. Under fs@miralomasf.com: create the Drive folder and the request-log Sheet with Requests, Users and Stipends tabs (the app creates any that are missing), have the treasurer enter the year's stipend amounts, create the Vercel project, and point the hostname at it. Create the PTA GitHub organization.
 2. **Phase 1 — MVP.** Sign in, form matching the PTA form, receipt upload with camera, PDF packet, built-in signature, email to ap@miralomasf.com, row in the Sheet, and the stipend choice with what's left in each stipend. Pilot with 3–5 teachers on the live app.
-3. **Phase 1b — Event chair signature.** The Events tab, the event question on the form, and the chair's signature on the VP/Chairman line, with the event's budget shown to the chair. Detailed in *Event Chair Signature — Spec* (same folder). Its first two steps are built: the chair signs or sends the request back, and a returned request is fixed and re-signed as a new version. Reminders and the time-out are not.
+3. **Phase 1b — Event chair signature.** The Events tab, the event question on the form, and the chair's signature on the VP/Chairman line, with the event's budget shown to the chair. Detailed in *Event Chair Signature — Spec* (same folder). Its first two steps are built: the chair signs or sends the request back, and a returned request is fixed and re-signed as a new version. Its third, reminders and a time-out, won't be built; the requester's Resend and the Events tab chase a slow chair instead.
 4. **Phase 1c — Mailed checks.** *Mail it to me*, paid by the bank's bill pay once two check signers sign an FO10. Detailed in *Mailed Check — Spec* (same folder). Its first two steps are built, and its pilot starts with one board member. Reminders are not.
 5. **Phase 2 — AP workflow.** Return with a note, mark paid with check number, paid/returned emails to teachers, weekly digest. Detailed in *Phase 2 — AP Workflow Spec* (same folder). Fixing and re-signing a returned request is already built, with Phase 1b.
 6. **Phase 3 — Nice to have.** Receipt OCR to prefill line items.
@@ -272,7 +272,7 @@ Each has a proposed default. The build follows the default unless it is changed 
 ## Changes since v0.6
 
 - Sending back and fixing: the event chair and the check signers can send a request back with a note, and the teacher's **Fix and re-sign** makes a new version under the same ID. The open question on resubmission is now marked built.
-- Rollout: mailed checks added as Phase 1c; Phase 1b and 1c each have their first two steps built.
+- Rollout: mailed checks added as Phase 1c; Phase 1b and 1c each have their first two steps built. Phase 1b's third step, chair reminders and a time-out, won't be built.
 
 ## Changes since v0.5
 

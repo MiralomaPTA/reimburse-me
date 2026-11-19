@@ -1,6 +1,6 @@
 # Mailed Check — Spec
 
-Nov 19, 2026 · Draft v0.7 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
+Nov 19, 2026 · Draft v0.8 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
 
 ## Overview
 
@@ -164,7 +164,7 @@ Once the first signer has signed, both values are locked, so the second signer s
 | --- | --- | --- |
 | Staff mailbox or pickup | Goes on as today | blank |
 | Mailed, not for an event | Status becomes *Awaiting signers*, and every check signer except the requester gets their own email | Waiting |
-| Mailed, for an event | The chair step runs first. When it ends (signed, skipped or timed out), the request becomes *Awaiting signers* | blank, then Waiting |
+| Mailed, for an event | The chair step runs first. When it ends (signed or skipped), the request becomes *Awaiting signers* | blank, then Waiting |
 | Mailing switched off (see *The form*) | The form doesn't offer it, and the server refuses it | — |
 
 The signer step is never skipped. A requester who is also a check signer isn't emailed for their own request, can't sign it, and still needs two other signers.
@@ -186,7 +186,7 @@ This stage adds one status, after *Awaiting chair* and before *Submitted*.
 | From | To | Who | Notes |
 | --- | --- | --- | --- |
 | (signing) | Awaiting signers | The requester, by signing a mailed request that has no chair step | |
-| Awaiting chair | Awaiting signers | The chair, by signing, or the app, when the chair step times out | For a mailed request, the chair spec's time-out sends the request to the signers, not to AP |
+| Awaiting chair | Awaiting signers | The chair, by signing | |
 | Awaiting signers | Awaiting signers | The first signer, by signing | `signers_step` becomes *1 of 2 signed* |
 | Awaiting signers | Submitted | The second signer, by signing | The authorized packet goes to AP |
 | Awaiting signers | Returned | Either signer, by sending it back | Note required. Every signer link stops working |
@@ -357,12 +357,12 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 ## How this fits with the chair step and Phase 2
 
 - **Order.** Requester, then chair, then check signers, then AP. Each step adds a file and changes nothing before it.
-- **Shared parts.** The signer page reuses the chair page's signing step and token checks, and the request's `request.json`. The reminders run on the chair step's daily cron job. Signing takes the chair step's row lock, so signatures, send-backs and resends on one request never overlap. The Signatures tab and the cell-level writes are new. Build this after step 1 of the chair spec.
+- **Shared parts.** The signer page reuses the chair page's signing step and token checks, and the request's `request.json`. The reminders run on a daily cron job of their own; the chair step has none. Signing takes the chair step's row lock, so signatures, send-backs and resends on one request never overlap. The Signatures tab and the cell-level writes are new. Build this after step 1 of the chair spec.
 - **Changes the chair spec should take.** The same review found two of these problems in the chair step:
   - The chair email's Reply-To should be AP, not the requester, because a reply hands the requester a working chair link.
   - The chair's IP address and browser should be kept off the countersignature page, which the requester receives.
 - **`SEND_PACKETS_TO`.** Mailed requests ignore it and always go straight to AP. Mailbox and pickup requests still follow it.
-- **Chair time-out.** A mailed event request that times out at the chair goes to the signers, not to AP. The signers' email and page say that the chair didn't sign.
+- **No chair time-out.** The chair spec dropped its time-out, so a mailed event request waits at the chair until a chair signs or sends it back.
 - **Status model.** Phase 2's status table gains *Awaiting signers* after *Awaiting chair*. "Returned → Submitted" becomes "Returned → Awaiting signers" for a mailed request.
 - **Dashboard.** Requests awaiting the signers haven't reached AP yet, so the default view leaves them out. The status filter can show them. Mailed requests show *Mail* in the list, the address from `request.json`, and a warning if the row differs from it.
 - **Paying a mailed request.** Both signatures are already on the FO10, so Phase 2's *Check written* step, which covers the wait for a second signature on a paper check, doesn't apply. For mailed requests, AP's **Record check** becomes **Record bill pay**. It asks for the date the payment was set up and the confirmation or check number from the bank, and it can mark the request Paid in the same step. It refuses a second payment for the same request. The Paid email says "Mailed to 123 Main St Apt 4 on Nov 20, confirmation 4821". Phase 2 already includes the address only when the check was mailed, and only in the requester's email.
@@ -384,13 +384,13 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 - **Bank details.** `BILL_PAY_ACCOUNTS` holds nicknames or last four digits. The app still stores no full bank or card numbers.
 - **Who gets links.** Signer links go only to addresses in `CHECK_SIGNERS`, which is set in the app's environment, not in the Sheet. Removing an address and redeploying stops its links at once.
 - **Referrers and search engines.** The signer page and its PDF route send no Referer header and ask not to be indexed.
-- **The cron route** that sends reminders is protected by `CRON_SECRET`, as it is for the chair step.
+- **The cron route** that sends reminders is protected by `CRON_SECRET`, as Phase 2's digest will be.
 
 **Rules the server enforces**, whatever the form shows:
 
 - It refuses `checkDelivery: "mail"` while mailing is switched off for that requester, whether by their `mailed_checks` cell, by `MAILED_CHECKS`, or by the signer settings. It reads the Users row at signing, not from the session.
 - A mailed request goes on to the check signers only while `CHECK_SIGNERS` has two besides the requester and `BILL_PAY_ACCOUNTS` isn't empty. Submit refuses mailing otherwise. The chair's signature is refused until the PTA fixes the settings, so the request never waits for signatures that can't come. Mailing switched off for the account, or paused with `MAILED_CHECKS=off`, doesn't stop the chair: the request was submitted as mailed and carries on.
-- Every path that sends a packet to AP sends a mailed request to the signers instead. Those paths are submit, chair signature, chair time-out, a returned request signed again (*Fix and re-sign*), and any later status tool. A single guard refuses to email AP a mailed request that has no authorized packet for its current version.
+- Every path that sends a packet to AP sends a mailed request to the signers instead. Those paths are submit, chair signature, a returned request signed again (*Fix and re-sign*), and any later status tool. A single guard refuses to email AP a mailed request that has no authorized packet for its current version.
 - Each signature is made once, under the row lock (see *How a signature is recorded*).
 - The FO10 is filled from a `request.json` whose packet hash matches the row. Every FO10 and packet a signer is shown, is emailed or signs is first checked against its recorded hash, and so is the authorized packet before a resend to AP. A file that doesn't match isn't shown or sent.
 
@@ -409,7 +409,7 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 
    Mailing stays hidden until `CHECK_SIGNERS` and `BILL_PAY_ACCOUNTS` are set, and then shows only for accounts set to `yes`.
 2. **Fix and re-sign.** *Built Nov 19, 2026,* with step 2 of the chair spec, which describes the flow under *Fixing a returned request*. A sent-back request is fixed and re-signed as a new version: `FY27-042-v2.pdf`, and once signed again `FY27-042-v2-fo10-1.pdf` and `FY27-042-v2-authorized.pdf`. Every signer column, the accounts and the FO10 files start blank, links from the old version stop working, and the signer emails and page say which version it is and the note it answers. The sent-back email tells the requester how to fix it. A signer's send-back now also records `returned_by` and `returned_at`.
-3. **Nudge.** The 3-day and 7-day reminders, on the chair step's daily cron job.
+3. **Nudge.** The 3-day and 7-day reminders, on a daily Vercel cron job of their own, protected by `CRON_SECRET`. The chair spec's step 3, which was to share the job, won't be built. Phase 2c's weekly digest can run on the same job later.
 
 **Pilot.**
 
@@ -438,6 +438,10 @@ Each has a default. The build follows it unless it is changed here.
 | 6 | Budget Account | The stipend first, then the event, otherwise blank. The first signer must fill it in before signing |
 | 7 | Offering mailing to everyone | `MAILED_CHECKS=everyone`, so blank cells follow along and new accounts get mailing without a row edit. The alternative is the column alone, where offering it to everyone means a `yes` in every row and on every new approval |
 | 8 | The guides during the pilot | They leave mailing out, so most readers don't look for a choice they can't see. The alternative is a line saying some accounts can have checks mailed |
+
+## Changes since v0.7
+
+- The chair spec won't build its step 3, so there is no chair time-out: a mailed event request waits at the chair until a chair signs or sends it back. This spec's step 3 still sends the signers reminders, on a daily cron job of its own.
 
 ## Changes since v0.6
 

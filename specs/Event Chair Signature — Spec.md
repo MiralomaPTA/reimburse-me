@@ -1,6 +1,6 @@
 # Event Chair Signature — Spec
 
-Nov 19, 2026 · Draft v0.3 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Phase 2 — AP Workflow Spec*, which stay the source of truth for what they decide. Steps 1 and 2 of the rollout (*Sign*, *Send back*) are built; step 3 is not.
+Nov 19, 2026 · Draft v0.4 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Phase 2 — AP Workflow Spec*, which stay the source of truth for what they decide. Steps 1 and 2 of the rollout (*Sign*, *Send back*) are built. Step 3 (*Nudge*: reminders and a time-out) won't be built.
 
 ## Overview
 
@@ -20,8 +20,8 @@ Requests that aren't for an event work exactly as they do today. The event quest
 | How the chair signs | Through a link in the email, tied to their address and that one request. No account or sign-in |
 | Requester is a chair, and the event has a co-chair | Still no chair step. The co-chair isn't asked |
 | Starting value of the event question | *Not for an event*, unless the description names exactly one event |
-| Chair doesn't sign | Reminders at 3 and 7 days. At 14 days the request goes on with the line blank and a note (rollout step 3) |
-| How long a chair link works | 14 days, for one version of one request. Each reminder or resend has a fresh link |
+| Chair doesn't sign | No reminders and no time-out: the request waits until a chair signs or sends it back. The requester can resend once a day. If a chair can't act, the admin changes the event's chairs in the Events tab, and the requester sends it to the new chair at once |
+| How long a chair link works | 14 days, for one version of one request. Each resend has a fresh link |
 | Chair's copy | The chair who signs gets the co-signed packet by email, for their records |
 | Re-signed versions | Every new version goes back to the chair, even after an AP return that changed nothing the chair saw |
 | Event budget | Optional, per event, in the Events tab. The chair sees it before and after the request they're signing. Shown, never enforced |
@@ -36,7 +36,7 @@ Requests that aren't for an event work exactly as they do today. The event quest
 - Every request for a PTA event reaches AP with the chair's signature on the VP/Chairman line. Nobody prints, scans or forwards anything to make that happen.
 - A chair can review and sign on a phone, starting from the email, in under two minutes and without an account.
 - The requester can always see whose signature the request is waiting for.
-- A slow chair never strands a request. The chair gets reminders, and after that the request goes on without the signature.
+- A slow chair can always be chased. The requester can resend once a day, and the admin can hand the request to another chair by changing the Events tab.
 - Requests not for an event go through exactly as they do today.
 
 **Non-goals**
@@ -53,7 +53,7 @@ Requests that aren't for an event work exactly as they do today. The event quest
 | --- | --- | --- |
 | Requester | The Users tab, as today | Picks the event and signs. Sees who the request is waiting for, and can resend the chair email |
 | Event chair | Listed for the event in the Events tab. No Users row or sign-in needed | Opens the request from the emailed link, then signs the VP/Chairman line or sends the request back with a note |
-| AP | As today | Gets the packet once the chair has signed, or once the chair step was skipped or timed out |
+| AP | As today | Gets the packet once the chair has signed, or once the chair step was skipped |
 | Admin | Edits the Events tab | Keeps the event list and the chairs current, usually at the start of each fiscal year |
 
 Being listed as a chair in the Events tab is the approval. The app sends chair links only to addresses in that tab, and each link works only for its one request.
@@ -121,7 +121,6 @@ This stage adds one status before *Submitted*.
 | --- | --- | --- | --- |
 | Awaiting chair | Submitted | The chair, by signing | The co-signed packet goes on |
 | Awaiting chair | Returned | The chair, by sending it back | Note required. Built in rollout step 2 |
-| Awaiting chair | Submitted | The app, after 14 days with no signature | The requester-signed packet goes on with the line blank, plus a note that the chair didn't sign. Comes in rollout step 3 |
 | Returned | Awaiting chair | The requester, by re-signing | Every new version goes back to the chair, whoever returned it |
 
 A request awaiting the chair counts against its stipend, the same as a submitted one. Only Returned requests are left out of stipend totals.
@@ -160,7 +159,7 @@ The page then offers two choices:
 
 **Link scanners.** Opening the link only shows the page, and nothing happens until the chair presses a button. Email security scanners that open links therefore can't sign anything.
 
-**After someone has acted.** Once one co-chair has signed, the other chairs' links show "Already signed by norton@example.com on Nov 14". A request that has timed out shows that it went on to the PTA without a chair signature.
+**After someone has acted.** Once one co-chair has signed, the other chairs' links show "Already signed by norton@example.com on Nov 14".
 
 ## The co-signed packet
 
@@ -191,12 +190,12 @@ The requester-signed packet already prints the event's name in small type at the
 | | The chair who signed | A short confirmation with the co-signed packet, for their records |
 | Chair sends back | Requester | The note, who sent it back, and a link to fix the request. Replies go to that chair: the email holds no signing link |
 | Requester taps Resend | Each chair listed now | The same email, subject starting "Reminder:", with a fresh link |
-| 3 and 7 days with no action | Each chair | A reminder with a fresh link |
-| 14 days with no action | AP or the requester, depending on `SEND_PACKETS_TO` | The usual packet email with the requester-signed packet and "The Fun Run chair did not sign within 14 days" |
 
 ## The requester's side
 
 The request page shows *Waiting for the Fun Run chair to sign*, who the email reached and when, and a **Resend to the chair** button that works at most once a day. Until then it says when it can be used. If the email didn't reach a chair (at submission or on a resend), or the admin has added a chair since, the page says so and the button works at once, for those chairs only. The button can't send twice for one press. Resend sends to whoever the Events tab lists as chairs at that moment, so a chair the admin has just added gets it. Once the chair signs, the page shows who signed and when, and links the co-signed packet. *My requests* shows the same status in the list.
+
+There is no time-out, so the request waits until a chair signs or sends it back. If a chair can't sign (they've stepped down, or are away), the admin changes the event's `chair_email` in the Events tab. The old chair's link stops working at once, and the requester's page offers to send it to the new chair right away.
 
 ## Fixing a returned request
 
@@ -219,7 +218,7 @@ The request page shows *Waiting for the Fun Run chair to sign*, who the email re
 | Column | Meaning |
 | --- | --- |
 | `event` | The event's name, as chosen on the form |
-| `chair_step` | Blank, Waiting, Signed, Sent back, Skipped: requester is a chair, Skipped: no chair listed, or Timed out |
+| `chair_step` | Blank, Waiting, Signed, Sent back, Skipped: requester is a chair, or Skipped: no chair listed |
 | `chair_sent_to` | The addresses the chair email reached. A chair whose email failed isn't listed until a resend reaches them |
 | `chair_sent_at` | When the email last went out, at submit or on resend |
 | `chair_signed_by` | The address that signed |
@@ -250,7 +249,7 @@ Step 2 adds three of Phase 2's columns early, appended the same way:
 - **Dashboard.** Requests awaiting the chair haven't reached AP yet, so the default view leaves them out. The status filter can show them, so AP can see what's coming and chase a slow chair. For a Submitted request, the age counts from when it was sent on, not from when the requester signed.
 - **Resubmission.** This stage built the *Fix and re-sign* flow Phase 2b describes, in step 2 (see *Fixing a returned request*). Phase 2b adds AP's **Return with a note** and its email to the teacher, which should set `returned_at` and `returned_by` the way the chair's send-back does. Requests submitted before step 1, which wrote the first request JSON files, can't be refilled; their request page says to start a new request.
 - **Weekly digest.** Adds a section for requests that have been awaiting the chair for more than 7 days.
-- **Actions tab.** Once it exists, each chair signature, send-back, resend and time-out adds a row.
+- **Actions tab.** Once it exists, each chair signature, send-back and resend adds a row.
 - **The VP/Chairman question.** Both earlier specs leave open what happens to the VP/Chairman line (Phase 2 open question 11). This stage answers it for event requests. Other requests keep the line blank.
 
 ## Security and privacy
@@ -261,7 +260,6 @@ Step 2 adds three of Phase 2's columns early, appended the same way:
 - The chair sees only that one request: its summary and its packet, including the receipts. They can't see the requester's other requests or any stipend balances. The event budget shows only totals, never who claimed what. The existing tip to crop personal details out of receipts applies here too.
 - The chair page sends no Referer header and asks search engines not to index it, because the token is in its URL.
 - Chair links go only to addresses in the Events tab, which only the admin and AP can edit.
-- The cron route that sends reminders and times out requests is protected by `CRON_SECRET`, as in Phase 2.
 
 ## Rollout
 
@@ -280,7 +278,7 @@ Step 2 adds three of Phase 2's columns early, appended the same way:
    - The requester's *Fix and re-sign* flow, with versions (see *Fixing a returned request*). It is the one Phase 2b and the Mailed Check spec's step 2 describe, so a request a check signer sent back, or one AP returned, is fixed the same way.
    - The chair email now asks a chair who finds a problem to send it back.
    - Updated help guides: sending back in the chairs' and check signers' guides, and a question on fixing a sent-back request in the teacher and volunteer guides.
-3. **Nudge.** A daily Vercel cron job that sends the 3-day and 7-day reminders and handles the 14-day time-out. The same route can later run the Phase 2c digest and the 30-day cleanup of `pending/`.
+3. **Nudge.** *Won't be built (decided Nov 19, 2026).* It was to be a daily Vercel cron job sending the chairs reminders at 3 and 7 days, and sending a request on without the chair's signature at 14 days. The requester's **Resend to the chair** and the Events tab chase a slow chair instead (see *Decisions*). The Mailed Check spec's reminders, which were to share the job, get one of their own.
 
 **Pilot.** Pilot step 1 with the Fun Run: add it to the Events tab, with its budget, and send a couple of real requests through.
 
@@ -291,6 +289,10 @@ Step 2 adds three of Phase 2's columns early, appended the same way:
 ## Open questions
 
 None. The defaults proposed in v0.1 were accepted and are listed under *Decisions*.
+
+## Changes since v0.3
+
+- Step 3 (*Nudge*) won't be built: no reminders to the chairs and no 14-day time-out, so no cron job for this stage. A request waits until a chair signs or sends it back; the requester resends, and the admin can swap the chair in the Events tab. *Decisions*, *Goals*, the status model, *Notifications*, `chair_step` and *Security* lose what depended on it.
 
 ## Changes since v0.2
 
