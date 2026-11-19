@@ -4,7 +4,9 @@ import { getAdapters } from "@/server/adapters";
 import { requireApprovedSession } from "@/server/auth/session";
 import { config } from "@/server/config";
 import { chairSending, type ChairSending, type ResendProblem } from "@/server/requests/chair";
-import { authorizedSending, sentBackBy, signerSending, type AuthorizedResendProblem, type SignerResendProblem, type SignerSending } from "@/server/requests/signers";
+import { returnedBy } from "@/server/requests/resubmit";
+import { versionOf } from "@/server/requests/rows";
+import { authorizedSending, signerSending, type AuthorizedResendProblem, type SignerResendProblem, type SignerSending } from "@/server/requests/signers";
 import { formatDateTime, formatMonthDay, parseDate } from "@/lib/dates";
 import { parseEvents } from "@/lib/events";
 import { formatAddress } from "@/lib/mailing";
@@ -27,7 +29,8 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
   const toSigners = row.status === "Awaiting signers" ? signerSending(row) : null;
   const signerResend = query["resend-signers"];
   const signerProblem = typeof signerResend === "string" && Object.hasOwn(SIGNER_RESEND_PROBLEMS, signerResend) ? SIGNER_RESEND_PROBLEMS[signerResend as SignerResendProblem] : null;
-  const sentBack = row.signers_step === "Sent back" ? await sentBackBy(signatures, row) : null;
+  // Whoever sent it back: its chair, a check signer, or AP.
+  const returnedWho = row.status === "Returned" ? await returnedBy(row, signatures) : null;
   // Only while it's with AP: a Returned or Paid request has its own box.
   const toAp = row.status === "Submitted" || row.status === "Approved" ? authorizedSending(row) : null;
   const sendAp = query["send-ap"];
@@ -80,17 +83,7 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
           <MailtoLink email={config.apEmail} /> to be reimbursed.
         </div>
       )}
-      {row.status === "Returned" && row.returned_note && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900">
-          <div className="font-medium">
-            {row.signers_step === "Sent back"
-              ? `Sent back by ${sentBack?.signer_name ? `${sentBack.signer_name}, one of the PTA's check signers` : "one of the PTA's check signers"}`
-              : "Returned by the AP team"}
-          </div>
-          <p className="mt-1 whitespace-pre-wrap text-sm">{row.returned_note}</p>
-          {row.signers_step === "Sent back" && <p className="mt-2 text-sm">This request is closed and won&apos;t be paid. Start a new request with the change.</p>}
-        </div>
-      )}
+      {returnedWho && <Returned row={row} by={returnedWho} />}
       {row.status === "Paid" && (
         <div className="rounded-md border border-emerald-300 bg-emerald-50 p-4 text-emerald-900">
           Paid with check #{row.check_number || "?"} {row.paid_date ? `on ${row.paid_date}` : ""}.
@@ -99,6 +92,7 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
 
       <dl className="card grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
         <Row label="Submitted" value={formatDateTime(new Date(row.submitted_at))} />
+        {versionOf(row) > 1 ? <Row label="Version" value={`${versionOf(row)}, signed again after it was sent back`} /> : null}
         <Row label="Name" value={row.payee_name} />
         <Row label="PTA position" value={row.pta_position} />
         <Row label="Check" value={checkDelivery(row)} />
@@ -134,6 +128,31 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
           <>SHA-256 of the signed file: {row.pdf_sha256}</>
         )}
       </p>
+    </div>
+  );
+}
+
+/** A returned request: who sent it back and why, and the way to fix it and sign it again as its next version. */
+function Returned({ row, by }: { row: RequestRow; by: string }) {
+  return (
+    <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-950">
+      <div>
+        <div className="font-medium">Sent back by {by}</div>
+        {row.returned_note.trim() && <p className="mt-1 whitespace-pre-wrap text-sm">{row.returned_note}</p>}
+      </div>
+      {row.request_file_id ? (
+        <>
+          <p className="text-sm">
+            It won&apos;t be paid as it stands. Tap <strong>Fix and re-sign</strong>: the form opens filled in as you signed it, receipts included. Make the
+            change, check it over and sign again, and it goes on as version {versionOf(row) + 1}.
+          </p>
+          <Link href={`/requests/${encodeURIComponent(row.request_id)}/fix`} className="btn-primary inline-block">
+            Fix and re-sign
+          </Link>
+        </>
+      ) : (
+        <p className="text-sm">This request is from before the portal could fill the form in again. Start a new request with the change.</p>
+      )}
     </div>
   );
 }

@@ -1,10 +1,21 @@
 import { config } from "@/server/config";
-import { formatDateTime, formatMonthDay } from "@/lib/dates";
+import { formatDateTime, formatMonthDay, parseDate } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import type { EventBudget } from "@/lib/events";
 import { formatAddress } from "@/lib/mailing";
 import { CHECK_DELIVERY_LABEL, totals, type RequestInput } from "@/lib/request-schema";
 import type { StipendStatus } from "@/server/requests/stipends";
+import type { ReturnAnswered } from "@/server/requests/stored";
+
+/** "FY27-042", or "FY27-042, version 2" once it has been re-signed. */
+const idLabel = (requestId: string, version: number) => (version > 1 ? `${requestId}, version ${version}` : requestId);
+
+/** The return a version answers, as one line: who sent it back, when, and their note. */
+function answersLine(answers: ReturnAnswered): string {
+  const at = parseDate(answers.at);
+  const when = at ? ` on ${formatMonthDay(at)}` : "";
+  return answers.note.trim() ? `Sent back by ${answers.by}${when}, with this note: ${answers.note}` : `Sent back by ${answers.by}${when}.`;
+}
 
 export function signInEmail(link: string): { subject: string; text: string } {
   return {
@@ -47,6 +58,8 @@ export interface SubmissionEmailInput {
   chair?: ChairSignature;
   /** Present once two check signers have authorized a mailed check; `sha256` is then the authorized packet's. */
   signers?: SignersAuthorization;
+  /** From version 2 on: the return this version answers. */
+  answers?: ReturnAnswered;
 }
 
 /** Who authorized a mailed check, for the emails that carry the authorized packet. */
@@ -77,6 +90,7 @@ function summary(input: SubmissionEmailInput): string[] {
     `Request: ${requestId}${input.version > 1 ? ` (version ${input.version})` : ""}`,
     `From: ${request.payeeName} <${requesterEmail}>, ${request.ptaPosition}`,
     `Submitted: ${formatDateTime(submittedAt)}`,
+    ...(input.version > 1 && input.answers ? [answersLine(input.answers)] : []),
     `Purpose: ${request.purpose}`,
     ...(request.event ? [`Event: ${request.event}`] : []),
     ...(chair ? [`Signed by the ${chair.event} chair: ${chair.name} <${chair.email}>, ${formatDateTime(chair.signedAt)}`] : []),
@@ -132,7 +146,7 @@ function standing({ label, stipend }: FundingShareInput): string {
 export function apSubmissionEmail(input: SubmissionEmailInput): { subject: string; text: string } {
   const t = totals(input.request);
   return {
-    subject: `Reimbursement request ${input.requestId} - ${input.request.payeeName} - ${formatMoney(t.reimbursementCents)}`,
+    subject: `Reimbursement request ${idLabel(input.requestId, input.version)} - ${input.request.payeeName} - ${formatMoney(t.reimbursementCents)}`,
     text: [
       input.chair
         ? `A reimbursement request was submitted through the portal and signed by the ${input.chair.event} chair.`
@@ -169,7 +183,7 @@ export function requesterPacketEmail(input: SubmissionEmailInput): { subject: st
 export function requesterCopyEmail(input: SubmissionEmailInput): { subject: string; text: string } {
   const t = totals(input.request);
   return {
-    subject: `Your PTA reimbursement request ${input.requestId} (${formatMoney(t.reimbursementCents)})`,
+    subject: `Your PTA reimbursement request ${idLabel(input.requestId, input.version)} (${formatMoney(t.reimbursementCents)})`,
     text: [
       input.chair
         ? `${input.request.payeeName}, the ${input.chair.event} chair signed your request, and it was sent to the PTA's accounts payable team (${config.apEmail}).`
@@ -214,7 +228,7 @@ export function requesterSentToChairEmail(input: SubmissionEmailInput, chairs: s
   const failed =
     notReached.length > 0 ? [`The email to ${notReached.join(", ")} didn't go through. Use "Resend to the chair" on your request page to try again: ${page}`] : [];
   return {
-    subject: `Your PTA reimbursement request ${input.requestId} (${formatMoney(t.reimbursementCents)}) is with the ${event} chair`,
+    subject: `Your PTA reimbursement request ${idLabel(input.requestId, input.version)} (${formatMoney(t.reimbursementCents)}) is with the ${event} chair`,
     text: [
       reached,
       ...failed,
@@ -244,6 +258,8 @@ export interface ChairRequestEmailInput {
   reminder?: boolean;
   /** Where the event's budget stands around this request, when it has one. */
   budget: EventBudget | null;
+  /** From version 2 on: the return this version answers. */
+  answers?: ReturnAnswered;
 }
 
 /** "$380.00 left" or "$12.50 over". */
@@ -263,16 +279,19 @@ export function chairRequestEmail(input: ChairRequestEmailInput): { subject: str
   const t = totals(request);
   const event = request.event;
   return {
-    subject: `${input.reminder ? "Reminder: please" : "Please"} sign: ${event} reimbursement for ${request.payeeName}, ${formatMoney(t.reimbursementCents)} (${input.requestId})`,
+    subject: `${input.reminder ? "Reminder: please" : "Please"} sign: ${event} reimbursement for ${request.payeeName}, ${formatMoney(t.reimbursementCents)} (${idLabel(input.requestId, input.version)})`,
     text: [
       `${request.payeeName} asked the PTA to reimburse ${formatMoney(t.reimbursementCents)} of ${event} expenses. As ${event} chair, please check the request and sign it on the form's VP/Chairman line. It goes on to the PTA for payment once you sign.`,
+      ...(input.version > 1
+        ? [`This is version ${input.version}: the request was sent back, and ${request.payeeName} changed it and signed it again. Links from earlier emails about it no longer work.`]
+        : []),
       "",
       ...(input.budget ? [budgetLine(event, input.budget), ""] : []),
       `Review and sign: ${input.link}`,
       "",
       `The link works for ${config.chairLinkDays} days and only for you, so please don't forward it.` +
         (input.chairCount > 1 ? ` The other ${event} chairs got this email too; one signature is enough.` : ""),
-      `If something isn't right, don't sign. Write to ${request.payeeName} at ${input.requesterEmail} in a new email rather than forwarding or replying to this one, which holds your link. A reply to this email goes to the PTA.`,
+      `If something isn't right, don't sign. Send it back from the same page with a note saying what needs to change; ${request.payeeName} gets the note and can fix it. Please don't forward or reply to this email, which holds your link. A reply goes to the PTA.`,
       `New to this? ${input.linkBase}/help/chairs explains it.`,
       "",
       ...summary({ ...input, funding: [] }),
@@ -353,7 +372,7 @@ export function requesterSentToSignersEmail(input: SubmissionEmailInput, notReac
       ? [`The email to ${notReached.length === 1 ? "one check signer" : `${notReached.length} check signers`} didn't go through; the others have it. If nobody signs in a few days, use "Resend to the check signers" on your request page: ${page}`]
       : [];
   return {
-    subject: `Your PTA reimbursement request ${input.requestId} (${formatMoney(t.reimbursementCents)}) is with the PTA's check signers`,
+    subject: `Your PTA reimbursement request ${idLabel(input.requestId, input.version)} (${formatMoney(t.reimbursementCents)}) is with the PTA's check signers`,
     text: [
       `Thanks, ${input.request.payeeName}. Your signed request went to the PTA's check signers.`,
       ...problem,
@@ -387,13 +406,15 @@ export interface SignerRequestEmailInput {
   packetSha256: string;
   /** The requester asked for it to be sent again. */
   reminder?: boolean;
+  /** From version 2 on: the return this version answers. */
+  answers?: ReturnAnswered;
 }
 
 /** To one check signer: a mailed check to authorize, and their own link to review and sign the FO10. Says nothing about stipends beyond the Budget Account. */
 export function signerRequestEmail(input: SignerRequestEmailInput): { subject: string; text: string } {
   const { request, firstSigner } = input;
   const t = totals(request);
-  const what = `mailed check to ${request.payeeName}, ${formatMoney(t.reimbursementCents)} (${input.requestId})`;
+  const what = `mailed check to ${request.payeeName}, ${formatMoney(t.reimbursementCents)} (${idLabel(input.requestId, input.version)})`;
   const ask = firstSigner ? "One more signature" : "Please authorize";
   const chair = input.chair && "skipped" in input.chair ? input.chair.skipped : null;
   return {
@@ -404,6 +425,9 @@ export function signerRequestEmail(input: SignerRequestEmailInput): { subject: s
       firstSigner
         ? `${firstSigner.name} signed the first Authorized By line on ${formatDateTime(firstSigner.signedAt)}. One more signature is needed, from a check signer other than ${firstSigner.name}.`
         : "Any two check signers may sign. The first to sign confirms the Budget Account and the Payment Account.",
+      ...(input.version > 1
+        ? [`This is version ${input.version}: the request was sent back, and ${request.payeeName} changed it and signed it again. It needs two signatures again, and links from earlier emails about it no longer work.`]
+        : []),
       ...(chair ? [chair] : []),
       "",
       ...flagLines(input.flags),
@@ -466,7 +490,7 @@ export function apAuthorizedEmail(input: SubmissionEmailInput & { signers: Signe
   const t = totals(input.request);
   const { signers } = input;
   return {
-    subject: `Reimbursement request ${input.requestId} - ${input.request.payeeName} - ${formatMoney(t.reimbursementCents)} - mailed check`,
+    subject: `Reimbursement request ${idLabel(input.requestId, input.version)} - ${input.request.payeeName} - ${formatMoney(t.reimbursementCents)} - mailed check`,
     text: [
       "A reimbursement request was submitted through the portal and authorized for payment by bank bill pay by two of the PTA's check signers.",
       "",
@@ -491,7 +515,7 @@ export function apAuthorizedEmail(input: SubmissionEmailInput & { signers: Signe
 export function requesterAuthorizedEmail(input: SubmissionEmailInput & { signers: SignersAuthorization }): { subject: string; text: string } {
   const t = totals(input.request);
   return {
-    subject: `Your PTA reimbursement request ${input.requestId} (${formatMoney(t.reimbursementCents)}) is approved for mailing`,
+    subject: `Your PTA reimbursement request ${idLabel(input.requestId, input.version)} (${formatMoney(t.reimbursementCents)}) is approved for mailing`,
     text: [
       `${input.request.payeeName}, two of the PTA's check signers approved your payment, and it went to the PTA's accounts payable team (${config.apEmail}).`,
       `The PTA's bank will mail your check to ${formatAddress(input.request)}. The authorized request, with the signed FO10 in front, is attached for your records.`,
@@ -503,23 +527,53 @@ export function requesterAuthorizedEmail(input: SubmissionEmailInput & { signers
   };
 }
 
-/** To the requester, with AP copied, when a check signer sends a mailed request back instead of signing it. */
-export function signerSentBackEmail(input: { requestId: string; payeeName: string; amountCents: number; signerName: string; signerEmail: string; note: string; linkBase: string }): {
+/** Where the requester fixes a returned request: their request page's "Fix and re-sign", which opens the form filled in as they signed it. */
+export const fixLink = (linkBase: string, requestId: string) => `${linkBase}/requests/${encodeURIComponent(requestId)}/fix`;
+
+/**
+ * To the requester when the event chair sends their request back instead of
+ * signing it. Replies go to the chair: unlike the chair's own email, this one
+ * holds no signing link, and the requester may want to ask them about it.
+ */
+export function chairSentBackEmail(input: { requestId: string; version: number; event: string; payeeName: string; amountCents: number; chairEmail: string; note: string; linkBase: string; mailed: boolean }): {
   subject: string;
   text: string;
 } {
+  const next = input.mailed ? `the ${input.event} chair to sign, then to two of the PTA's check signers` : `the ${input.event} chair to sign`;
   return {
-    subject: `Sent back: your PTA reimbursement request ${input.requestId} (${formatMoney(input.amountCents)})`,
+    subject: `Sent back: your PTA reimbursement request ${idLabel(input.requestId, input.version)} (${formatMoney(input.amountCents)})`,
+    text: [
+      `${input.payeeName}, ${input.chairEmail}, the ${input.event} chair, sent your request ${input.requestId} back instead of signing it.`,
+      "",
+      "Their note:",
+      input.note,
+      "",
+      `What to do next: open the request and tap "Fix and re-sign". The form opens filled in as you signed it, receipts included. Make the change, check it over and sign again. The new version goes back to ${next}.`,
+      `Fix it here: ${fixLink(input.linkBase, input.requestId)}`,
+      "",
+      `Questions about the note? Reply to this email; it goes to ${input.chairEmail}.`,
+    ].join("\n"),
+  };
+}
+
+/** To the requester, with AP copied, when a check signer sends a mailed request back instead of signing it. */
+export function signerSentBackEmail(input: { requestId: string; version: number; payeeName: string; amountCents: number; signerName: string; signerEmail: string; note: string; linkBase: string; event: string }): {
+  subject: string;
+  text: string;
+} {
+  const next = input.event ? `the ${input.event} chair and then two of the PTA's check signers` : "two of the PTA's check signers";
+  return {
+    subject: `Sent back: your PTA reimbursement request ${idLabel(input.requestId, input.version)} (${formatMoney(input.amountCents)})`,
     text: [
       `${input.payeeName}, ${input.signerName} (${input.signerEmail}), one of the PTA's check signers, sent your request ${input.requestId} back instead of authorizing the payment.`,
       "",
       "Their note:",
       input.note,
       "",
-      "What to do next: start a new request with the change, from the portal. This one is closed and won't be paid.",
-      `Questions? Reply to this email; it goes to the PTA's accounts payable team (${config.apEmail}), who are copied.`,
+      `What to do next: open the request and tap "Fix and re-sign". The form opens filled in as you signed it, receipts included. Make the change, check it over and sign again. The new version needs ${next} to sign it again. Until then it won't be paid.`,
+      `Fix it here: ${fixLink(input.linkBase, input.requestId)}`,
       "",
-      `See your request: ${input.linkBase}/requests/${input.requestId}`,
+      `Questions? Reply to this email; it goes to the PTA's accounts payable team (${config.apEmail}), who are copied.`,
     ].join("\n"),
   };
 }

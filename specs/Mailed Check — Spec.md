@@ -1,6 +1,6 @@
 # Mailed Check — Spec
 
-Nov 18, 2026 · Draft v0.6 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
+Nov 19, 2026 · Draft v0.7 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
 
 ## Overview
 
@@ -190,7 +190,7 @@ This stage adds one status, after *Awaiting chair* and before *Submitted*.
 | Awaiting signers | Awaiting signers | The first signer, by signing | `signers_step` becomes *1 of 2 signed* |
 | Awaiting signers | Submitted | The second signer, by signing | The authorized packet goes to AP |
 | Awaiting signers | Returned | Either signer, by sending it back | Note required. Every signer link stops working |
-| Returned | Awaiting chair or Awaiting signers | The requester, by re-signing | Comes in rollout step 2. A new version needs both signatures again, even if one signer had signed the old one *(default)* |
+| Returned | Awaiting chair or Awaiting signers | The requester, by re-signing | Built in rollout step 2. A new version needs both signatures again, even if one signer had signed the old one *(default)* |
 
 **A new version starts clean.** Re-signing clears every signer column, `budget_account`, `payment_account`, and the FO10 file IDs and hashes, and the new version gets a new FO10. Signatures and files from the old version stay in the Signatures tab and in Drive, but nothing from them carries over.
 
@@ -221,7 +221,7 @@ Only the account's requests that went through count: approved or paid by AP, or 
 **The page** at `/signers/FY27-042?t=…` shows the same summary and flags, the FO10, and the packet with its receipts. It offers two choices:
 
 - **Sign.** The first signer can change the Budget Account and pick the Payment Account. The second signer sees both locked, with the first signer's signature already on the FO10. Each signer types their name, ticks "I agree to sign electronically", then signs by keeping the typed name or drawing a signature. This is the same signing step the requester and the chair use. They can add an optional note to AP, which goes into the packet email.
-- **Send back.** A note is required. The request becomes *Returned*, the requester and AP get the note by email, and every signer link stops working. Until rollout step 2 brings *Fix and re-sign*, the requester starts a new request.
+- **Send back.** A note is required. The request becomes *Returned*, the requester and AP get the note by email, and every signer link stops working. The requester fixes it with *Fix and re-sign*, and the new version needs both signatures again.
 
 **Checks on every visit.** Each time the page opens or a signer presses a button, the app re-reads the request's row and checks that:
 
@@ -284,7 +284,7 @@ A later version is saved as `FY27-042-v2-fo10-1.pdf` and `FY27-042-v2-authorized
 Getting a payment sent to a different address is the usual way to steal one. The rules:
 
 - AP pays only to the address and amount on the signed FO10.
-- Any change to either one is a new version: *Fix and re-sign*, and both signatures again. AP doesn't act on a change of address sent by email. Until rollout step 2, the requester's only way to change the address is to start a new request.
+- Any change to either one is a new version: *Fix and re-sign*, and both signatures again. AP doesn't act on a change of address sent by email.
 - The packet email to AP says: "Pay only to the address on the signed FO10. A change of address needs a new request."
 - The AP email, the Phase 2 dashboard and the Paid email take the address and amount from `request.json`, not the row. The dashboard shows a warning when the row's `address`, `city_zip` or amount differs from it.
 
@@ -407,8 +407,8 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
    - The requester's status line and the Resend button.
    - Updated help guides: mailing in the teacher and volunteer guides, and a short page for check signers that their email links to. While `MAILED_CHECKS` is `pilot`, the teacher and volunteer guides leave mailing out, and the PTA tells the people trying it what to expect *(default)*. The check signers' page is always there.
 
-   Mailing stays hidden until `CHECK_SIGNERS` and `BILL_PAY_ACCOUNTS` are set, and then shows only for accounts set to `yes`. Until step 2 ships, a request that's sent back is finished, and the requester starts a new one.
-2. **Fix and re-sign.** A sent-back request can be fixed and re-signed as a new version, using the same flow as the chair step and Phase 2b.
+   Mailing stays hidden until `CHECK_SIGNERS` and `BILL_PAY_ACCOUNTS` are set, and then shows only for accounts set to `yes`.
+2. **Fix and re-sign.** *Built Nov 19, 2026,* with step 2 of the chair spec, which describes the flow under *Fixing a returned request*. A sent-back request is fixed and re-signed as a new version: `FY27-042-v2.pdf`, and once signed again `FY27-042-v2-fo10-1.pdf` and `FY27-042-v2-authorized.pdf`. Every signer column, the accounts and the FO10 files start blank, links from the old version stop working, and the signer emails and page say which version it is and the note it answers. The sent-back email tells the requester how to fix it. A signer's send-back now also records `returned_by` and `returned_at`.
 3. **Nudge.** The 3-day and 7-day reminders, on the chair step's daily cron job.
 
 **Pilot.**
@@ -438,6 +438,10 @@ Each has a default. The build follows it unless it is changed here.
 | 6 | Budget Account | The stipend first, then the event, otherwise blank. The first signer must fill it in before signing |
 | 7 | Offering mailing to everyone | `MAILED_CHECKS=everyone`, so blank cells follow along and new accounts get mailing without a row edit. The alternative is the column alone, where offering it to everyone means a `yes` in every row and on every new approval |
 | 8 | The guides during the pilot | They leave mailing out, so most readers don't look for a choice they can't see. The alternative is a line saying some accounts can have checks mailed |
+
+## Changes since v0.6
+
+- Step 2 is built, as the chair spec's *Fix and re-sign*. The send-back email, the signer page and the guides now say the requester can fix and re-sign rather than start a new request.
 
 ## Changes since v0.5
 

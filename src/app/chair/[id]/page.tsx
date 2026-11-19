@@ -29,7 +29,14 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
   const pdfHref = `/chair/${encodeURIComponent(id)}/pdf?t=${encodeURIComponent(token)}`;
 
   if (state.kind !== "ready") {
-    const title = state.kind === "signed" ? "Already signed" : state.kind === "invalid" ? "This link isn't valid" : "Nothing to sign";
+    const title =
+      state.kind === "signed"
+        ? "Already signed"
+        : state.kind === "invalid"
+          ? "This link isn't valid"
+          : state.kind === "closed" && state.row.chair_step === "Sent back"
+            ? "Sent back"
+            : "Nothing to sign";
     return (
       <div className="mx-auto max-w-md space-y-4">
         <h1 className="text-2xl font-semibold">{title}</h1>
@@ -53,7 +60,8 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
     <div className="space-y-6">
       <div>
         <p className="text-sm text-neutral-500">
-          {row.request_id} · for {row.event}
+          {row.request_id}
+          {stored.version > 1 ? `, version ${stored.version}` : ""} · for {row.event}
         </p>
         <h1 className="text-2xl font-semibold">Please sign as {row.event} chair</h1>
         <p className="mt-1 text-neutral-700">
@@ -63,6 +71,15 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
             ? "Once you sign, two of the PTA's check signers approve the payment, then the PTA's bank mails the check."
             : "Once you sign, it goes on to the PTA for payment."}
         </p>
+        {stored.version > 1 && stored.answers && (
+          <div className="mt-3 space-y-1 rounded-md border border-sky-300 bg-sky-50 p-3 text-sm text-sky-950">
+            <p>
+              This is version {stored.version}. It was sent back by {stored.answers.by}, and {request.payeeName} changed it and signed it again.
+              {stored.answers.note.trim() ? " The note it answers:" : ""}
+            </p>
+            {stored.answers.note.trim() && <p className="whitespace-pre-wrap italic">{stored.answers.note.trim()}</p>}
+          </div>
+        )}
       </div>
 
       {budget && <BudgetPanel event={row.event} budget={budget} />}
@@ -123,8 +140,8 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
       />
 
       <p className="text-sm text-neutral-600">
-        Something not right? Don&apos;t sign. Write to {request.payeeName} at <MailtoLink email={stored.requesterEmail} /> so they can fix it, rather than
-        forwarding the email you got: it holds your link. A reply to that email goes to the PTA. You&apos;re signing as {link.email}.
+        To ask {request.payeeName} about it first, write to them at <MailtoLink email={stored.requesterEmail} /> in a new email rather than forwarding the
+        email you got: it holds your link. A reply to that email goes to the PTA. You&apos;re signing as {link.email}.
       </p>
     </div>
   );

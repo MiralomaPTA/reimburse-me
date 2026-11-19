@@ -19,9 +19,8 @@ import { sha256 } from "@/server/hash";
 import { addressList, appendNotes, lowerEmail as lower, ResendProblemError, versionOf } from "@/server/requests/rows";
 import { toPacketSignature } from "@/server/requests/signature";
 import { fundingEmailShares, fundingLabel, fundingOptions, parseFundingChoice } from "@/server/requests/stipends";
-import { authorizedName, cosignedName, fo10Name, loadStoredRequest, type StoredRequest } from "@/server/requests/stored";
+import { authorizedName, cosignedName, fo10Name, loadStoredRequest, packetName, requestFolder, type StoredRequest } from "@/server/requests/stored";
 import { formatDateTime, formatMonthDay, parseDate } from "@/lib/dates";
-import { fiscalYearLabel } from "@/lib/fiscal-year";
 import { budgetAccountProblem, formatAddress, oneLine, sameAddress, squash, toBudgetAccount } from "@/lib/mailing";
 import { fundingSplit, totals, type RequestInput, type SignatureInput } from "@/lib/request-schema";
 
@@ -45,12 +44,10 @@ import { fundingSplit, totals, type RequestInput, type SignatureInput } from "@/
 
 export const signerLinkPath = (requestId: string, token: string) => `/signers/${encodeURIComponent(requestId)}?t=${encodeURIComponent(token)}`;
 
-const folderOf = (row: Pick<RequestRow, "request_id" | "submitted_at">) => ["requests", fiscalYearLabel(new Date(row.submitted_at)), row.request_id];
-
 /** The packet the check signers authorize: co-signed when the chair signed, otherwise as the requester signed it. */
 export function signedPacket(row: RequestRow): { fileId: string; sha256: string; filename: string; kind: "co-signed" | "requester-signed" } {
   if (row.chair_pdf_file_id) return { fileId: row.chair_pdf_file_id, sha256: row.chair_pdf_sha256, filename: cosignedName(row.request_id, versionOf(row)), kind: "co-signed" };
-  return { fileId: row.pdf_file_id, sha256: row.pdf_sha256, filename: `${row.request_id}.pdf`, kind: "requester-signed" };
+  return { fileId: row.pdf_file_id, sha256: row.pdf_sha256, filename: packetName(row.request_id, versionOf(row)), kind: "requester-signed" };
 }
 
 /** Something the check signer can act on: refused, or changed since the page loaded (`reload`). */
@@ -282,6 +279,7 @@ export async function sendToSigners(
       firstSigner: row.signers_step === "1 of 2 signed" && firstAt ? { name: row.signer_1_name, signedAt: firstAt } : null,
       packetSha256: packet.sha256,
       reminder: input.reminder,
+      answers: stored.answers,
     };
     const attachments = [
       { filename: packet.filename, mimeType: "application/pdf", bytes: packetBytes },
@@ -585,7 +583,7 @@ export async function signAsSigner(input: SignerSignInput, adapters: Adapters): 
 
     if (slot === 1) {
       const fo10 = await fillFo10(fo10Details(row, stored, accounts), [{ slot: 1, name, signature, signedAt }]);
-      const saved = await files.putFile({ name: fo10Name(requestId, version), mimeType: "application/pdf", bytes: fo10.bytes, folderPath: folderOf(row) });
+      const saved = await files.putFile({ name: fo10Name(requestId, version), mimeType: "application/pdf", bytes: fo10.bytes, folderPath: requestFolder(row) });
       const signed = { ...record, fo10_sha256: fo10.sha256 };
       // Recorded before the row, so a row marked signed always has its record. One left by a failure here matches no FO10 the row points to.
       await signatures.append(signed);
@@ -645,7 +643,7 @@ export async function signAsSigner(input: SignerSignInput, adapters: Adapters): 
         fo10Sha256: row.fo10_sha256,
       },
     });
-    const saved = await files.putFile({ name: authorizedName(requestId, version), mimeType: "application/pdf", bytes: authorized.bytes, folderPath: folderOf(row) });
+    const saved = await files.putFile({ name: authorizedName(requestId, version), mimeType: "application/pdf", bytes: authorized.bytes, folderPath: requestFolder(row) });
     const signed = { ...record, fo10_sha256: sha256(fo10) };
     await signatures.append(signed);
     const patch: Partial<RequestRow> = {
@@ -755,6 +753,7 @@ export async function sendAuthorizedPacket(
     linkBase: input.linkBase,
     chair: chair && !("skipped" in chair) ? chair : undefined,
     signers,
+    answers: stored.answers,
   };
   const attachment = { filename: authorizedName(row.request_id, versionOf(row)), mimeType: "application/pdf", bytes: input.authorized };
   const ap = apAuthorizedEmail(email);
@@ -815,12 +814,16 @@ export async function sendBackAsSigner(input: SignerSendBackInput, adapters: Ada
       packet_sha256: signedPacket(current).sha256,
       fo10_sha256: "",
     });
-    return { patch: { status: "Returned", signers_step: "Sent back", returned_note: note }, result: current };
+    const patch: Partial<RequestRow> = { status: "Returned", signers_step: "Sent back", returned_note: note, returned_by: lower(link.email), returned_at: now.toISOString() };
+    return { patch, result: current };
   }).catch(busy);
 
   try {
     const mail = signerSentBackEmail({
       requestId: row.request_id,
+      version,
+      // The chair signs the new version again when they signed this one.
+      event: row.chair_step === "Signed" ? row.event : "",
       payeeName: stored.request.payeeName,
       amountCents: totals(stored.request).reimbursementCents,
       signerName: name,

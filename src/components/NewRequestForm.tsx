@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { LEGACY_DRAFT_KEY, readDraft, removeDraft, writeDraft } from "@/lib/draft";
 import { chairRouting, findEvent, guessEvents, type FormEvent } from "@/lib/events";
 import { addressProblems, formatAddress } from "@/lib/mailing";
-import { formatMoney, parseMoney } from "@/lib/money";
+import { formatMoney, moneyPlain, parseMoney } from "@/lib/money";
 import { DEFAULT_POSITION, GRADE_LABELS, otherPosition, parseTeacherPosition, teacherPosition } from "@/lib/pta-position";
 import { DESCRIPTION_MAX, fundingSplit, type FundingShare, type RequestInput } from "@/lib/request-schema";
 import { uploadReceipt } from "@/lib/upload-client";
@@ -97,11 +97,56 @@ const emptyForm = (profile: Profile | null, requester: Requester): FormState => 
   };
 };
 
-function loadDraft(email: string, requester: Requester): FormState | null {
+/** A returned request being fixed and signed again: which version the form starts from, and why it came back. */
+export interface FixInfo {
+  requestId: string;
+  /** The version the form is filled in from; signing makes the next one. */
+  version: number;
+  /** Who sent it back, in words ("the Fun Run chair (lillie@example.org)"), and their note. */
+  by: string;
+  note: string;
+  /** The request as that version was signed. */
+  request: RequestInput;
+}
+
+/**
+ * The form filled in with a request exactly as it was signed, receipts
+ * included (they're already in Drive, and its next version may use them
+ * again). The event counts as picked by hand, so the guess from the
+ * description doesn't change it.
+ */
+function formFromRequest(request: RequestInput, requester: Requester): FormState {
+  const teacher = requester.teacher ? parseTeacherPosition(request.ptaPosition) : null;
+  return {
+    payeeName: request.payeeName,
+    ptaPosition: requester.teacher || request.ptaPosition === DEFAULT_POSITION ? "" : request.ptaPosition,
+    grade: teacher?.grade ?? requester.grade,
+    room: teacher?.room ?? "",
+    phone: request.phone,
+    checkDelivery: request.checkDelivery,
+    address: request.address,
+    cityStateZip: request.cityStateZip,
+    purpose: request.purpose,
+    event: request.event,
+    items: request.items.map((item) => ({
+      key: newKey(),
+      description: item.description,
+      amount: moneyPlain(item.amountCents),
+      receipts: item.receipts.map((r) => ({ key: newKey(), fileId: r.fileId, name: r.name, mimeType: r.mimeType, size: 0, status: "done" as const, progress: 1 })),
+      funding: item.funding,
+    })),
+    donation: request.donationCents > 0 ? moneyPlain(request.donationCents) : "",
+  };
+}
+
+/** Where a fix keeps its draft: the request and the version it was filled in from. */
+const fixScope = (fix: FixInfo | undefined) => (fix ? `${fix.requestId}:v${fix.version}` : "");
+
+function loadDraft(email: string, requester: Requester, scope = ""): FormState | null {
   try {
     // A pre-v2 draft can't be attributed to anyone, so it is dropped rather than resumed.
     localStorage.removeItem(LEGACY_DRAFT_KEY);
-    const raw = readDraft(email);
+    const raw = readDraft(email, scope);
     if (!raw) return null;
     const { funding: legacyFunding, ...draft } = JSON.parse(raw) as SavedForm;
     // Only finished uploads survive a reload; anything mid-flight is dropped.
@@ -261,6 +306,7 @@ export function NewRequestForm({
   requester,
   funding,
   events,
+  fix,
 }: {
   email: string;
   apEmail: string;
@@ -272,10 +318,12 @@ export function NewRequestForm({
   funding: FundingOptions;
   /** The active PTA events; none means the form doesn't ask. */
   events: FormEvent[];
+  /** Set to fix a returned request and sign it again as its next version, instead of starting a new one. */
+  fix?: FixInfo;
 }) {
   const mounted = useSyncExternalStore(noop, () => true, () => false);
   if (!mounted) return <p className="text-neutral-500">Loading…</p>;
-  const draft = loadDraft(email, requester);
+  const draft = loadDraft(email, requester, fixScope(fix));
   return (
     <RequestForm
       email={email}
@@ -286,8 +334,9 @@ export function NewRequestForm({
       requester={requester}
       funding={funding}
       events={events}
-      initialForm={draft ?? emptyForm(profile, requester)}
-      prefilled={!draft && profile !== null}
+      fix={fix}
+      initialForm={draft ?? (fix ? formFromRequest(fix.request, requester) : emptyForm(profile, requester))}
+      prefilled={!draft && !fix && profile !== null}
     />
   );
 }
@@ -303,12 +352,14 @@ interface RequestFormProps {
   /** The requester's stipends before this request; none means the form doesn't ask. */
   funding: FundingOptions;
   events: FormEvent[];
+  fix?: FixInfo;
   initialForm: FormState;
   /** True when the "about you" fields came from the last request rather than a draft. */
   prefilled: boolean;
 }
 
-function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requester, funding: initialFunding, events, initialForm, prefilled }: RequestFormProps) {
+function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requester, funding: initialFunding, events, fix, initialForm, prefilled }: RequestFormProps) {
+  const scope = fixScope(fix);
   const [form, setForm] = useState<FormState>(initialForm);
   // After a submission, "Start another" prefills from what was just sent.
   const latestProfile = useRef<Profile | null>(profile);
@@ -324,6 +375,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
   const [typedName, setTypedName] = useState("");
   const [result, setResult] = useState<{
     requestId: string;
+    version: number;
     emailed: boolean;
     shares: FundingShare[];
     chair: { event: string; sentTo: string[]; notReached: string[] } | null;
@@ -334,8 +386,8 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
   const padRef = useRef<SignaturePadHandle>(null);
 
   useEffect(() => {
-    if (step !== "done") writeDraft(email, form);
-  }, [email, form, step]);
+    if (step !== "done") writeDraft(email, form, scope);
+  }, [email, form, step, scope]);
 
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -420,7 +472,8 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
     }
     setBusy("preview");
     try {
-      const response = await fetch("/api/requests/preview", {
+      // A fix may use the receipts already in its request's folder again.
+      const response = await fetch(fix ? `/api/requests/preview?fix=${encodeURIComponent(fix.requestId)}` : "/api/requests/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
@@ -458,17 +511,17 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
 
     setBusy("submit");
     try {
-      const response = await fetch("/api/requests", {
+      const response = await fetch(fix ? `/api/requests/${encodeURIComponent(fix.requestId)}/resubmit` : "/api/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request: requestInput, signature, consent: true }),
+        body: JSON.stringify({ request: requestInput, signature, consent: true, ...(fix ? { version: fix.version } : {}) }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         setProblems(body.issues ? issueText(body.issues) : [body.error ?? "Could not submit."]);
         return;
       }
-      removeDraft(email);
+      removeDraft(email, scope);
       const mailed = requestInput.checkDelivery === "mail";
       latestProfile.current = {
         payeeName: requestInput.payeeName,
@@ -482,6 +535,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
       if (body.funding) setFunding(body.funding);
       setResult({
         requestId: body.requestId,
+        version: body.version ?? 1,
         emailed: body.emailed,
         shares: fundingSplit(requestInput),
         chair: body.chair ?? null,
@@ -507,11 +561,14 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
     setStep("form");
   }
 
-  /** Throws away the in-progress draft; the "about you" fields start over from the last request. */
+  /** Throws away the in-progress draft; the "about you" fields start over from the last request, or a fix from the version it was filled in from. */
   function discardDraft() {
-    if (!window.confirm("Discard this draft? Anything you've entered, including uploaded receipts, will be removed from the form.")) return;
-    removeDraft(email);
-    setForm(emptyForm(latestProfile.current, requester));
+    const question = fix
+      ? `Undo your changes? The form goes back to ${fix.requestId} as you signed it.`
+      : "Discard this draft? Anything you've entered, including uploaded receipts, will be removed from the form.";
+    if (!window.confirm(question)) return;
+    removeDraft(email, scope);
+    setForm(fix ? formFromRequest(fix.request, requester) : emptyForm(latestProfile.current, requester));
     setProblems([]);
     window.scrollTo({ top: 0 });
   }
@@ -532,6 +589,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
   if (step === "done" && result) {
     const toAp = sendPacketsTo === "ap";
     const { chair, signers, mailTo } = result;
+    const doneLabel = result.version > 1 ? `${result.requestId}, version ${result.version},` : result.requestId;
     return (
       <div className="mx-auto max-w-lg space-y-4">
         <h1 className="text-2xl font-semibold">
@@ -539,7 +597,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
         </h1>
         {chair ? (
           <p className="text-neutral-700">
-            Your request <strong>{result.requestId}</strong> is signed and{" "}
+            Your request <strong>{doneLabel}</strong> is signed and{" "}
             {chair.sentTo.length > 0 ? `on its way to the ${chair.event} chair (${chair.sentTo.join(", ")})` : `waits for the ${chair.event} chair`} to sign on
             the form&apos;s VP/Chairman line.{" "}
             {mailTo
@@ -551,18 +609,18 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
           </p>
         ) : signers && mailTo ? (
           <p className="text-neutral-700">
-            Your request <strong>{result.requestId}</strong> is signed and on its way to the PTA&apos;s check signers. Two of them approve the payment, then it goes
+            Your request <strong>{doneLabel}</strong> is signed and on its way to the PTA&apos;s check signers. Two of them approve the payment, then it goes
             to the PTA by itself and the PTA&apos;s bank mails your check to {mailTo}. Mailed checks take a few extra days.
             {result.emailed ? ` A copy of what you signed went to ${email}.` : ""}
           </p>
         ) : toAp ? (
           <p className="text-neutral-700">
-            Your request <strong>{result.requestId}</strong> is signed and on its way to the accounts payable team.
+            Your request <strong>{doneLabel}</strong> is signed and on its way to the accounts payable team.
             {result.emailed ? ` A copy went to ${email}.` : ""}
           </p>
         ) : (
           <p className="text-neutral-700">
-            Your request <strong>{result.requestId}</strong> is signed.
+            Your request <strong>{doneLabel}</strong> is signed.
             {result.emailed ? ` The PDF was emailed to ${email}.` : ""} The portal hasn&apos;t sent it to the PTA: to be reimbursed, forward that email,
             with the PDF attached, to <MailtoLink email={apEmail} />.
           </p>
@@ -621,9 +679,15 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
           <Link href={`/requests/${result.requestId}`} className="btn-primary">
             View request
           </Link>
-          <button type="button" className="btn-secondary" onClick={startAnother}>
-            Start another
-          </button>
+          {fix ? (
+            <Link href="/requests" className="btn-secondary">
+              My requests
+            </Link>
+          ) : (
+            <button type="button" className="btn-secondary" onClick={startAnother}>
+              Start another
+            </button>
+          )}
         </div>
       </div>
     );
@@ -644,7 +708,10 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-semibold">Check and sign</h1>
-          <p className="text-neutral-600">This is the packet the PTA will receive. If anything is wrong, go back and fix it.</p>
+          <p className="text-neutral-600">
+            {fix ? `This is version ${fix.version + 1} of ${fix.requestId}, the packet the PTA will receive.` : "This is the packet the PTA will receive."} If anything is
+            wrong, go back and fix it.
+          </p>
           {afterSigningPreview(requestInput, events, email) && <p className="mt-2 font-medium text-neutral-800">{afterSigningPreview(requestInput, events, email)}</p>}
         </div>
         {problemBox}
@@ -706,13 +773,27 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
         void preview();
       }}
     >
-      <div>
-        <h1 className="text-2xl font-semibold">New reimbursement request</h1>
-        <p className="text-neutral-600">
-          One line per receipt. Photograph each receipt as you go.
-          {funding.stipends.length > 0 ? " To split one receipt between stipends, add a line for each stipend's share and attach the receipt to both." : ""}
-        </p>
-      </div>
+      {fix ? (
+        <div className="space-y-3">
+          <h1 className="text-2xl font-semibold">Fix and re-sign {fix.requestId}</h1>
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-950">
+            <div className="font-medium">Sent back by {fix.by}</div>
+            {fix.note.trim() && <p className="mt-1 whitespace-pre-wrap text-sm">{fix.note}</p>}
+          </div>
+          <p className="text-neutral-600">
+            The form is filled in as you signed it, receipts included. Change what the note asks for, then preview and sign again. It goes on as version{" "}
+            {fix.version + 1}; the version you signed before is kept.
+          </p>
+        </div>
+      ) : (
+        <div>
+          <h1 className="text-2xl font-semibold">New reimbursement request</h1>
+          <p className="text-neutral-600">
+            One line per receipt. Photograph each receipt as you go.
+            {funding.stipends.length > 0 ? " To split one receipt between stipends, add a line for each stipend's share and attach the receipt to both." : ""}
+          </p>
+        </div>
+      )}
       {problemBox}
 
       <section className="card space-y-4">
@@ -890,9 +971,9 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
         <button type="submit" className="btn-primary" disabled={busy === "preview"}>
           {busy === "preview" ? "Building preview…" : "Preview and sign"}
         </button>
-        <span className="text-sm text-neutral-500">Your draft is saved on this device.</span>
+        <span className="text-sm text-neutral-500">{fix ? "Your changes are saved on this device." : "Your draft is saved on this device."}</span>
         <button type="button" onClick={discardDraft} className="text-sm text-neutral-500 underline hover:text-red-700">
-          Discard draft
+          {fix ? "Undo my changes" : "Discard draft"}
         </button>
       </div>
     </form>

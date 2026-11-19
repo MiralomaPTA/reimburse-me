@@ -21,6 +21,8 @@ export interface AuditInfo {
 export interface PacketInput {
   /** e.g. FY27-042, or "PREVIEW" before signing. */
   requestId: string;
+  /** 2 and up for a returned request signed again; printed in the footer and on the audit page. 1 when left out. */
+  version?: number;
   submittedAt: Date;
   request: RequestInput;
   requesterEmail: string;

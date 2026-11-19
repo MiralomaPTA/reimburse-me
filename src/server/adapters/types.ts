@@ -153,6 +153,15 @@ export interface RequestRow {
   authorized_sent_at: string;
   /** Why the last try to email AP the authorized packet failed; blank otherwise. Only then can the requester send it again. */
   authorized_send_error: string;
+  /**
+   * The last return, from whoever sent the request back: when, and the address
+   * of the chair, check signer or AP member. `returned_note` says why. Kept
+   * after the requester re-signs, so the Sheet shows what the new version answers.
+   */
+  returned_at: string;
+  returned_by: string;
+  /** The requester-signed packets of earlier versions, oldest first, comma-separated. `pdf_file_id` is the current version's. */
+  previous_pdf_file_ids: string;
 }
 
 export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
@@ -216,6 +225,9 @@ export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
   "authorized_pdf_sha256",
   "authorized_sent_at",
   "authorized_send_error",
+  "returned_at",
+  "returned_by",
+  "previous_pdf_file_ids",
 ];
 
 export interface RequestLog {

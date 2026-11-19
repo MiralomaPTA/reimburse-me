@@ -1,6 +1,6 @@
 # Event Chair Signature — Spec
 
-Nov 12, 2026 · Draft v0.2 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Phase 2 — AP Workflow Spec*, which stay the source of truth for what they decide. Step 1 of the rollout (*Sign*) is built; steps 2 and 3 are not.
+Nov 19, 2026 · Draft v0.3 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Phase 2 — AP Workflow Spec*, which stay the source of truth for what they decide. Steps 1 and 2 of the rollout (*Sign*, *Send back*) are built; step 3 is not.
 
 ## Overview
 
@@ -120,7 +120,7 @@ This stage adds one status before *Submitted*.
 | From | To | Who | Notes |
 | --- | --- | --- | --- |
 | Awaiting chair | Submitted | The chair, by signing | The co-signed packet goes on |
-| Awaiting chair | Returned | The chair, by sending it back | Note required. Comes in rollout step 2 |
+| Awaiting chair | Returned | The chair, by sending it back | Note required. Built in rollout step 2 |
 | Awaiting chair | Submitted | The app, after 14 days with no signature | The requester-signed packet goes on with the line blank, plus a note that the chair didn't sign. Comes in rollout step 3 |
 | Returned | Awaiting chair | The requester, by re-signing | Every new version goes back to the chair, whoever returned it |
 
@@ -128,7 +128,7 @@ A request awaiting the chair counts against its stipend, the same as a submitted
 
 ## The chair's email and page
 
-**The email** goes to every address in the event's `chair_email`. Replies go to AP, not the requester: a reply quotes the email, link and all, and the link is all it takes to sign as the chair. The email asks a chair who finds a problem to write to the requester in a new email instead, and the signing page links the requester's address for that.
+**The email** goes to every address in the event's `chair_email`. Replies go to AP, not the requester: a reply quotes the email, link and all, and the link is all it takes to sign as the chair. The email asks a chair who finds a problem to send the request back from the signing page rather than reply or forward, and the signing page links the requester's address for a question, in a new email.
 
 - Subject: "Please sign: Fun Run reimbursement for Harvey Milk, $123.45 (FY27-042)".
 - The body gives the requester's name and position, the purpose, the line items and the totals, and has a **Review and sign** link. When the event has a budget, a line says where it stands: "Fun Run budget: $1,500.00. Before this request $120.00 was claimed, $1,380.00 left; after it, $1,337.50 left." It ends with a link to the chairs' guide at `/help/chairs`.
@@ -150,7 +150,7 @@ The count works like the stipends. It covers every request for the event in the 
 The page then offers two choices:
 
 - **Sign.** The chair types their name, ticks "I agree to sign electronically", then signs by keeping the typed name or drawing a signature. This is the same signing step the requester uses. They can add an optional note to AP, such as "bought for the water station", which goes into the packet email.
-- **Send back.** A note is required. The requester gets the note by email, the request becomes *Returned*, and the requester fixes and re-signs it (see *Rollout*, step 2).
+- **Send back.** A note is required; the chair's address says who sent it back, so no name is asked. The requester gets the note by email, the request becomes *Returned*, every chair's link for that version stops working, and the requester fixes and re-signs it (see *Fixing a returned request*). Sending back takes the same row lock as signing, so a co-chair's signature and a send-back at the same moment can't both go through.
 
 **How long the link works.** The link works for 14 days, for that one request and version, and only while the request is awaiting the chair.
 
@@ -189,7 +189,7 @@ The requester-signed packet already prints the event's name in small type at the
 | Chair signs | AP or the requester, depending on `SEND_PACKETS_TO` | The usual packet email with the co-signed packet attached, the line "Signed by the Fun Run chair (lillie@example.com) on Nov 14", and the chair's note |
 | | Requester, when packets go to AP | The usual copy, now co-signed |
 | | The chair who signed | A short confirmation with the co-signed packet, for their records |
-| Chair sends back | Requester | The note, who sent it back, and a link to fix the request |
+| Chair sends back | Requester | The note, who sent it back, and a link to fix the request. Replies go to that chair: the email holds no signing link |
 | Requester taps Resend | Each chair listed now | The same email, subject starting "Reminder:", with a fresh link |
 | 3 and 7 days with no action | Each chair | A reminder with a fresh link |
 | 14 days with no action | AP or the requester, depending on `SEND_PACKETS_TO` | The usual packet email with the requester-signed packet and "The Fun Run chair did not sign within 14 days" |
@@ -197,6 +197,18 @@ The requester-signed packet already prints the event's name in small type at the
 ## The requester's side
 
 The request page shows *Waiting for the Fun Run chair to sign*, who the email reached and when, and a **Resend to the chair** button that works at most once a day. Until then it says when it can be used. If the email didn't reach a chair (at submission or on a resend), or the admin has added a chair since, the page says so and the button works at once, for those chairs only. The button can't send twice for one press. Resend sends to whoever the Events tab lists as chairs at that moment, so a chair the admin has just added gets it. Once the chair signs, the page shows who signed and when, and links the co-signed packet. *My requests* shows the same status in the list.
+
+## Fixing a returned request
+
+*Fix and re-sign* is one flow for every return: the chair's, a check signer's (see the *Mailed Check — Spec*), and AP's (Phase 2b, or a `Returned` status set by hand in the Sheet until then).
+
+- The request page shows who sent it back and the note, and a **Fix and re-sign** button. It opens the form filled in from the request's JSON as that version was signed: the details, the event, the line items and their stipends, and the receipts, which stay in the request's folder and may be used again by that request only. The requester may change anything.
+- The event the request already names may be kept even if it has been made inactive since. Any other event must be on the active list, as for a new request.
+- Signing again makes the next version under the same request ID: `FY27-042-v2.pdf` and `FY27-042-v2.json` in the request's folder, beside the earlier files, which are never changed or deleted. The packet prints its version in the footer and on the audit page. The folder is the year in the request ID, so a version signed after July 1 stays beside the first.
+- The row's `version` goes up, `pdf_file_id`, `pdf_sha256`, `request_file_id` and `submitted_at` move to the new version, `previous_pdf_file_ids` lists the earlier packets, and the request's own columns are rewritten from what was signed.
+- The new version takes the same path a new request does, checked the same way. Every later step starts clean: the `chair_*`, `signers_*`, `signer_*`, account, FO10 and authorized-packet columns are cleared, and links from earlier versions show "This request was signed again since this link was sent."
+- `returned_note`, `returned_by` and `returned_at` stay, recording the return the new version answers. The version's JSON keeps it too (`answers`), and every email that carries the version says so: "Sent back by the Fun Run chair (lillie@example.com) on Nov 14, with this note: …". Subjects name the version ("FY27-042, version 2"), and the chair and check signer pages show it.
+- Re-signing takes the row's lock and checks the row is still *Returned* at the version the form was filled from, so a double press or a second tab makes one version, not two.
 
 ## Data changes
 
@@ -216,6 +228,13 @@ The request page shows *Waiting for the Fun Run chair to sign*, who the email re
 | `chair_pdf_file_id`, `chair_pdf_sha256` | The co-signed packet and its hash |
 | `request_file_id` | The request's JSON file (`FY27-042.json`), written for every request. Phase 2 calls it `request.json` |
 | `lock` | Held for a few seconds while the app signs or resends, so two of them at once can't both go through: the lock's expiry and a random ID. Blank otherwise. One left behind by a crash expires after 3 minutes, and is safe to clear by hand |
+
+Step 2 adds three of Phase 2's columns early, appended the same way:
+
+| Column | Meaning |
+| --- | --- |
+| `returned_at`, `returned_by` | When the request was last sent back, and the address of the chair, check signer or AP member who did it. `returned_note` says why. All three stay after the requester re-signs |
+| `previous_pdf_file_ids` | The requester-signed packets of earlier versions, oldest first. `pdf_file_id` is the current version's |
 
 `pdf_file_id` and `pdf_sha256` still mean the requester-signed packet. Wherever the app links a packet (the request page, and the Phase 2 dashboard), it uses the co-signed one when there is one. `RequestStatus` gains *Awaiting chair*.
 
@@ -254,8 +273,11 @@ The request page shows *Waiting for the Fun Run chair to sign*, who the email re
    - The request's JSON file written on every submit.
    - Updated help guides, including a short page for chairs that their email links to.
 
-   Until step 2 ships, a chair who finds a problem writes to the requester in a new email, from the link on the signing page. A reply to the chair email goes to AP.
-2. **Send back.** The chair's **Send back** button and the requester's *Fix and re-sign* flow, with versions. This is shared with Phase 2b.
+2. **Send back.** *Built Nov 19, 2026.*
+   - The chair's **Send back** button, under the row lock, and the email to the requester.
+   - The requester's *Fix and re-sign* flow, with versions (see *Fixing a returned request*). It is the one Phase 2b and the Mailed Check spec's step 2 describe, so a request a check signer sent back, or one AP returned, is fixed the same way.
+   - The chair email now asks a chair who finds a problem to send it back.
+   - Updated help guides: sending back in the chairs' and check signers' guides, and a question on fixing a sent-back request in the teacher and volunteer guides.
 3. **Nudge.** A daily Vercel cron job that sends the 3-day and 7-day reminders and handles the 14-day time-out. The same route can later run the Phase 2c digest and the 30-day cleanup of `pending/`.
 
 **Pilot.** Pilot step 1 with the Fun Run: add it to the Events tab, with its budget, and send a couple of real requests through.
@@ -267,6 +289,12 @@ The request page shows *Waiting for the Fun Run chair to sign*, who the email re
 ## Open questions
 
 None. The defaults proposed in v0.1 were accepted and are listed under *Decisions*.
+
+## Changes since v0.2
+
+- Step 2 is built: the chair's **Send back**, and *Fix and re-sign* with versions, shared with the check signers' send-back and AP's returns. A new section, *Fixing a returned request*, describes it.
+- Settled while building it: the chair gives only a note, not a name; replies to the sent-back email go to that chair; a returned request may keep an event made inactive since; every version's packet prints its version; the emails carry the return note each version answers.
+- `returned_at`, `returned_by` and `previous_pdf_file_ids` are added now rather than with Phase 2.
 
 ## Changes since v0.1
 

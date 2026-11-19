@@ -5,31 +5,37 @@
 
 /** Drafts before v2 were keyed per device, so one signed-in address could resume another's. */
 export const LEGACY_DRAFT_KEY = "rm:draft:v1";
-/** One draft per signed-in address per device, so a shared computer doesn't hand one teacher's draft to the next. */
-export const draftKey = (email: string) => `rm:draft:v2:${email.trim().toLowerCase()}`;
+/**
+ * One draft per signed-in address per device, so a shared computer doesn't
+ * hand one teacher's draft to the next. A returned request being fixed keeps
+ * its own, `scope` naming the request and the version it was filled from
+ * ("FY27-042:v1"), so it never replaces the new-request draft, and a draft
+ * for an earlier version isn't offered once that version was signed again.
+ */
+export const draftKey = (email: string, scope = "") => `rm:draft:v2:${email.trim().toLowerCase()}${scope ? `:fix:${scope}` : ""}`;
 /** Fired in this tab when the draft changes; other tabs hear the browser's `storage` event instead. */
 const DRAFT_CHANGED = "rm:draft-changed";
 
-export function readDraft(email: string): string | null {
+export function readDraft(email: string, scope = ""): string | null {
   try {
-    return localStorage.getItem(draftKey(email));
+    return localStorage.getItem(draftKey(email, scope));
   } catch {
     return null;
   }
 }
 
-export function writeDraft(email: string, draft: unknown) {
+export function writeDraft(email: string, draft: unknown, scope = "") {
   try {
-    localStorage.setItem(draftKey(email), JSON.stringify(draft));
+    localStorage.setItem(draftKey(email, scope), JSON.stringify(draft));
   } catch {
     /* storage unavailable: drafts just don't persist */
   }
   window.dispatchEvent(new Event(DRAFT_CHANGED));
 }
 
-export function removeDraft(email: string) {
+export function removeDraft(email: string, scope = "") {
   try {
-    localStorage.removeItem(draftKey(email));
+    localStorage.removeItem(draftKey(email, scope));
   } catch {
     /* ignore */
   }

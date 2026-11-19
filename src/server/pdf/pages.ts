@@ -87,6 +87,8 @@ async function writer(doc: PDFDocument) {
 
 export interface AuditPageInput {
   requestId: string;
+  /** 2 and up for a returned request signed again. */
+  version: number;
   request: RequestInput;
   submittedAt: Date;
   signature: PacketSignature;
@@ -102,7 +104,11 @@ export async function appendAuditPage(doc: PDFDocument, input: AuditPageInput): 
   const { requestId, request, submittedAt, signature, audit } = input;
   const w = await writer(doc);
   w.heading("Electronic signature record");
-  w.paragraph(`This page was added by the Miraloma PTA reimbursement portal when request ${requestId} was signed and submitted.`);
+  w.paragraph(
+    input.version > 1
+      ? `This page was added by the Miraloma PTA reimbursement portal when version ${input.version} of request ${requestId} was signed and submitted, after the request was sent back for a change.`
+      : `This page was added by the Miraloma PTA reimbursement portal when request ${requestId} was signed and submitted.`,
+  );
   w.space(6);
   w.sub("Signer");
   w.field("Name", request.payeeName);
@@ -118,7 +124,7 @@ export async function appendAuditPage(doc: PDFDocument, input: AuditPageInput): 
   w.field("Consent", audit.consentText);
   w.space(6);
   w.sub("Document");
-  w.field("Request", requestId);
+  w.field("Request", input.version > 1 ? `${requestId}, version ${input.version}` : requestId);
   w.field("Purpose", request.purpose);
   if (request.event) w.field("Event", request.event);
   w.field("Line items", `${request.items.length}, total ${formatMoney(totals(request).totalCents)}`);

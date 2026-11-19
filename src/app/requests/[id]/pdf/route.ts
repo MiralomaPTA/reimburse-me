@@ -6,7 +6,7 @@ import { sha256 } from "@/server/hash";
 import { pdfResponse } from "@/server/http";
 import { versionOf } from "@/server/requests/rows";
 import { authorizedSending } from "@/server/requests/signers";
-import { authorizedName, cosignedName } from "@/server/requests/stored";
+import { authorizedName, cosignedName, packetName } from "@/server/requests/stored";
 
 /**
  * Serves a requester's own packet: the authorized one once AP has it (two
@@ -36,5 +36,5 @@ export async function GET(_request: NextRequest, ctx: RouteContext<"/requests/[i
   // Once the event chair has signed, the co-signed packet is the one that went on.
   if (row.chair_pdf_file_id) return pdfResponse(await files.getFileBytes(row.chair_pdf_file_id), cosignedName(row.request_id, version), "private, no-store");
   const bytes = await files.getFileBytes(row.pdf_file_id);
-  return pdfResponse(bytes, `${row.request_id}.pdf`, "private, no-store");
+  return pdfResponse(bytes, packetName(row.request_id, version), "private, no-store");
 }
