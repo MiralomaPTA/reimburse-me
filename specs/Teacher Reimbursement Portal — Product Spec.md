@@ -125,7 +125,7 @@ Name, PTA position, phone, check delivery and address start filled in from the r
 - Returned requests go back to the teacher with a note; they edit and re-sign. The event chair and the check signers can send a request back too. **Fix and re-sign** opens the form filled in as the request was signed, receipts included, and signing again makes a new version (`FY27-042-v2.pdf`) under the same ID, which goes the way a new request does. Built with the event chair step; see *Event Chair Signature — Spec*, *Fixing a returned request*.
 - AP records the check number and date when the check is written, and marks it Paid once both signatures are on it and it has gone out.
 - The request-log Sheet may be edited directly. The app finds rows by request ID and columns by header name, so sorting, filtering and adding columns are safe; renaming a header breaks it. Status changes should still be made in the dashboard, because that is what sends the teacher's email and writes the audit trail; a status typed into the Sheet sends nothing.
-- CSV export for bookkeeping, and a bills file for QuickBooks, which the PTA uses. See *Phase 2 — AP Workflow Spec*.
+- CSV export for bookkeeping. A file QuickBooks can import comes later, in Phase 3.
 
 ### 6. Notifications
 
@@ -208,7 +208,7 @@ The app holds no data of its own: receipts and signed PDFs go to a Workspace Dri
 3. **Phase 1b — Event chair signature.** The Events tab, the event question on the form, and the chair's signature on the VP/Chairman line, with the event's budget shown to the chair. Detailed in *Event Chair Signature — Spec* (same folder). Its first two steps are built: the chair signs or sends the request back, and a returned request is fixed and re-signed as a new version. Its third, reminders and a time-out, won't be built; the requester's Resend and the Events tab chase a slow chair instead.
 4. **Phase 1c — Mailed checks.** *Mail it to me*, paid by the bank's bill pay once two check signers sign an FO10. Detailed in *Mailed Check — Spec* (same folder). Its first two steps are built, and its pilot starts with one board member. Reminders are not.
 5. **Phase 2 — AP workflow.** Return with a note, mark paid with check number, paid/returned emails to teachers, weekly digest. Detailed in *Phase 2 — AP Workflow Spec* (same folder). Fixing and re-signing a returned request is already built, with Phase 1b.
-6. **Phase 3 — Nice to have.** Receipt OCR to prefill line items.
+6. **Phase 3 — Nice to have.** A bills file QuickBooks can import, sketched in *Phase 2 — AP Workflow Spec* under *CSV export*. Receipt OCR to prefill line items.
 
 Success measures: share of requests submitted online, requests returned for missing info, and days from submission to payment.
 
@@ -263,7 +263,7 @@ Each has a proposed default. The build follows the default unless it is changed 
 | Resubmission after Return | Built: keeps the request ID and makes a new version (`FY27-042-v2.pdf` and its JSON) beside the earlier files, which stay in Drive. The new version goes the way a new request does: to the event's chairs, the check signers, or AP, marked with its version and the note it answers |
 | Drafts | Built: form state lives in the browser until signing; receipts upload to a pending folder as they are added; signed packets are kept forever. Not built yet: deleting pending uploads with no signed packet after 30 days |
 | What "locked" means | Built: SHA-256 hash of the signed file in the Sheet and both emails; the app never rewrites the file. Not built yet: marking the file read-only in Drive. No certificate-based PDF signature |
-| CSV export | One row per request with the Sheet's columns, plus a bills file for QuickBooks Online. The PTA uses QuickBooks (answered Nov 19). Still open: Online or Desktop, and how the treasurer records checks in it. See *Phase 2 — AP Workflow Spec*, question 6 |
+| CSV export | One row per request with the Sheet's columns. The PTA uses QuickBooks (answered Nov 19); a file it can import comes in Phase 3. Still open, for Phase 3: Online or Desktop, and how the treasurer records checks in it. See *Phase 2 — AP Workflow Spec*, question 6 |
 | Emails | PDF attached to both the AP email and the requester's copy; the body summarizes name, total, line items, check delivery and the stipend |
 | Weekly digest | Monday morning; lists anything not Paid seven days after submission |
 | Request ID | Sequential per PTA fiscal year, e.g. FY27-042 |
@@ -271,7 +271,7 @@ Each has a proposed default. The build follows the default unless it is changed 
 
 ## Changes since v0.7
 
-- The PTA uses QuickBooks, so the CSV export gains a bills file QuickBooks Online can import. The open question narrows to which edition, and how the treasurer records checks.
+- The PTA uses QuickBooks. A bills file QuickBooks can import joins Phase 3; Phase 2 keeps the generic CSV. The open question narrows to which edition, and how the treasurer records checks.
 
 ## Changes since v0.6
 

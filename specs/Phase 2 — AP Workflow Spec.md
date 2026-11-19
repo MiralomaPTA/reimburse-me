@@ -125,9 +125,9 @@ One row per request, latest version only, UTF-8 with a byte-order mark so Excel 
 
 Columns: `request_id`, `status`, `submitted_at`, `check_date`, `check_number`, `paid_date`, `budget_category`, `payee_name`, `pta_position`, `requester_email`, `purpose`, `event`, `chair_signed_by`, `total_expense`, `donation_to_pta`, `reimbursement_claimed`, `check_delivery`, `line_count`, `receipt_count`, `version`, `approved_by`, `paid_by`, `pdf_sha256`.
 
-### QuickBooks bills
+### Phase 3: QuickBooks bills
 
-The PTA keeps its books in QuickBooks (answered Nov 19). Beside the CSV, the dashboard offers a **QuickBooks bills** file that QuickBooks Online imports under *Settings > Import data > Bills*, on the Essentials, Plus or Advanced plan. Each request becomes one bill with one line:
+Not part of Phase 2. This comes in Phase 3, after 2c (see the Product Spec's *Rollout plan*), and is written down here because it builds on the export. The PTA keeps its books in QuickBooks (answered Nov 19). Beside the CSV, the dashboard offers a **QuickBooks bills** file that QuickBooks Online imports under *Settings > Import data > Bills*, on the Essentials, Plus or Advanced plan. Each request becomes one bill with one line:
 
 | QuickBooks column | From the request |
 | --- | --- |
@@ -141,11 +141,11 @@ The PTA keeps its books in QuickBooks (answered Nov 19). Beside the CSV, the das
 
 The purpose, and the event for an event request, go in the bill's memo or line description, whichever Intuit's sample import file names; check the sample when building. The file follows the dashboard's filters like the CSV, uses the latest version, and leaves out Returned requests.
 
-The treasurer imports it with *Add new suppliers that don't already exist* ticked, then pays each bill in QuickBooks using the check number the portal recorded. QuickBooks never creates an account during an import, so every name in the Categories tab must match a QuickBooks account exactly. Intuit recommends at most 100 bills per file, about two months at this volume. *(defaults; Open question 6)*
+The treasurer imports it with *Add new suppliers that don't already exist* ticked, then pays each bill in QuickBooks using the check number the portal recorded. QuickBooks never creates an account during an import, so every name in the Categories tab must match a QuickBooks account exactly; naming them that way from 2a saves renaming them later. Intuit recommends at most 100 bills per file, about two months at this volume. *(defaults; Open question 6)*
 
 ## Budget categories
 
-A **Categories** tab in the Sheet: `name`, `active` (yes/no), `order`. The treasurer edits it each fiscal year; inactive names stay on old requests but disappear from the dropdown. The app writes a starter header row on first use and shows an "Uncategorized" option until the tab has rows. Each name is the QuickBooks account the expense goes to, spelled as in QuickBooks' chart of accounts, so the QuickBooks file imports cleanly. *(default)*
+A **Categories** tab in the Sheet: `name`, `active` (yes/no), `order`. The treasurer edits it each fiscal year; inactive names stay on old requests but disappear from the dropdown. The app writes a starter header row on first use and shows an "Uncategorized" option until the tab has rows. *(default)*
 
 ## Data changes
 
@@ -164,7 +164,7 @@ Drive: after a return, a request folder gains additional PDF and JSON versions. 
 
 ## Rollout
 
-1. **2a — See.** Role check, the dashboard list and detail pages read-only, the category dropdown, and the CSV and QuickBooks exports. Lets the treasurer start using it immediately.
+1. **2a — See.** Role check, the dashboard list and detail pages read-only, the category dropdown, and CSV export. Lets the treasurer start using it immediately.
 2. **2b — Act.** Approve, Return with note, Record check, Mark sent, the teacher emails, and the resubmission flow with versions. The resubmission flow is built (Nov 19, with step 2 of the event chair spec).
 3. **2c — Nudge.** The weekly digest.
 
@@ -183,7 +183,7 @@ Each has a default. The build follows it unless changed here.
 | 3 | Category required | Must be set before Record check |
 | 4 | Who acted | Every action records the AP member's email and time in an Actions tab |
 | 5 | The PDF after payment | Untouched. Check number, dates and category live in the Sheet. The alternative is a second "paid" copy with the treasurer block filled in for the audit binder |
-| 6 | Export format | The PTA uses QuickBooks (answered Nov 19). Default: QuickBooks Online on a plan that imports bills, with the generic CSV and the QuickBooks bills file above. Still open: Online or Desktop, which plan, and does the treasurer pay bills in QuickBooks or enter each check directly? On Desktop the file would be an IIF of checks instead. On a plan that can't import bills, only the generic CSV is offered |
+| 6 | CSV format | Generic columns above. The PTA uses QuickBooks (answered Nov 19); a file it can import comes in Phase 3, sketched under *Phase 3: QuickBooks bills*. Still open, for Phase 3: Online or Desktop, which plan, and does the treasurer pay bills in QuickBooks or enter each check directly? The sketch assumes Online on a plan that imports bills. On Desktop the file would be an IIF of checks instead. On a plan that can't import bills, the generic CSV stays the only export |
 | 7 | What a returned teacher can change | Anything, with a fresh signature; the new version gets its own PDF and a fresh email to AP |
 | 8 | Weekly digest | Monday 8 AM Pacific; requests not Paid and older than 7 days; skipped when empty |
 | 9 | Acting on your own request | Blocked for every action; another AP member must do it |
@@ -194,7 +194,7 @@ Each has a default. The build follows it unless changed here.
 
 ## Changes since v0.3
 
-- The PTA uses QuickBooks. The export gains a QuickBooks bills file for QuickBooks Online, and the Categories tab's names match QuickBooks accounts. Open question 6 now asks only which edition and plan, and how the treasurer records checks.
+- The PTA uses QuickBooks. A bills file QuickBooks Online can import is sketched under *CSV export*, for Phase 3, not Phase 2; 2a keeps the generic CSV. Open question 6 now asks, for Phase 3, which edition and plan, and how the treasurer records checks.
 
 ## Changes since v0.2
 

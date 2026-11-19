@@ -24,9 +24,10 @@ In build order. The specs ask for the chair and mailed check steps before Phase 
 | ✅ | *Send back* and *Fix and re-sign*, with versions | Event Chair step 2, Mailed Check step 2, Phase 2b | Built Nov 19 (PR #3). One shared flow for the chair's, a check signer's and AP's returns. Phase 2b still needs AP's **Return with a note** button and its email |
 | ⬜ | A daily cron job: reminders to the check signers at 3 and 7 days | Mailed Check step 3 | Not built. The same job can later send the Phase 2 weekly digest and clean up `pending/` |
 | ➖ | Chair reminders at 3 and 7 days, and the 14-day time-out | Event Chair step 3 | Won't be built (Nov 19). The requester's Resend and the Events tab chase a slow chair instead |
-| ⬜ | Phase 2a — *See*: the AP dashboard (read-only), budget categories, the CSV and QuickBooks exports | Phase 2 | Not built |
+| ⬜ | Phase 2a — *See*: the AP dashboard (read-only), budget categories, CSV export | Phase 2 | Not built |
 | ⬜ | Phase 2b — *Act*: approve, return with a note, record the check, mark it sent, emails to the requester | Phase 2 | Not built, except *Fix and re-sign* (above) |
 | ⬜ | Phase 2c — *Nudge*: the weekly digest to AP | Phase 2 | Not built |
+| ⬜ | Phase 3 — a bills file QuickBooks can import | Phase 2 (*CSV export*) | Not built. Sketched; needs the QuickBooks question below answered first |
 | ⬜ | Phase 3 — receipt OCR to fill in line items | Product | An idea only. No spec yet |
 
 Smaller things the product spec lists as not built: deleting uploads in `pending/` that never made it into a request after 30 days (the main [README](../README.md) asks the admin to do this by hand for now), and marking signed files read-only in Drive.
@@ -36,7 +37,7 @@ Smaller things the product spec lists as not built: deleting uploads in `pending
 Every open question has a proposed default, and the build follows the default unless the PTA changes it in the spec. These are the ones still waiting for an answer:
 
 - **Who can add the DNS record** for reimburse.miralomasf.com? (Product Spec)
-- **Which QuickBooks**: Online or Desktop, on which plan, and does the treasurer pay bills in it or enter each check directly? The PTA uses QuickBooks, and the answer decides the export's QuickBooks file. (Product Spec and Phase 2, question 6)
+- **Which QuickBooks**: Online or Desktop, on which plan, and does the treasurer pay bills in it or enter each check directly? The PTA uses QuickBooks, and the answer decides Phase 3's QuickBooks file. Nothing before Phase 3 needs it. (Product Spec and Phase 2, question 6)
 
 To review the rest of the defaults, see the *Open questions* section of each spec: 11 in the Product Spec, 13 in Phase 2 and 8 in Mailed Check. The Event Chair spec has none left.
 
