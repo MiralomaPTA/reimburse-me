@@ -60,7 +60,8 @@ describe("the event chair step", () => {
     expect(toLillie.subject).toBe(`Please sign: Fun Run reimbursement for Pat Teacher, $10.00 (${result.requestId})`);
     // Not the requester: a reply would hand them the chair's link.
     expect(toLillie.replyTo).toBe(config.apEmail);
-    expect(toLillie.text).toContain(`Write to Pat Teacher at ${ME} in a new email`);
+    expect(toLillie.text).toContain("Send it back from the same page with a note");
+    expect(toLillie.text).toContain("Please don't forward or reply to this email, which holds your link.");
     expect(toLillie.attachments?.[0].filename).toBe(`${result.requestId}.pdf`);
     expect(toLillie.text).toContain("Fun Run budget: $500.00. Before this request $0.00 was claimed, $500.00 left; after it, $490.00 left.");
     expect(toLillie.text).toContain("The other Fun Run chairs got this email too");

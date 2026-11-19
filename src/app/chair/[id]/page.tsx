@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getAdapters } from "@/server/adapters";
 import { config } from "@/server/config";
+import { answersForChair } from "@/server/email/templates";
 import { chairLinkState, chairStateMessage } from "@/server/requests/chair";
 import { formatDateTime } from "@/lib/dates";
 import type { EventBudget } from "@/lib/events";
@@ -8,6 +9,7 @@ import { formatMoney } from "@/lib/money";
 import { CHECK_DELIVERY_LABEL, totals } from "@/lib/request-schema";
 import { ChairSignForm } from "@/components/ChairSignForm";
 import { MailtoLink } from "@/components/MailtoLink";
+import { VersionNote } from "@/components/VersionNote";
 
 export const metadata: Metadata = {
   title: "Sign as event chair · Miraloma PTA Reimbursements",
@@ -29,7 +31,14 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
   const pdfHref = `/chair/${encodeURIComponent(id)}/pdf?t=${encodeURIComponent(token)}`;
 
   if (state.kind !== "ready") {
-    const title = state.kind === "signed" ? "Already signed" : state.kind === "invalid" ? "This link isn't valid" : "Nothing to sign";
+    const title =
+      state.kind === "signed"
+        ? "Already signed"
+        : state.kind === "invalid"
+          ? "This link isn't valid"
+          : state.kind === "closed" && state.row.chair_step === "Sent back"
+            ? "Sent back"
+            : "Nothing to sign";
     return (
       <div className="mx-auto max-w-md space-y-4">
         <h1 className="text-2xl font-semibold">{title}</h1>
@@ -48,12 +57,15 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
 
   const { row, link, stored, budget } = state;
   const { request } = stored;
+  // A chair's own note, but only who sent it back when a check signer or AP did.
+  const answers = answersForChair(stored.answers);
   const t = totals(request);
   return (
     <div className="space-y-6">
       <div>
         <p className="text-sm text-neutral-500">
-          {row.request_id} · for {row.event}
+          {row.request_id}
+          {stored.version > 1 ? `, version ${stored.version}` : ""} · for {row.event}
         </p>
         <h1 className="text-2xl font-semibold">Please sign as {row.event} chair</h1>
         <p className="mt-1 text-neutral-700">
@@ -63,6 +75,7 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
             ? "Once you sign, two of the PTA's check signers approve the payment, then the PTA's bank mails the check."
             : "Once you sign, it goes on to the PTA for payment."}
         </p>
+        {stored.version > 1 && answers && <VersionNote version={stored.version} answers={answers} payeeName={request.payeeName} />}
       </div>
 
       {budget && <BudgetPanel event={row.event} budget={budget} />}
@@ -123,8 +136,8 @@ export default async function ChairPage(props: PageProps<"/chair/[id]">) {
       />
 
       <p className="text-sm text-neutral-600">
-        Something not right? Don&apos;t sign. Write to {request.payeeName} at <MailtoLink email={stored.requesterEmail} /> so they can fix it, rather than
-        forwarding the email you got: it holds your link. A reply to that email goes to the PTA. You&apos;re signing as {link.email}.
+        To ask {request.payeeName} about it first, write to them at <MailtoLink email={stored.requesterEmail} /> in a new email rather than forwarding the
+        email you got: it holds your link. A reply to that email goes to the PTA. You&apos;re signing as {link.email}.
       </p>
     </div>
   );

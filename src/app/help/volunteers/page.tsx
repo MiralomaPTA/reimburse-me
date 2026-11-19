@@ -109,6 +109,7 @@ export default function VolunteerGuidePage() {
             q.lostReceipt,
             q.computer,
             q.event,
+            q.sentBack,
             q.chairSlow,
             ...(mailingInGuides() ? [q.signersSlow] : []),
             {

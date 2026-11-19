@@ -9,6 +9,7 @@ import { formatMoney } from "@/lib/money";
 import { totals } from "@/lib/request-schema";
 import { MailtoLink } from "@/components/MailtoLink";
 import { SignerSignForm } from "@/components/SignerSignForm";
+import { VersionNote } from "@/components/VersionNote";
 
 export const metadata: Metadata = {
   title: "Authorize a mailed check · Miraloma PTA Reimbursements",
@@ -62,7 +63,10 @@ export default async function SignerPage(props: PageProps<"/signers/[id]">) {
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-sm text-neutral-500">{row.request_id} · mailed check</p>
+        <p className="text-sm text-neutral-500">
+          {row.request_id}
+          {stored.version > 1 ? `, version ${stored.version}` : ""} · mailed check
+        </p>
         <h1 className="text-2xl font-semibold">{slot === 1 ? "Please authorize this payment" : "One more signature needed"}</h1>
         <p className="mt-1 text-neutral-700">
           {request.payeeName} asked the PTA to reimburse {formatMoney(t.reimbursementCents)} and chose to have the check mailed. The PTA&apos;s bank mails it by bill
@@ -71,6 +75,8 @@ export default async function SignerPage(props: PageProps<"/signers/[id]">) {
             ? `${row.signer_1_name} signed the first line${firstAt ? ` on ${formatDateTime(firstAt)}` : ""}. Yours is the second signature, and then it goes to the PTA's accounts payable team.`
             : "Any two check signers may sign. As the first, you also confirm the Budget Account and Payment Account."}
         </p>
+        {/* Check signers see the whole note, which may be what asked for a change of address. */}
+        {stored.version > 1 && stored.answers && <VersionNote version={stored.version} answers={stored.answers} payeeName={request.payeeName} />}
       </div>
 
       {flags.length > 0 && (

@@ -146,7 +146,7 @@ export function SignerSignForm({
         <h2 className="text-lg font-semibold">Sent back</h2>
         <p className="text-sm">
           {done.emailed
-            ? `${payeeName} and the PTA's accounts payable team have your note. The request is closed and won't be paid; ${payeeName} can start a new one.`
+            ? `${payeeName} and the PTA's accounts payable team have your note. It won't be paid as it stands; ${payeeName} can fix it and sign it again, and then the check signers get a new email.`
             : `The request is sent back and won't be paid, but the email with your note didn't go out. Please let ${payeeName} know.`}
         </p>
       </div>
@@ -244,7 +244,7 @@ export function SignerSignForm({
           <input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
           <span>{SIGNER_CONSENT_TEXT}</span>
         </label>
-        <button type="button" className="btn-primary" onClick={sign} disabled={busy !== null}>
+        <button type="button" className="btn-primary" onClick={sign} disabled={!consent || busy !== null}>
           {busy === "sign" ? "Signing…" : "Sign"}
         </button>
       </div>
@@ -253,7 +253,8 @@ export function SignerSignForm({
         <summary className="cursor-pointer font-medium">Something not right? Send it back</summary>
         <div className="mt-4 space-y-3">
           <p className="text-sm text-neutral-600">
-            {payeeName} and the PTA&apos;s accounts payable team get your note, and the request is closed: nobody else can sign it. Uses the name you typed above.
+            {payeeName} and the PTA&apos;s accounts payable team get your note, and nobody can sign this version. If {payeeName} fixes it and signs it again, it
+            needs two signatures again. Uses the name you typed above.
           </p>
           <label htmlFor="sendBackNote" className="label">
             What needs to change?

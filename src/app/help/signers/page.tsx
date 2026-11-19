@@ -83,8 +83,9 @@ export default function SignerGuidePage() {
       <Section title="Something not right? Send it back">
         <p>
           Don&apos;t sign. Open <strong>Something not right? Send it back</strong> at the bottom of the page, say what needs to change, and tap{" "}
-          <strong>Send back</strong>. The requester and the PTA get your note, and the request is closed: nobody else can sign it, and the requester starts a new
-          one with the change.
+          <strong>Send back</strong>. The requester and the PTA get your note, and nobody can sign that version any more. The requester fixes it and signs it
+          again, and the new version needs two signatures again, even from a signer who signed the old one. Every check signer gets a fresh email and link for
+          it.
         </p>
       </Section>
 
@@ -104,7 +105,7 @@ export default function SignerGuidePage() {
             { q: "It says the request was authorized or sent back.", a: "Two other check signers got to it first, or one sent it back. Your link shows who and when." },
             {
               q: "The requester wants the check sent somewhere else.",
-              a: "Send it back with a note. The PTA pays only to the address on the signed FO10, so a new address needs a new request, signed again.",
+              a: "Send it back with a note. The PTA pays only to the address on the signed FO10, so a new address needs a new version, signed again by the requester and two check signers.",
             },
             {
               q: "Why me?",

@@ -14,8 +14,10 @@ import type { Packet, PacketInput } from "@/server/pdf/types";
  */
 export async function buildPacket(input: PacketInput): Promise<Packet> {
   const { request, requestId, submittedAt, signature, audit } = input;
+  // "FY27-042 v2" wherever the packet names itself, so a printed copy says which version it is.
+  const label = (input.version ?? 1) > 1 ? `${requestId} v${input.version}` : requestId;
   const doc = await PDFDocument.create();
-  doc.setTitle(`PTA reimbursement request ${requestId}`);
+  doc.setTitle(`PTA reimbursement request ${label}`);
   doc.setAuthor(request.payeeName);
   doc.setProducer("Miraloma PTA reimbursement portal");
   doc.setCreationDate(submittedAt);
@@ -30,6 +32,7 @@ export async function buildPacket(input: PacketInput): Promise<Packet> {
   if (signature && audit) {
     await appendAuditPage(doc, {
       requestId,
+      version: input.version ?? 1,
       request,
       submittedAt,
       signature,
@@ -39,7 +42,7 @@ export async function buildPacket(input: PacketInput): Promise<Packet> {
       pagesBeforeAudit: doc.getPageCount(),
     });
   }
-  await stampFooters(doc, requestId, submittedAt, !signature);
+  await stampFooters(doc, label, submittedAt, !signature);
 
   const bytes = await doc.save({ useObjectStreams: true });
   return { bytes, sha256: sha256(bytes), pageCount: doc.getPageCount(), chairLine };

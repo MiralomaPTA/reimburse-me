@@ -69,12 +69,30 @@ export default function ChairGuidePage() {
         <Shot src={toAp ? signedAp : signedRequester} alt="The Signed, thank you message" />
       </Section>
 
+      <Section title="Something not right? Send it back">
+        <p>
+          Don&apos;t sign. Open <strong>Something not right? Send it back</strong> at the bottom of the page, say what needs to change, and tap{" "}
+          <strong>Send back</strong>. The person who asked gets your note by email, and nobody can sign that version any more. They fix it and sign it
+          again, and the new version comes back to you, with a fresh email and link.
+        </p>
+      </Section>
+
       <Section title="Common questions">
         <Questions
           items={[
             {
               q: "This wasn't for my event, or something looks wrong.",
-              a: "Don't sign. Write to the person who asked, using the link at the bottom of the signing page, so they can fix it and send a corrected request. Please don't forward the email or reply to them from it: it holds your signing link. A reply to the email goes to the PTA.",
+              a: (
+                <>
+                  Send it back with a note saying what&apos;s wrong, as above. To ask the person who asked about it first, write to them using the link at the
+                  bottom of the signing page. Please don&apos;t forward the email or reply to them from it: it holds your signing link. A reply to the email goes
+                  to the PTA.
+                </>
+              ),
+            },
+            {
+              q: "I got an email to sign a request I sent back.",
+              a: "That's the fixed version. It says what changed in the note it answers. Check it over and sign it, or send it back again. Links from the earlier email no longer work.",
             },
             {
               q: "The link says it isn't valid or has expired.",

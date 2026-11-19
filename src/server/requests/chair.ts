@@ -1,21 +1,20 @@
 import type { Adapters, MailAttachment, Mailer, RequestRow } from "@/server/adapters/types";
 import { config } from "@/server/config";
 import { createChairToken, verifyChairToken, type ChairLink } from "@/server/auth/tokens";
-import { chairRequestEmail, chairSignedEmail } from "@/server/email/templates";
+import { chairRequestEmail, chairSentBackEmail, chairSignedEmail } from "@/server/email/templates";
 import { countersignPacket } from "@/server/pdf/countersign";
 import { chairConsentText } from "@/server/pdf/types";
 import { BusyError, withRequestLock } from "@/server/requests/lock";
 import { sha256 } from "@/server/hash";
-import { addressList, appendNotes, ResendProblemError, versionOf } from "@/server/requests/rows";
+import { addressList, appendNotes, lowerEmail, ResendProblemError, versionOf } from "@/server/requests/rows";
 import { signersCanFinish, signersFor } from "@/server/requests/mailing";
 import { sendPacketOn } from "@/server/requests/send-on";
 import { reachedCells, sendToSigners, signerFlags } from "@/server/requests/signers";
 import { toPacketSignature } from "@/server/requests/signature";
-import { fundingEmailShares, fundingOptions } from "@/server/requests/stipends";
-import { cosignedName, loadStoredRequest, type StoredRequest } from "@/server/requests/stored";
-import { formatDateTime, parseDate } from "@/lib/dates";
+import { fundingAsOf, fundingEmailShares, fundingOptions } from "@/server/requests/stipends";
+import { cosignedName, loadStoredRequest, packetName, requestFolder, type ReturnAnswered, type StoredRequest } from "@/server/requests/stored";
+import { formatDateTime, formatMonthDay, parseDate } from "@/lib/dates";
 import { eventBudget, findEvent, parseEvents, type EventBudget, type PtaEvent } from "@/lib/events";
-import { fiscalYearLabel } from "@/lib/fiscal-year";
 import { parseMoney } from "@/lib/money";
 import type { RequestInput, SignatureInput } from "@/lib/request-schema";
 
@@ -59,6 +58,8 @@ export interface ChairRequestInput {
   reminder?: boolean;
   /** Where the event's budget stands around this request, when it has one. */
   budget: EventBudget | null;
+  /** From version 2 on: the return this version answers. */
+  answers?: ReturnAnswered;
 }
 
 /**
@@ -142,7 +143,7 @@ export async function chairLinkState(requestId: string, token: string, adapters:
  */
 export async function chairPdfFile(requestId: string, token: string, adapters: Pick<Adapters, "log" | "events">): Promise<{ fileId: string; filename: string } | null> {
   const checked = await checkLink(requestId, token, adapters, false);
-  if (checked.kind === "open") return { fileId: checked.row.pdf_file_id, filename: `${requestId}.pdf` };
+  if (checked.kind === "open") return { fileId: checked.row.pdf_file_id, filename: packetName(requestId, versionOf(checked.row)) };
   if (checked.kind === "signed" && checked.row.chair_pdf_file_id) return { fileId: checked.row.chair_pdf_file_id, filename: cosignedName(requestId, versionOf(checked.row)) };
   return null;
 }
@@ -163,6 +164,13 @@ export function chairStateMessage(state: Exclude<ChairLinkState, { kind: "ready"
       return `This request was already signed by ${state.row.chair_name || state.row.chair_signed_by || "a chair"}${at ? ` on ${formatDateTime(at)}` : ""}.`;
     }
     case "closed":
+      if (state.row.chair_step === "Sent back") {
+        const at = parseDate(state.row.returned_at);
+        return (
+          `This request was sent back to ${state.row.payee_name || "the requester"}${state.row.returned_by ? ` by ${state.row.returned_by}` : ""}${at ? ` on ${formatMonthDay(at)}` : ""}, ` +
+          "so there's nothing to sign. If they fix it and sign it again, the chairs get a new email."
+        );
+      }
       return state.row.chair_step === "Timed out"
         ? "This request went on to the PTA without a chair signature, because it wasn't signed in time."
         : "This request isn't waiting for a chair's signature any more.";
@@ -233,6 +241,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
       packet: original,
       requesterSha256: actual,
       requestId,
+      version: versionOf(row),
       chairLine: stored.packet.chairLine,
       event,
       payeeName: row.payee_name,
@@ -245,7 +254,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
       note: input.note,
     });
     const filename = cosignedName(requestId, versionOf(row));
-    const saved = await files.putFile({ name: filename, mimeType: "application/pdf", bytes: packet.bytes, folderPath: ["requests", fiscalYearLabel(new Date(row.submitted_at)), requestId] });
+    const saved = await files.putFile({ name: filename, mimeType: "application/pdf", bytes: packet.bytes, folderPath: requestFolder(row) });
     // A mailed check goes to the check signers next; it reaches AP only with their FO10.
     const patch: Partial<RequestRow> = {
       ...(mailed
@@ -289,7 +298,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
     try {
       const [user, stipendRows] = await Promise.all([users.get(row.requester_email), stipends.list()]);
       // The log as read before signing: a request counts against its stipend the same while it waits for the chair.
-      const funding = fundingEmailShares(fundingOptions(user, stipendRows, rows, submittedAt), stored.request);
+      const funding = fundingEmailShares(fundingOptions(user, stipendRows, rows, fundingAsOf(requestId, submittedAt)), stored.request);
       await sendPacketOn(
         {
           requestId,
@@ -301,6 +310,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
           funding,
           linkBase: input.linkBase,
           chair: { event, name: input.name, email: link.email, signedAt, note: input.note, requesterSha256: row.pdf_sha256 },
+          answers: stored.answers,
         },
         attachment,
         mailer,
@@ -314,7 +324,7 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
   }
   let chairCopied = true;
   try {
-    const mail = chairSignedEmail({ requestId, event, payeeName: row.payee_name, sha256: packet.sha256, mailed });
+    const mail = chairSignedEmail({ requestId, version: versionOf(row), event, payeeName: row.payee_name, sha256: packet.sha256, mailed });
     await mailer.send({ to: [link.email], subject: mail.subject, text: mail.text, attachments: [attachment] });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -324,6 +334,64 @@ export async function signAsChair(input: ChairSignInput, adapters: Adapters): Pr
   }
   await appendNotes(log, requestId, problems);
   return { sha256: packet.sha256, emailed, chairCopied, mailed };
+}
+
+export interface ChairSendBackInput {
+  requestId: string;
+  token: string;
+  /** Required: what needs to change. */
+  note: string;
+  linkBase: string;
+}
+
+/**
+ * Sends the request back instead of signing it: it becomes Returned, every
+ * chair link for this version stops working, and the requester gets the note
+ * with a link to fix and re-sign it. The new version comes back to the chairs.
+ * Runs under the row's lock, like a signature, so a co-chair signing at the
+ * same moment and this can't both go through.
+ */
+export async function sendBackAsChair(input: ChairSendBackInput, adapters: Pick<Adapters, "log" | "events" | "mailer">): Promise<{ emailed: boolean }> {
+  const { log, mailer } = adapters;
+  const checked = await checkLink(input.requestId, input.token, adapters, false);
+  if (checked.kind !== "open") throw new ChairError(chairStateMessage(checked));
+  const { link } = checked;
+  const note = input.note.trim();
+  if (!note) throw new ChairError(`Say what needs to change, so ${checked.row.payee_name || "the requester"} can fix it.`);
+  const chair = lowerEmail(link.email);
+  const now = new Date();
+
+  const row = await withRequestLock(log, checked.row.request_id, async (current) => {
+    // Checked again under the lock: a co-chair may have signed or sent it back since the page loaded.
+    if (current.chair_step === "Signed") throw new ChairError(`${current.chair_name || current.chair_signed_by || `Another ${current.event} chair`} signed this request a moment ago.`);
+    if (current.status !== "Awaiting chair" || versionOf(current) !== link.version) throw new ChairError("This request isn't waiting for a chair's signature any more.");
+    const patch: Partial<RequestRow> = { status: "Returned", chair_step: "Sent back", returned_note: note, returned_by: chair, returned_at: now.toISOString() };
+    return { patch, result: { ...current, ...patch } };
+  }).catch((error: unknown) => {
+    if (error instanceof BusyError) throw new ChairError("Someone is signing or sending back this request right now, perhaps a co-chair. Reload the page in a minute to see where it stands.");
+    throw error;
+  });
+
+  try {
+    const mail = chairSentBackEmail({
+      requestId: row.request_id,
+      version: versionOf(row),
+      event: row.event,
+      payeeName: row.payee_name,
+      amountCents: parseMoney(row.reimbursement_claimed) ?? 0,
+      chairEmail: chair,
+      note,
+      linkBase: input.linkBase,
+      mailed: row.check_delivery === "mail",
+    });
+    await mailer.send({ to: [row.requester_email], replyTo: chair, subject: mail.subject, text: mail.text });
+    return { emailed: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[chair] the sent-back email for ${row.request_id} failed: ${message}`);
+    await appendNotes(log, row.request_id, [`Email that the ${row.event} chair sent it back failed: ${message}`]);
+    return { emailed: false };
+  }
 }
 
 export type ResendProblem = "not-found" | "closed" | "too-soon" | "no-chair" | "requester-chair" | "busy" | "failed";
@@ -412,8 +480,9 @@ export async function resendToChair(
           sha256: row.pdf_sha256,
           chairs: sending.to,
           linkBase: input.linkBase,
-          attachment: { filename: `${row.request_id}.pdf`, mimeType: "application/pdf", bytes },
+          attachment: { filename: packetName(row.request_id, versionOf(row)), mimeType: "application/pdf", bytes },
           reminder: true,
+          answers: stored.answers,
           budget: event ? eventBudget(event, rows, { requestId: row.request_id, claimedCents: parseMoney(row.reimbursement_claimed) ?? 0 }) : null,
         },
         mailer,

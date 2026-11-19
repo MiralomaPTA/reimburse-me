@@ -194,6 +194,16 @@ export function commonQuestions(exampleId: string) {
         </>
       ),
     },
+    sentBack: {
+      q: "My request was sent back.",
+      a: (
+        <>
+          You&apos;ll get an email with the note saying what needs to change. Open the request from <strong>My requests</strong> and tap{" "}
+          <strong>Fix and re-sign</strong>. The form opens filled in as you signed it, receipts included. Make the change, check it over and sign again. It
+          goes on as a new version, the same way your first one did, and the earlier one is kept.
+        </>
+      ),
+    },
     chairSlow: {
       q: "The event chair hasn't signed yet.",
       a: (

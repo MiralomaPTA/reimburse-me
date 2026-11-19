@@ -1,15 +1,33 @@
-import type { FileStore } from "@/server/adapters/types";
+import type { FileStore, RequestRow } from "@/server/adapters/types";
+import { fiscalYearLabel } from "@/lib/fiscal-year";
 import type { RequestInput } from "@/lib/request-schema";
 import type { LineBox } from "@/server/pdf/types";
+
+/** Who sent a request back: its event chair, a check signer, or AP (a status set by hand in the Sheet until Phase 2b's Return). */
+export type ReturnSource = "chair" | "signer" | "ap";
+
+/** The return a re-signed version answers: why it was sent back, by whom (in words, "the Fun Run chair (lillie@example.org)"), and when. */
+export interface ReturnAnswered {
+  note: string;
+  by: string;
+  /**
+   * Who it was. The event chair is shown the note only when a chair sent it
+   * back: a check signer's or AP's may name the requester's home address or
+   * stipends, which the chair never sees (see answersForChair).
+   */
+  from: ReturnSource;
+  /** ISO; blank when the row doesn't record it for this version (a status set by hand in the Sheet). */
+  at: string;
+}
 
 /**
  * What the request's JSON file in Drive holds: the request exactly as it was
  * signed, and where its VP/Chairman line landed in the packet. Written at
- * every submission. The chair step reads it to stamp the chair's signature
- * and to show the chair what they are signing, the check signers' step fills
- * the FO10 from it (a mailed check's address and amount come from here, never
- * the editable row), and Phase 2's "Fix and re-sign" will read it to refill
- * the form.
+ * every submission and every re-signing. The chair step reads it to stamp the
+ * chair's signature and to show the chair what they are signing, the check
+ * signers' step fills the FO10 from it (a mailed check's address and amount
+ * come from here, never the editable row), and "Fix and re-sign" refills the
+ * form from it.
  */
 export interface StoredRequest {
   requestId: string;
@@ -18,17 +36,34 @@ export interface StoredRequest {
   requesterEmail: string;
   request: RequestInput;
   packet: { sha256: string; pageCount: number; chairLine: LineBox };
+  /** From version 2 on: the return this version answers, for the emails that carry it. */
+  answers?: ReturnAnswered;
 }
 
 const suffix = (version: number) => (version > 1 ? `-v${version}` : "");
+/** The packet as the requester signed it: FY27-042.pdf, FY27-042-v2.pdf */
+export const packetName = (requestId: string, version: number) => `${requestId}${suffix(version)}.pdf`;
 /** FY27-042.json, FY27-042-v2.json */
 export const storedRequestName = (requestId: string, version: number) => `${requestId}${suffix(version)}.json`;
 /** FY27-042-cosigned.pdf, FY27-042-v2-cosigned.pdf */
 export const cosignedName = (requestId: string, version: number) => `${requestId}${suffix(version)}-cosigned.pdf`;
+/** The FO10 as filled in so far, as emailed and shown to the check signers: FY27-042-fo10.pdf, FY27-042-v2-fo10.pdf */
+export const fo10AttachmentName = (requestId: string, version: number) => `${requestId}${suffix(version)}-fo10.pdf`;
 /** The FO10 with the first check signer's signature: FY27-042-fo10-1.pdf, FY27-042-v2-fo10-1.pdf */
 export const fo10Name = (requestId: string, version: number) => `${requestId}${suffix(version)}-fo10-1.pdf`;
 /** The packet AP pays a mailed check from: FY27-042-authorized.pdf, FY27-042-v2-authorized.pdf */
 export const authorizedName = (requestId: string, version: number) => `${requestId}${suffix(version)}-authorized.pdf`;
+
+/**
+ * The request's folder in Drive: requests/FY27/FY27-042. The year comes from
+ * the ID, the year the request was first submitted, so a version signed again
+ * after July 1 stays beside the first. A hand-typed ID without one falls back
+ * to the year it was signed.
+ */
+export function requestFolder(row: Pick<RequestRow, "request_id" | "submitted_at">): string[] {
+  const year = /^FY\d{2}(?=-)/.exec(row.request_id)?.[0] ?? fiscalYearLabel(new Date(row.submitted_at));
+  return ["requests", year, row.request_id];
+}
 
 export async function saveStoredRequest(files: FileStore, folderPath: string[], stored: StoredRequest): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(stored, null, 2));

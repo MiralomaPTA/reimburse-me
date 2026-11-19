@@ -84,7 +84,9 @@ When a request is returned:
 4. They preview and sign again. The app builds a new packet, stores it as `FY27-042-v2.pdf` beside the earlier one, sets `version` to 2, points `pdf_file_id` and `pdf_sha256` at the new file, keeps the previous file ids in `previous_pdf_file_ids`, and sets status back to Submitted. A request for an event with a chair goes back to *Awaiting chair* instead, the chair signs version 2, and it reaches AP from there.
 5. AP receives a new packet email marked *version 2* that includes the return note it answers.
 
-To refill the form, the app saves the exact request content as JSON in the request's Drive folder at every submission (`FY27-042.json`, `FY27-042-v2.json`; `request_file_id` on the row). This part is already built, with the event chair step. Receipts already in Drive are reused by id; nothing is re-uploaded unless the teacher adds a new one.
+To refill the form, the app saves the exact request content as JSON in the request's Drive folder at every submission (`FY27-042.json`, `FY27-042-v2.json`; `request_file_id` on the row). Receipts already in Drive are reused by id; nothing is re-uploaded unless the teacher adds a new one.
+
+**Built Nov 19, 2026,** with step 2 of the event chair spec (see its *Fixing a returned request*): steps 2 to 5 above, for any request whose status is Returned. Until 2b's **Return with a note** exists, AP can return a request by setting `status` to `Returned` and writing `returned_note` in the Sheet; the requester sees the note and **Fix and re-sign** on their request page, though nothing emails them. 2b still needs the Return button and its email to the teacher, which should set `returned_at` and `returned_by` as the chair's and check signers' send-backs do.
 
 ## AP dashboard
 
@@ -131,7 +133,7 @@ A **Categories** tab in the Sheet: `name`, `active` (yes/no), `order`. The treas
 
 ## Data changes
 
-Requests tab, new columns: `approved_at`, `approved_by`, `returned_at`, `returned_by`, `check_date`, `check_written_by`, `paid_by`, `previous_pdf_file_ids`. (`request_file_id`, `lock` and the event and `chair_*` columns already exist, from the event chair step. AP's actions should take the row's `lock` too, the way chair signing and resend do, so an AP action and a chair signature at the same moment can't both go through.) The existing `paid_date` now means the date the signed check went out. The app appends any missing header to the end of the header row on first use, so the existing tab does not need to be rebuilt.
+Requests tab, new columns: `approved_at`, `approved_by`, `check_date`, `check_written_by`, `paid_by`. (`request_file_id`, `lock`, the event and `chair_*` columns, and `returned_at`, `returned_by` and `previous_pdf_file_ids` already exist, from the event chair step. AP's actions should take the row's `lock` too, the way chair signing and resend do, so an AP action and a chair signature at the same moment can't both go through.) The existing `paid_date` now means the date the signed check went out. The app appends any missing header to the end of the header row on first use, so the existing tab does not need to be rebuilt.
 
 New tabs: `Actions` and `Categories`, created with headers on first use.
 
