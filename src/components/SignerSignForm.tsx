@@ -244,7 +244,7 @@ export function SignerSignForm({
           <input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
           <span>{SIGNER_CONSENT_TEXT}</span>
         </label>
-        <button type="button" className="btn-primary" onClick={sign} disabled={busy !== null}>
+        <button type="button" className="btn-primary" onClick={sign} disabled={!consent || busy !== null}>
           {busy === "sign" ? "Signing…" : "Sign"}
         </button>
       </div>

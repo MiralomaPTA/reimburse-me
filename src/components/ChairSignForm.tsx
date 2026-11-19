@@ -135,7 +135,7 @@ export function ChairSignForm({
         <input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
         <span>{chairConsentText(event)}</span>
       </label>
-      <button type="button" className="btn-primary" onClick={sign} disabled={busy}>
+      <button type="button" className="btn-primary" onClick={sign} disabled={!consent || busy}>
         {busy ? "Signing…" : "Sign"}
       </button>
     </div>

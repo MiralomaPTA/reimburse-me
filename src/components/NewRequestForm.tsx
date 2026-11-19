@@ -686,7 +686,7 @@ function RequestForm({ email, apEmail, sendPacketsTo, mailing, profile, requeste
             <span>{CONSENT_LABEL}</span>
           </label>
           <div className="flex flex-wrap gap-3">
-            <button type="button" className="btn-primary" onClick={submit} disabled={busy === "submit"}>
+            <button type="button" className="btn-primary" onClick={submit} disabled={!consent || busy === "submit"}>
               {busy === "submit" ? "Submitting…" : "Sign and submit"}
             </button>
             <button type="button" className="btn-secondary" onClick={() => setStep("form")} disabled={busy === "submit"}>

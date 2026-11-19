@@ -43,3 +43,7 @@ next-env.d.ts
 
 # local dev adapters
 /.data/
+
+# claude code: local worktrees and personal settings (shared settings, skills and agents are committed)
+/.claude/worktrees/
+/.claude/settings.local.json
