@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getAdapters } from "@/server/adapters";
 import type { ActionRecord, RequestRow } from "@/server/adapters/types";
 import { requireApSession } from "@/server/ap/access";
-import { ageDays, categoryChoices, earlierPackets, formatAge, reachedApAt } from "@/server/ap/dashboard";
+import { ageDays, categoryChoices, earlierPackets, formatAge, reachedApAt, UNCATEGORIZED } from "@/server/ap/dashboard";
 import { mailedCheck } from "@/server/ap/mailed";
 import { returnedAtOf, returnedBy } from "@/server/requests/resubmit";
 import { versionOf } from "@/server/requests/rows";
@@ -61,13 +61,19 @@ export default async function ApRequestPage(props: PageProps<"/ap/[id]">) {
         </p>
       </div>
 
-      {mail && "problem" in mail && (
+      {mail?.kind === "problem" && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
           <div className="font-medium">Mailed check: pay only to the address and amount on the signed FO10</div>
           <p className="mt-1">{mail.problem}</p>
         </div>
       )}
-      {mail && !("problem" in mail) && (
+      {mail?.kind === "before-bill-pay" && (
+        <div className="rounded-md border border-neutral-300 bg-neutral-50 p-4 text-sm text-neutral-800">
+          <div className="font-medium">Mailed check, from before bill pay: to {mail.address}</div>
+          <p className="mt-1">A paper check from before mailing went through bill pay. The portal kept no copy of the address it was signed with then, so this one is the Sheet&apos;s and can&apos;t be checked here.</p>
+        </div>
+      )}
+      {mail?.kind === "signed" && (
         <div className={`rounded-md border p-4 text-sm ${mail.differences.length ? "border-amber-300 bg-amber-50 text-amber-950" : "border-teal-300 bg-teal-50 text-teal-950"}`}>
           <div className="font-medium">
             Mailed check: {formatMoney(mail.amountCents)} to {mail.address}
@@ -100,17 +106,20 @@ export default async function ApRequestPage(props: PageProps<"/ap/[id]">) {
         </label>
         <div className="flex flex-col gap-3 sm:flex-row">
           <select id="category" name="category" defaultValue={choices.selected} className="field sm:flex-1">
-            <option value="">Not set</option>
+            <option value="">{choices.noneYet ? UNCATEGORIZED : "Not set"}</option>
             {choices.options.map((name) => (
               <option key={name} value={name}>
                 {name}
               </option>
             ))}
           </select>
-          <button type="submit" className="btn-primary">
-            Save
-          </button>
+          {choices.options.length > 0 && (
+            <button type="submit" className="btn-primary">
+              Save
+            </button>
+          )}
         </div>
+        {choices.noneYet && <p className="text-sm text-neutral-600">The Categories tab in the Sheet has no categories yet. Once it has, they&apos;re offered here.</p>}
         {choices.suggested && <p className="text-sm text-neutral-600">Suggested by the FO10&apos;s Budget Account ({row.budget_account}). Not saved yet.</p>}
         {query.saved === "category" && <p className="text-sm font-medium text-emerald-800">Saved.</p>}
         {categoryProblem && <p className="text-sm font-medium text-amber-900">{categoryProblem}</p>}
@@ -124,7 +133,7 @@ export default async function ApRequestPage(props: PageProps<"/ap/[id]">) {
         <Row label="Email" value={row.requester_email} />
         <Row label="Phone" value={row.phone} />
         <Row label="PTA position" value={row.pta_position} />
-        <Row label="Check" value={row.check_delivery === "mail" ? "Mailed by bill pay" : row.check_delivery === "pickup" ? "Pickup from the PTA" : "Staff mailbox"} />
+        <Row label="Check" value={checkDelivery(row, mail?.kind === "before-bill-pay")} />
         <Row label="Line items" value={`${row.line_count}, ${row.receipt_count} receipt${Number(row.receipt_count) === 1 ? "" : "s"}`} />
         <Row label="Total expense" value={money(row.total_expense)} />
         {parseMoney(String(row.donation_to_pta ?? "")) ? <Row label="Donated to PTA" value={money(row.donation_to_pta)} /> : null}
@@ -163,7 +172,7 @@ export default async function ApRequestPage(props: PageProps<"/ap/[id]">) {
         </div>
         {earlier > 0 && (
           <p>
-            Earlier versions:{" "}
+            Earlier versions, for reference (the Sheet keeps no SHA-256 for them, so they aren&apos;t checked):{" "}
             {Array.from({ length: earlier }, (_, i) => i + 1).map((v, i) => (
               <span key={v}>
                 {i > 0 && ", "}
@@ -213,6 +222,11 @@ const dateTime = (cell: string) => {
   const at = parseDate(cell);
   return at ? formatDateTime(at) : cell || "";
 };
+
+function checkDelivery(row: RequestRow, beforeBillPay: boolean): string {
+  if (row.check_delivery === "mail") return beforeBillPay ? "Mailed, a paper check from before bill pay" : "Mailed by bill pay";
+  return row.check_delivery === "pickup" ? "Pickup from the PTA" : "Staff mailbox";
+}
 
 /** "treasurer@example.org set the category to Supplies" */
 function describe(record: ActionRecord): string {

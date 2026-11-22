@@ -10,10 +10,12 @@ import { authorizedName, cosignedName, packetName } from "@/server/requests/stor
 /**
  * Serves AP any of a request's packets: `file=authorized` (a mailed check's,
  * with the FO10 signed by both), `file=cosigned` (with the event chair's
- * signature), or `file=signed` (as the requester signed it), each checked
- * against the hash on the row when there is one. `v` picks an earlier
- * version's requester-signed packet. Only the files the row names can be
- * served, and only to AP.
+ * signature), or `file=signed` (as the requester signed it), each only if it
+ * matches the hash on the row: every packet the app writes records one, so a
+ * blank hash cell is refused too. `v` picks an earlier version's
+ * requester-signed packet, for reference: the row keeps no hash for those, so
+ * they're served unchecked, and the page says so. Only the files the row
+ * names can be served, and only to AP.
  */
 export async function GET(request: NextRequest, ctx: RouteContext<"/ap/[id]/pdf">) {
   const session = await getApSession();
@@ -41,9 +43,10 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/ap/[id]/pdf"
   }[file];
   if (!which?.fileId) return new Response("Not found", { status: 404 });
   const bytes = await files.getFileBytes(which.fileId);
-  if (which.hash && sha256(bytes) !== which.hash) {
-    console.error(`[ap pdf] ${row.request_id}'s ${file} packet is ${sha256(bytes)}, the row says ${which.hash}`);
-    return new Response("This file doesn't match the record of what was signed (its SHA-256 differs from the Sheet's). Don't pay from it; ask the admin to look.", { status: 409 });
+  if (!which.hash || sha256(bytes) !== which.hash) {
+    console.error(`[ap pdf] ${row.request_id}'s ${file} packet is ${sha256(bytes)}, the row says ${which.hash || "nothing"}`);
+    const why = which.hash ? "its SHA-256 differs from the Sheet's" : "the Sheet has no SHA-256 for it";
+    return new Response(`This file can't be matched to the record of what was signed (${why}). Don't pay from it; ask the admin to look.`, { status: 409 });
   }
   return pdfResponse(bytes, which.name, "private, no-store");
 }

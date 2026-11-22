@@ -107,6 +107,15 @@ describe("AP's packets", () => {
     expect(response.status).toBe(409);
     expect(await response.text()).toContain("Don't pay from it");
   });
+
+  it("refuses a current packet whose hash cell is blank", async () => {
+    h.rows[0] = { ...h.rows[0], chair_pdf_sha256: "" };
+    const response = await getPdf("file=cosigned");
+    expect(response.status).toBe(409);
+    expect(await response.text()).toContain("the Sheet has no SHA-256 for it");
+    // An earlier version has no hash to check, and is still served for reference.
+    expect((await getPdf("file=signed&v=1")).status).toBe(200);
+  });
 });
 
 describe("the CSV export", () => {

@@ -1,5 +1,5 @@
 import type { CategoryRow, RequestRow, RequestStatus } from "@/server/adapters/types";
-import { returnedAtOf } from "@/server/requests/resubmit";
+import { returnedAtOf, returnSource } from "@/server/requests/resubmit";
 import { parseDate } from "@/lib/dates";
 import { squash } from "@/lib/mailing";
 
@@ -28,8 +28,11 @@ const latest = (cells: string[]): Date | null =>
  * When the request reached AP: when the requester signed, or once its event
  * chair and its check signers had signed, when it had them. Every later step's
  * cells start blank on a new version, so the latest of them is this version's.
+ * Null while it's still with the chair or the signers, and when one of them
+ * sent it back before AP had it.
  */
 export function reachedApAt(row: RequestRow): Date | null {
+  if (BEFORE_AP.includes(row.status) || (row.status === "Returned" && returnSource(row) !== "ap")) return null;
   return latest([row.submitted_at, row.chair_signed_at, row.signer_2_signed_at, row.authorized_sent_at]);
 }
 
@@ -147,7 +150,7 @@ export function fiscalYears(rows: RequestRow[]): string[] {
   return [...years].sort().reverse();
 }
 
-/** Offered while the Categories tab has no rows yet. */
+/** What the dropdown calls "no category" while the Categories tab has no rows yet. It's never saved: a request without a category has a blank cell. */
 export const UNCATEGORIZED = "Uncategorized";
 
 export interface CategoryChoices {
@@ -157,6 +160,8 @@ export interface CategoryChoices {
   selected: string;
   /** Whether `selected` comes from the FO10's Budget Account rather than a category already saved. */
   suggested: boolean;
+  /** The Categories tab has no rows yet, so there's nothing to choose but "Uncategorized" (blank). */
+  noneYet: boolean;
 }
 
 /** The active categories by `order`, smallest first; a blank or unreadable order goes last, in the tab's order. */
@@ -174,12 +179,12 @@ export function activeCategories(rows: CategoryRow[]): string[] {
 }
 
 export function categoryChoices(rows: CategoryRow[], row: Pick<RequestRow, "budget_category" | "budget_account">): CategoryChoices {
-  const hasRows = rows.some((r) => String(r.name ?? "").trim());
-  const options = hasRows ? activeCategories(rows) : [UNCATEGORIZED];
+  const noneYet = !rows.some((r) => String(r.name ?? "").trim());
+  const options = activeCategories(rows);
   const current = String(row.budget_category ?? "").trim();
   if (current && !options.includes(current)) options.push(current);
-  if (current) return { options, selected: current, suggested: false };
+  if (current) return { options, selected: current, suggested: false, noneYet };
   const account = squash(row.budget_account);
   const match = account ? options.find((name) => squash(name) === account) : undefined;
-  return { options, selected: match ?? "", suggested: Boolean(match) };
+  return { options, selected: match ?? "", suggested: Boolean(match), noneYet };
 }

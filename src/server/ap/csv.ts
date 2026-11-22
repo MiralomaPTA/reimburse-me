@@ -50,5 +50,5 @@ export function requestsCsv(rows: RequestRow[]): string {
   const cell = (row: RequestRow, column: (typeof CSV_COLUMNS)[number]) =>
     column === "version" ? versionOf(row) : (row as unknown as Record<string, unknown>)[column];
   const lines = [CSV_COLUMNS.join(","), ...rows.map((row) => CSV_COLUMNS.map((column) => csvField(cell(row, column))).join(","))];
-  return `﻿${lines.join("\r\n")}\r\n`;
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
 }

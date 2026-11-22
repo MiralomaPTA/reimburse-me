@@ -74,6 +74,8 @@ describe("SheetTable rows", () => {
     const rows = await table().readAll();
     expect(api.spreadsheets.values.get).toHaveBeenCalledTimes(1);
     expect(api.spreadsheets.values.get).toHaveBeenCalledWith(expect.objectContaining({ range: "'Requests'" }));
+    // Numbers unformatted, but a date typed into the Sheet as the text it shows, not a serial number.
+    expect(api.spreadsheets.values.get).toHaveBeenCalledWith(expect.objectContaining({ valueRenderOption: "UNFORMATTED_VALUE", dateTimeRenderOption: "FORMATTED_STRING" }));
     expect(rows.map((r) => [r.rowNumber, r.row])).toEqual([
       [2, { a: "A1", b: "B1", c: "C1", n: 7 }],
       [4, { a: "A3", b: "B3", c: "", n: 0 }],

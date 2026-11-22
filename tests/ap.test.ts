@@ -16,9 +16,10 @@ import {
   reachedApAt,
   UNCATEGORIZED,
 } from "@/server/ap/dashboard";
-import { mailedDifferences } from "@/server/ap/mailed";
+import { mailedBeforeBillPay, mailedCheck, mailedChecks, mailedDifferences } from "@/server/ap/mailed";
+import { sha256 } from "@/server/hash";
 import type { StoredRequest } from "@/server/requests/stored";
-import { apRow, request, world } from "./support";
+import { apRow, MemoryFiles, request, world } from "./support";
 
 const NOW = new Date("2026-11-19T20:00:00.000Z");
 const defaults = parseFilters({});
@@ -50,6 +51,18 @@ describe("a request's age", () => {
     expect(ageDays(apRow({ status: "Awaiting chair", chair_sent_at: "2026-11-17T17:00:00.000Z" }), NOW)).toBe(2);
     expect(ageDays(apRow({ status: "Awaiting chair" }), NOW)).toBe(18);
     expect(ageDays(apRow({ status: "Awaiting signers", signers_sent_at: "2026-11-19T17:00:00.000Z" }), NOW)).toBe(0);
+  });
+
+  it("has no Reached AP while the chair or the signers have it, or after one of them sent it back", () => {
+    const chaired = { chair_step: "Signed", chair_signed_at: "2026-11-10T17:00:00.000Z" } as const;
+    expect(reachedApAt(apRow({ ...chaired, status: "Awaiting signers", check_delivery: "mail" }))).toBeNull();
+    expect(reachedApAt(apRow({ status: "Awaiting chair" }))).toBeNull();
+    expect(reachedApAt(apRow({ ...chaired, status: "Returned", signers_step: "Sent back" }))).toBeNull();
+    expect(reachedApAt(apRow({ status: "Returned", chair_step: "Sent back" }))).toBeNull();
+    // Sent back by AP (a status typed in the Sheet in 2a): it had reached AP.
+    expect(reachedApAt(apRow({ ...chaired, status: "Returned" }))?.toISOString()).toBe("2026-11-10T17:00:00.000Z");
+    // The age of one still with the signers is unchanged.
+    expect(ageDays(apRow({ ...chaired, status: "Awaiting signers" }), NOW)).toBe(9);
   });
 
   it("is blank once Paid, and counts a status typed by hand from reaching AP", () => {
@@ -117,13 +130,13 @@ describe("budget categories", () => {
     { name: "Hospitality", active: "", order: "" },
   ];
 
-  it("offers Uncategorized until the tab has rows, then its active ones by order", () => {
-    expect(categoryChoices([], apRow()).options).toEqual([UNCATEGORIZED]);
-    expect(categoryChoices(tab, apRow())).toEqual({ options: ["Fun Run", "Supplies", "Hospitality"], selected: "", suggested: false });
+  it("offers nothing to save until the tab has rows (the blank is called Uncategorized), then its active ones by order", () => {
+    expect(categoryChoices([], apRow())).toEqual({ options: [], selected: "", suggested: false, noneYet: true });
+    expect(categoryChoices(tab, apRow())).toEqual({ options: ["Fun Run", "Supplies", "Hospitality"], selected: "", suggested: false, noneYet: false });
   });
 
   it("keeps a request's own category after it's made inactive", () => {
-    expect(categoryChoices(tab, apRow({ budget_category: "Old line" }))).toEqual({ options: ["Fun Run", "Supplies", "Hospitality", "Old line"], selected: "Old line", suggested: false });
+    expect(categoryChoices(tab, apRow({ budget_category: "Old line" }))).toEqual({ options: ["Fun Run", "Supplies", "Hospitality", "Old line"], selected: "Old line", suggested: false, noneYet: false });
   });
 
   it("starts on the FO10's Budget Account when it names a category and none is saved", () => {
@@ -160,19 +173,27 @@ describe("budget categories", () => {
     expect(actions.records).toEqual([]);
   });
 
-  it("still saves when the Actions tab doesn't take the record", async () => {
+  it("never saves Uncategorized: it's only the dropdown's name for blank while the tab is empty", async () => {
     const { adapters, log } = world();
     log.rows.push(apRow());
+    await expect(setCategory({ requestId: "FY27-001", category: UNCATEGORIZED, by: "a@example.org" }, adapters)).rejects.toEqual(new CategoryError("unknown"));
+    expect(log.rows[0].budget_category).toBe("");
+  });
+
+  it("still saves when the Actions tab doesn't take the record", async () => {
+    const { adapters, log, categoryRows } = world();
+    categoryRows.push(...tab);
+    log.rows.push(apRow());
     adapters.actions = { append: async () => Promise.reject(new Error("Sheets refused")), listFor: async () => [] };
-    expect(await setCategory({ requestId: "FY27-001", category: UNCATEGORIZED, by: "a@example.org" }, adapters)).toBe("saved");
-    expect(log.rows[0].budget_category).toBe(UNCATEGORIZED);
+    expect(await setCategory({ requestId: "FY27-001", category: "Supplies", by: "a@example.org" }, adapters)).toBe("saved");
+    expect(log.rows[0].budget_category).toBe("Supplies");
   });
 });
 
 describe("the CSV export", () => {
   it("starts with a byte-order mark and the header, one line per request", () => {
     const csv = requestsCsv([apRow({ reimbursement_claimed: "45.00", version: "" as never }), apRow({ request_id: "FY27-002", version: 2 })]);
-    expect(csv.startsWith("﻿")).toBe(true);
+    expect(csv.startsWith("\uFEFF")).toBe(true);
     const lines = csv.slice(1).split("\r\n");
     expect(lines[0]).toBe(CSV_COLUMNS.join(","));
     expect(lines).toHaveLength(4); // header, two rows, and the final line break
@@ -216,5 +237,91 @@ describe("a mailed check on the dashboard", () => {
     expect(differences[1]).toContain("$10.00");
     expect(differences[2]).toContain("version 2");
     expect(mailedDifferences(row({ reimbursement_claimed: "ten" }), stored())[0]).toContain('"ten"');
+  });
+});
+
+describe("reading a mailed check for the dashboard", () => {
+  const packet = new TextEncoder().encode("the packet as signed");
+  const signed = (extra: Partial<StoredRequest> = {}): StoredRequest => ({
+    requestId: "FY27-001",
+    version: 1,
+    submittedAt: "2026-11-01T17:00:00.000Z",
+    requesterEmail: "pat@example.org",
+    request: { ...request(["r1"]), checkDelivery: "mail", address: "123 Main St Apt 4", cityStateZip: "San Francisco, CA 94127" },
+    packet: { sha256: sha256(packet), pageCount: 2, chairLine: { page: 0, x: 0, y: 0, width: 1, height: 1 } },
+    ...extra,
+  });
+  const json = (stored: StoredRequest) => new TextEncoder().encode(JSON.stringify(stored));
+  const mailedRow = (extra: Partial<RequestRow> = {}) =>
+    apRow({
+      check_delivery: "mail",
+      address: "123 Main St Apt 4",
+      city_zip: "San Francisco, CA 94127",
+      reimbursement_claimed: "10.00",
+      request_file_id: "json-1",
+      pdf_sha256: sha256(packet),
+      signers_step: "Signed",
+      ...extra,
+    });
+  const filesWith = (entries: Record<string, Uint8Array>) => {
+    const files = new MemoryFiles();
+    for (const [id, bytes] of Object.entries(entries)) files.add(id, "app", bytes);
+    return files;
+  };
+
+  it("shows the address as signed when the JSON belongs to the packet the row records", async () => {
+    const check = await mailedCheck(mailedRow(), filesWith({ "json-1": json(signed()) }));
+    expect(check).toEqual({ kind: "signed", address: "123 Main St Apt 4, San Francisco, CA 94127", amountCents: 1000, differences: [] });
+    expect(await mailedCheck(apRow({ check_delivery: "pickup" }), new MemoryFiles())).toBeNull();
+  });
+
+  it("won't vouch for a JSON from another request or another packet, whatever it says", async () => {
+    const files = filesWith({
+      "json-1": json(signed({ requestId: "FY27-002" })),
+      "json-2": json(signed({ packet: { ...signed().packet, sha256: "something else" } })),
+      "json-3": json(signed({ packet: { ...signed().packet, sha256: "" } })),
+    });
+    // Another request's JSON; another packet's; and a blank hash on both sides, which matches nothing.
+    for (const row of [mailedRow(), mailedRow({ request_file_id: "json-2" }), mailedRow({ request_file_id: "json-3", pdf_sha256: "" })]) {
+      expect(await mailedCheck(row, files)).toEqual({ kind: "problem", problem: expect.stringContaining("doesn't match the packet") });
+    }
+  });
+
+  it("says when the JSON is missing or can't be read", async () => {
+    expect(await mailedCheck(mailedRow({ request_file_id: "" }), new MemoryFiles())).toEqual({ kind: "problem", problem: expect.stringContaining("no saved copy") });
+    expect(await mailedCheck(mailedRow(), new MemoryFiles())).toEqual({ kind: "problem", problem: expect.stringContaining("couldn't be read just now") });
+    expect(await mailedCheck(mailedRow(), filesWith({ "json-1": new TextEncoder().encode("not json") }))).toMatchObject({ kind: "problem" });
+  });
+
+  it("knows a paper check mailed before bill pay, with the Sheet's address and no FO10", async () => {
+    const october = apRow({ check_delivery: "mail", address: "9 Elsewhere Ave", city_zip: "San Francisco, CA 94112" });
+    expect(mailedBeforeBillPay(october)).toBe(true);
+    expect(await mailedCheck(october, new MemoryFiles())).toEqual({ kind: "before-bill-pay", address: "9 Elsewhere Ave, San Francisco, CA 94112" });
+    // A bill pay row whose JSON cell was cleared isn't mistaken for one.
+    expect(mailedBeforeBillPay(mailedRow({ request_file_id: "" }))).toBe(false);
+    expect(mailedBeforeBillPay(apRow({ check_delivery: "pickup" }))).toBe(false);
+  });
+
+  it("reads the list's unpaid mailed checks a few at a time", async () => {
+    let reading = 0;
+    let most = 0;
+    const files = filesWith({ "json-1": json(signed()) });
+    const getFileBytes = files.getFileBytes.bind(files);
+    files.getFileBytes = async (id: string) => {
+      most = Math.max(most, ++reading);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      reading--;
+      return getFileBytes(id);
+    };
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => mailedRow({ request_id: `FY27-0${10 + i}` })),
+      mailedRow({ request_id: "FY27-099", status: "Paid" }),
+      apRow({ request_id: "FY27-098", check_delivery: "pickup" }),
+    ];
+    const checks = await mailedChecks(rows, files, 3);
+    expect(most).toBe(3);
+    expect(checks.size).toBe(10);
+    expect(checks.has("FY27-099")).toBe(false);
+    expect(checks.has("FY27-098")).toBe(false);
   });
 });

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { getAdapters } from "@/server/adapters";
 import { requireApSession } from "@/server/ap/access";
 import { ageDays, filtersQuery, fiscalYears, formatAge, matches, oldestFirst, parseFilters, STATUSES } from "@/server/ap/dashboard";
-import { mailedCheck } from "@/server/ap/mailed";
+import { mailedChecks, type MailedCheck } from "@/server/ap/mailed";
+import type { RequestRow } from "@/server/adapters/types";
 import { versionOf } from "@/server/requests/rows";
 import { formatDateShort, parseDate } from "@/lib/dates";
 import { formatMoney, parseMoney } from "@/lib/money";
@@ -21,8 +22,8 @@ export default async function ApPage(props: PageProps<"/ap">) {
   const all = await log.list();
   const rows = oldestFirst(all.filter((row) => matches(row, filters)));
   const now = new Date();
-  // A mailed check's address comes from what was signed, never the Sheet; the few on the list are read from Drive.
-  const mailed = new Map(await Promise.all(rows.filter((row) => row.check_delivery === "mail").map(async (row) => [row.request_id, await mailedCheck(row, files)] as const)));
+  // A mailed check's address comes from what was signed, never the Sheet, so the unpaid ones on the list are read from Drive.
+  const mailed = await mailedChecks(rows, files);
   const claimedCents = rows.reduce((sum, row) => sum + (parseMoney(String(row.reimbursement_claimed ?? "")) ?? 0), 0);
   const query = filtersQuery(filters);
 
@@ -90,7 +91,7 @@ export default async function ApPage(props: PageProps<"/ap">) {
             const age = formatAge(ageDays(row, now));
             const submitted = parseDate(row.submitted_at);
             const mail = mailed.get(row.request_id);
-            const warning = mail && ("problem" in mail ? mail.problem : mail.differences.length > 0 ? "The Sheet differs from what was signed" : "");
+            const warning = mail?.kind === "problem" ? mail.problem : mail?.kind === "signed" && mail.differences.length > 0 ? "The Sheet differs from what was signed" : "";
             return (
               <li key={row.request_id}>
                 <Link href={`/ap/${encodeURIComponent(row.request_id)}`} className="block px-4 py-3 hover:bg-neutral-50">
@@ -110,7 +111,7 @@ export default async function ApPage(props: PageProps<"/ap">) {
                       row.budget_category || "No category",
                       age ? (age === "today" ? "since today" : `waiting ${age}`) : "",
                       versionOf(row) > 1 ? `v${versionOf(row)}` : "",
-                      mail && !("problem" in mail) ? `Mail to ${mail.address}` : row.check_delivery === "mail" ? "Mail" : "",
+                      mailLabel(row, mail),
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -124,4 +125,11 @@ export default async function ApPage(props: PageProps<"/ap">) {
       )}
     </div>
   );
+}
+
+/** "Mail to 123 Main St, San Francisco, CA 94127" when the address could be read as signed; "Mail" otherwise, and for a Paid one. */
+function mailLabel(row: RequestRow, mail: MailedCheck | undefined): string {
+  if (mail?.kind === "signed") return `Mail to ${mail.address}`;
+  if (mail?.kind === "before-bill-pay") return `Mail to ${mail.address}, from before bill pay`;
+  return row.check_delivery === "mail" ? "Mail" : "";
 }
