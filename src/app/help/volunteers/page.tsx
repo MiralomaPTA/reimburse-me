@@ -110,6 +110,8 @@ export default function VolunteerGuidePage() {
             q.computer,
             q.event,
             q.sentBack,
+            q.checkWritten,
+            q.paid,
             q.chairSlow,
             ...(mailingInGuides() ? [q.signersSlow] : []),
             {
