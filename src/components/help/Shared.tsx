@@ -21,7 +21,7 @@ export const linkMinutes = config.magicLinkMinutes;
 export const mailingInGuides = () => config.mailedChecks === "everyone" && config.checkSigners.length >= 2 && config.billPayAccounts.length > 0;
 
 /** The statuses *My requests* can show, with "Awaiting signers" once the guides describe mailing. */
-export const statusList = () => `Awaiting chair, ${mailingInGuides() ? "Awaiting signers, " : ""}Submitted, Approved, Returned or Paid`;
+export const statusList = () => `Awaiting chair, ${mailingInGuides() ? "Awaiting signers, " : ""}Submitted, Approved, Check written, Returned or Paid`;
 
 /** What a mailed check does before it reaches the PTA; nothing while the guides leave mailing out. */
 function MailStep() {
@@ -128,7 +128,9 @@ export function WhatHappensNext({ check, stipendNote = false, children }: { chec
           {stipendNote ? "The copy also spells out which stipend each line came from and what's left in it, so you have a record." : "Keep it for your records."}
         </p>
         <p>
-          The team checks the request and pays by check, {check}. If anything is missing, they&apos;ll send it back with a note so you can fix it.
+          The team checks the request and pays by check, {check}. If anything is missing, they&apos;ll send it back with a note so you can fix it. Either way,
+          you&apos;ll get an email: with the note, or once your check has gone out. While a check waits for its second signature, your request says{" "}
+          <strong>Check written</strong>.
         </p>
         <ChairStep />
         <MailStep />
@@ -147,7 +149,8 @@ export function WhatHappensNext({ check, stipendNote = false, children }: { chec
       <MailStep />
       {stipendNote && <p>The email also spells out which stipend each line came from and what&apos;s left in it, so you have a record.</p>}
       <p>
-        The team checks the request and pays by check, {check}. If anything is missing, they&apos;ll email you.
+        The team checks the request and pays by check, {check}. If anything is missing, they&apos;ll send it back with a note, and you&apos;ll get an email. You&apos;ll
+        get one when your check goes out, too.
       </p>
       {children}
     </Section>

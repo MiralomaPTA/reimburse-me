@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { getAdapters } from "@/server/adapters";
 import { requireApSession } from "@/server/ap/access";
-import { ageDays, filtersQuery, fiscalYears, formatAge, matches, oldestFirst, parseFilters, STATUSES } from "@/server/ap/dashboard";
+import { ageDays, AWAITING_SIGNATURE, awaitingSignature, filtersQuery, fiscalYears, formatAge, matches, oldestFirst, parseFilters, STATUSES } from "@/server/ap/dashboard";
+import { paidByBillPay } from "@/server/ap/actions";
 import { mailedChecks, type MailedCheck } from "@/server/ap/mailed";
 import type { RequestRow } from "@/server/adapters/types";
 import { versionOf } from "@/server/requests/rows";
@@ -24,6 +25,8 @@ export default async function ApPage(props: PageProps<"/ap">) {
   const now = new Date();
   // A mailed check's address comes from what was signed, never the Sheet, so the unpaid ones on the list are read from Drive.
   const mailed = await mailedChecks(rows, files);
+  // The co-signer's to-do list: paper checks written and waiting for their second signature.
+  const toSign = all.filter(awaitingSignature).length;
   const claimedCents = rows.reduce((sum, row) => sum + (parseMoney(String(row.reimbursement_claimed ?? "")) ?? 0), 0);
   const query = filtersQuery(filters);
 
@@ -48,6 +51,7 @@ export default async function ApPage(props: PageProps<"/ap">) {
                 {status}
               </option>
             ))}
+            <option value={AWAITING_SIGNATURE}>Awaiting signature (paper checks written)</option>
             <option value="all">Everything</option>
           </select>
         </div>
@@ -81,6 +85,15 @@ export default async function ApPage(props: PageProps<"/ap">) {
 
       <p className="text-sm text-neutral-600">
         {rows.length === 1 ? "1 request" : `${rows.length} requests`}, {formatMoney(claimedCents)} claimed. Oldest first.
+        {toSign > 0 && filters.status !== AWAITING_SIGNATURE && (
+          <>
+            {" "}
+            <Link href={`/ap?status=${AWAITING_SIGNATURE}`} className="font-medium text-sky-800 underline">
+              {toSign === 1 ? "1 check is" : `${toSign} checks are`} awaiting the second signature
+            </Link>
+            .
+          </>
+        )}
       </p>
 
       {rows.length === 0 ? (
@@ -111,6 +124,7 @@ export default async function ApPage(props: PageProps<"/ap">) {
                       row.budget_category || "No category",
                       age ? (age === "today" ? "since today" : `waiting ${age}`) : "",
                       versionOf(row) > 1 ? `v${versionOf(row)}` : "",
+                      row.check_number && (row.status === "Check written" || row.status === "Paid") ? (paidByBillPay(row) ? `confirmation ${row.check_number}` : `check #${row.check_number}`) : "",
                       mailLabel(row, mail),
                     ]
                       .filter(Boolean)

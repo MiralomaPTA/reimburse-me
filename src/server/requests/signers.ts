@@ -110,7 +110,7 @@ export function budgetAccountDefault(request: Pick<RequestInput, "items" | "dona
  * that was sent back, or one still waiting, can't make the next one look
  * like the account's usual.
  */
-const wentThrough = (r: RequestRow) => r.status === "Approved" || r.status === "Paid" || (r.status === "Submitted" && r.signers_step === "Signed");
+const wentThrough = (r: RequestRow) => r.status === "Approved" || r.status === "Check written" || r.status === "Paid" || (r.status === "Submitted" && r.signers_step === "Signed");
 
 /**
  * The signs of an account that's been taken over, which matter more once a
