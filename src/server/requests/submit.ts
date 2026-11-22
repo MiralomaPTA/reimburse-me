@@ -218,14 +218,22 @@ type StepCell =
   | "authorized_pdf_file_id"
   | "authorized_pdf_sha256"
   | "authorized_sent_at"
-  | "authorized_send_error";
+  | "authorized_send_error"
+  | "approved_at"
+  | "approved_by"
+  | "check_number"
+  | "check_date"
+  | "check_written_by"
+  | "paid_date"
+  | "paid_by";
 
 /**
  * The cells of every step after the requester's, as a version starts them:
  * the chair's or the check signers' step waiting when it applies, and
  * everything a later step fills in blank. A new version starts clean, so
- * nothing an earlier version's chair or check signers did carries over; their
- * files stay in Drive and their signatures in the Signatures tab.
+ * nothing an earlier version's chair, check signers or AP did carries over;
+ * their files stay in Drive, their signatures in the Signatures tab, and AP's
+ * steps (a voided check number among them) in the Actions tab.
  */
 export function stepCells(checked: CheckedSubmission, requesterEmail: string, at: Date): Pick<RequestRow, StepCell> {
   const { routing, toChair, toSigners } = checked;
@@ -264,6 +272,13 @@ export function stepCells(checked: CheckedSubmission, requesterEmail: string, at
     authorized_pdf_sha256: "",
     authorized_sent_at: "",
     authorized_send_error: "",
+    approved_at: "",
+    approved_by: "",
+    check_number: "",
+    check_date: "",
+    check_written_by: "",
+    paid_date: "",
+    paid_by: "",
   };
 }
 
@@ -457,8 +472,6 @@ export async function submitRequest(input: SubmitInput, adapters: Adapters): Pro
     pdf_sha256: packet.sha256,
     signature_type: input.signature.type,
     budget_category: "",
-    check_number: "",
-    paid_date: "",
     returned_note: "",
     version: 1,
     updated_at: submittedAt.toISOString(),

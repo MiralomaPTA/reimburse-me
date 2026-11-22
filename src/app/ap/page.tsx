@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getAdapters } from "@/server/adapters";
 import { requireApSession } from "@/server/ap/access";
 import { ageDays, filtersQuery, fiscalYears, formatAge, matches, oldestFirst, parseFilters, STATUSES } from "@/server/ap/dashboard";
+import { paidByBillPay } from "@/server/ap/actions";
 import { mailedChecks, type MailedCheck } from "@/server/ap/mailed";
 import type { RequestRow } from "@/server/adapters/types";
 import { versionOf } from "@/server/requests/rows";
@@ -24,6 +25,8 @@ export default async function ApPage(props: PageProps<"/ap">) {
   const now = new Date();
   // A mailed check's address comes from what was signed, never the Sheet, so the unpaid ones on the list are read from Drive.
   const mailed = await mailedChecks(rows, files);
+  // The co-signer's to-do list: checks written but not yet sent.
+  const awaitingSignature = all.filter((row) => row.status === "Check written").length;
   const claimedCents = rows.reduce((sum, row) => sum + (parseMoney(String(row.reimbursement_claimed ?? "")) ?? 0), 0);
   const query = filtersQuery(filters);
 
@@ -45,7 +48,7 @@ export default async function ApPage(props: PageProps<"/ap">) {
             <option value="">With AP</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {status === "Check written" ? "Check written: awaiting signature" : status}
               </option>
             ))}
             <option value="all">Everything</option>
@@ -81,6 +84,15 @@ export default async function ApPage(props: PageProps<"/ap">) {
 
       <p className="text-sm text-neutral-600">
         {rows.length === 1 ? "1 request" : `${rows.length} requests`}, {formatMoney(claimedCents)} claimed. Oldest first.
+        {awaitingSignature > 0 && filters.status !== "Check written" && (
+          <>
+            {" "}
+            <Link href="/ap?status=Check+written" className="font-medium text-sky-800 underline">
+              {awaitingSignature === 1 ? "1 check is" : `${awaitingSignature} checks are`} awaiting the second signature
+            </Link>
+            .
+          </>
+        )}
       </p>
 
       {rows.length === 0 ? (
@@ -111,6 +123,7 @@ export default async function ApPage(props: PageProps<"/ap">) {
                       row.budget_category || "No category",
                       age ? (age === "today" ? "since today" : `waiting ${age}`) : "",
                       versionOf(row) > 1 ? `v${versionOf(row)}` : "",
+                      row.check_number && (row.status === "Check written" || row.status === "Paid") ? (paidByBillPay(row) ? `confirmation ${row.check_number}` : `check #${row.check_number}`) : "",
                       mailLabel(row, mail),
                     ]
                       .filter(Boolean)

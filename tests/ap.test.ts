@@ -65,6 +65,16 @@ describe("a request's age", () => {
     expect(ageDays(apRow({ ...chaired, status: "Awaiting signers" }), NOW)).toBe(9);
   });
 
+  it("counts a written check from its date, and keeps it in the default view: it's the co-signer's to-do list", () => {
+    const written = apRow({ status: "Check written", check_number: "1043", check_date: "2026-11-15" });
+    expect(ageDays(written, NOW)).toBe(4);
+    // A date typed into the Sheet reads too.
+    expect(ageDays(apRow({ status: "Check written", check_date: "11/15/2026" }), NOW)).toBe(4);
+    expect(matches(written, defaults)).toBe(true);
+    expect(matches(written, parseFilters({ status: "Check written" }))).toBe(true);
+    expect(matches(apRow(), parseFilters({ status: "Check written" }))).toBe(false);
+  });
+
   it("is blank once Paid, and counts a status typed by hand from reaching AP", () => {
     expect(ageDays(apRow({ status: "Paid" }), NOW)).toBeNull();
     expect(ageDays(apRow({ status: "Check written" as never }), NOW)).toBe(18);

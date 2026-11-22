@@ -11,7 +11,7 @@ import { squash } from "@/lib/mailing";
 
 export { isAp } from "@/server/auth/roles";
 
-export const STATUSES: RequestStatus[] = ["Awaiting chair", "Awaiting signers", "Submitted", "Approved", "Returned", "Paid"];
+export const STATUSES: RequestStatus[] = ["Awaiting chair", "Awaiting signers", "Submitted", "Approved", "Check written", "Returned", "Paid"];
 
 /** Still with the event chair or the check signers, so not with AP yet. */
 const BEFORE_AP: string[] = ["Awaiting chair", "Awaiting signers"];
@@ -38,9 +38,10 @@ export function reachedApAt(row: RequestRow): Date | null {
 
 /**
  * What a request's age counts from: reaching AP for Submitted and Approved,
- * the return for Returned, and the last email to the chair or the check
- * signers while it waits for them. Paid has none. A status typed into the
- * Sheet that the app doesn't know counts from reaching AP.
+ * the check's date for Check written, the return for Returned, and the last
+ * email to the chair or the check signers while it waits for them. Paid has
+ * none. A status typed into the Sheet that the app doesn't know counts from
+ * reaching AP.
  */
 export function ageFrom(row: RequestRow): Date | null {
   switch (row.status) {
@@ -48,6 +49,8 @@ export function ageFrom(row: RequestRow): Date | null {
       return null;
     case "Returned":
       return parseDate(returnedAtOf(row));
+    case "Check written":
+      return parseDate(row.check_date) ?? reachedApAt(row);
     case "Awaiting chair":
       return parseDate(row.chair_sent_at) ?? parseDate(row.submitted_at);
     case "Awaiting signers":

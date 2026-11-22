@@ -2,12 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getAdapters } from "@/server/adapters";
 import { requireApprovedSession } from "@/server/auth/session";
+import { paidByBillPay, paidHow } from "@/server/ap/actions";
 import { config } from "@/server/config";
+import { paidLine } from "@/server/email/templates";
 import { chairSending, type ChairSending, type ResendProblem } from "@/server/requests/chair";
 import { returnedBy } from "@/server/requests/resubmit";
 import { versionOf } from "@/server/requests/rows";
 import { authorizedSending, signerSending, type AuthorizedResendProblem, type SignerResendProblem, type SignerSending } from "@/server/requests/signers";
-import { formatDateTime, formatMonthDay, parseDate } from "@/lib/dates";
+import { formatDateTime, formatDay, formatMonthDay, parseDate } from "@/lib/dates";
 import { parseEvents } from "@/lib/events";
 import { formatAddress } from "@/lib/mailing";
 import { formatMoney, parseMoney } from "@/lib/money";
@@ -84,9 +86,31 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
         </div>
       )}
       {returnedWho && <Returned row={row} by={returnedWho} />}
+      {row.status === "Check written" && (
+        <div className="rounded-md border border-sky-300 bg-sky-50 p-4 text-sm text-sky-900">
+          {paidByBillPay(row) ? (
+            <>
+              <div className="font-medium">Payment set up</div>
+              <p className="mt-1">
+                The PTA set up the payment with its bank{row.check_date ? ` on ${formatDay(row.check_date)}` : ""}. You&apos;ll get an email once the bank has mailed your
+                check to {mailTo}.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="font-medium">Check written, awaiting second signature</div>
+              <p className="mt-1">
+                The PTA has written your check{row.check_number ? ` (#${row.check_number})` : ""}. Every PTA check needs two signatures, and it&apos;s waiting for the second.
+                You&apos;ll get an email when it goes out.
+              </p>
+            </>
+          )}
+        </div>
+      )}
       {row.status === "Paid" && (
-        <div className="rounded-md border border-emerald-300 bg-emerald-50 p-4 text-emerald-900">
-          Paid with check #{row.check_number || "?"} {row.paid_date ? `on ${row.paid_date}` : ""}.
+        <div className="rounded-md border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900">
+          <div className="font-medium">Paid</div>
+          {row.paid_date && <p className="mt-1">{paidLine({ how: paidHow(row), checkNumber: row.check_number, paidDate: row.paid_date, address: mailTo || undefined })}</p>}
         </div>
       )}
 

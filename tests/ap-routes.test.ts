@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   files: new Map<string, Uint8Array>(),
   categories: [] as CategoryRow[],
   actions: [] as ActionRecord[],
+  mail: [] as { to: string[]; subject: string }[],
+  mailFails: false,
 }));
 
 vi.mock("@/server/auth/session", () => ({
@@ -22,6 +24,18 @@ vi.mock("@/server/adapters", () => ({
       update: async (id: string, patch: Partial<RequestRow>) => {
         const i = h.rows.findIndex((r) => r.request_id === id);
         h.rows[i] = { ...h.rows[i], ...patch };
+      },
+      updateIf: async (id: string, condition: (row: RequestRow) => boolean, patch: Partial<RequestRow>) => {
+        const i = h.rows.findIndex((r) => r.request_id === id);
+        if (i === -1 || !condition(h.rows[i])) return false;
+        h.rows[i] = { ...h.rows[i], ...patch };
+        return true;
+      },
+    },
+    mailer: {
+      send: async (message: { to: string[]; subject: string }) => {
+        if (h.mailFails) throw new Error("Gmail refused");
+        h.mail.push(message);
       },
     },
     files: {
@@ -39,6 +53,8 @@ vi.mock("@/server/adapters", () => ({
 import { GET as pdf } from "@/app/ap/[id]/pdf/route";
 import { GET as exportCsv } from "@/app/ap/export/route";
 import { POST as saveCategory } from "@/app/api/ap/[id]/category/route";
+import { POST as act } from "@/app/api/ap/[id]/action/route";
+import { lockTiming } from "@/server/requests/lock";
 import { apRow } from "./support";
 
 const bytes = (text: string) => new TextEncoder().encode(text);
@@ -52,7 +68,19 @@ const post = (category: string) => {
   } as RouteContext<"/api/ap/[id]/category">);
 };
 
+const step = (fields: Record<string, string>) => {
+  const body = new FormData();
+  for (const [name, value] of Object.entries(fields)) body.set(name, value);
+  return act(new NextRequest("https://portal.example/api/ap/FY27-001/action", { method: "POST", body }), {
+    params: Promise.resolve({ id: "FY27-001" }),
+  } as RouteContext<"/api/ap/[id]/action">);
+};
+const location = (response: Response) => response.headers.get("Location");
+
 beforeEach(() => {
+  lockTiming.settleMs = 0;
+  h.mail = [];
+  h.mailFails = false;
   h.role = "ap";
   h.files = new Map([
     ["signed-v1", bytes("v1")],
@@ -155,5 +183,42 @@ describe("saving a category", () => {
     expect((await post("Supplies")).headers.get("Location")).toBe("/?next=%2Fap%2FFY27-001");
     expect(h.rows[0].budget_category).toBe("");
     expect(h.actions).toEqual([]);
+  });
+});
+
+describe("AP's steps", () => {
+  it("approve and come back to the page saying so", async () => {
+    const response = await step({ action: "approve" });
+    expect(response.status).toBe(303);
+    expect(location(response)).toBe("/ap/FY27-001?done=approve");
+    expect(h.rows[0]).toMatchObject({ status: "Approved", approved_by: "treasurer@example.org", lock: "" });
+    expect(h.actions.map((a) => a.action)).toEqual(["approve"]);
+  });
+
+  it("record a check that's already sent as Paid, and say when the requester's email failed", async () => {
+    h.rows[0] = { ...h.rows[0], budget_category: "Supplies", requester_email: "pat@example.org" };
+    h.mailFails = true;
+    const response = await step({ action: "record", checkNumber: "1043", checkDate: "2026-11-01", sent: "1" });
+    expect(location(response)).toBe("/ap/FY27-001?done=paid&emailed=0");
+    expect(h.rows[0]).toMatchObject({ status: "Paid", check_number: "1043", paid_date: "2026-11-01" });
+  });
+
+  it("come back with a problem code when refused, and change nothing", async () => {
+    expect(location(await step({ action: "return", note: "" }))).toBe("/ap/FY27-001?problem=note");
+    expect(location(await step({ action: "record", checkNumber: "1043", checkDate: "2026-11-01" }))).toBe("/ap/FY27-001?problem=category");
+    expect(location(await step({ action: "sent", paidDate: "2026-11-01" }))).toBe("/ap/FY27-001?problem=status");
+    expect(location(await step({ action: "delete" }))).toBe("/ap/FY27-001?problem=unknown");
+    h.rows[0] = { ...h.rows[0], requester_email: "Treasurer@example.org" };
+    expect(location(await step({ action: "approve" }))).toBe("/ap/FY27-001?problem=own");
+    expect(h.rows[0].status).toBe("Submitted");
+    expect(h.actions).toEqual([]);
+  });
+
+  it("send anyone who isn't AP away, and anyone signed out to sign in", async () => {
+    h.role = "teacher";
+    expect(location(await step({ action: "approve" }))).toBe("/requests");
+    h.role = null;
+    expect(location(await step({ action: "approve" }))).toBe(`/?next=${encodeURIComponent("/ap/FY27-001")}`);
+    expect(h.rows[0].status).toBe("Submitted");
   });
 });

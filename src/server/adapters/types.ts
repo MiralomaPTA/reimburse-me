@@ -45,8 +45,10 @@ export interface FileStore {
  * "Awaiting chair": signed by the requester, waiting for the event chair's
  * signature before it goes on. "Awaiting signers": a mailed check, waiting for
  * two of the PTA's check signers to sign its FO10 before it goes to AP.
+ * "Check written": AP wrote the check (or set up the bill pay payment) and it
+ * hasn't gone out yet; a paper check is waiting for its second signature.
  */
-export type RequestStatus = "Awaiting chair" | "Awaiting signers" | "Submitted" | "Approved" | "Returned" | "Paid";
+export type RequestStatus = "Awaiting chair" | "Awaiting signers" | "Submitted" | "Approved" | "Check written" | "Returned" | "Paid";
 
 /**
  * Where a request stands with its event chair. Blank when it isn't for an
@@ -162,6 +164,18 @@ export interface RequestRow {
   returned_by: string;
   /** The requester-signed packets of earlier versions, oldest first, comma-separated. `pdf_file_id` is the current version's. */
   previous_pdf_file_ids: string;
+  /**
+   * AP's steps on this version (Phase 2b), each blank until it happens and
+   * cleared when the requester signs a new version. `check_number` and
+   * `check_date` (YYYY-MM-DD) are the check's, or a bill pay payment's bank
+   * confirmation and the day it was set up; a return clears them, and the
+   * Actions tab keeps the voided number. `paid_date` is the day it went out.
+   */
+  approved_at: string;
+  approved_by: string;
+  check_date: string;
+  check_written_by: string;
+  paid_by: string;
 }
 
 export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
@@ -228,6 +242,11 @@ export const REQUEST_COLUMNS: (keyof RequestRow)[] = [
   "returned_at",
   "returned_by",
   "previous_pdf_file_ids",
+  "approved_at",
+  "approved_by",
+  "check_date",
+  "check_written_by",
+  "paid_by",
 ];
 
 export interface RequestLog {

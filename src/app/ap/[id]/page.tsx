@@ -4,12 +4,14 @@ import { getAdapters } from "@/server/adapters";
 import type { ActionRecord, RequestRow } from "@/server/adapters/types";
 import { requireApSession } from "@/server/ap/access";
 import { ageDays, categoryChoices, earlierPackets, formatAge, reachedApAt, UNCATEGORIZED } from "@/server/ap/dashboard";
+import { paidByBillPay } from "@/server/ap/actions";
 import { mailedCheck } from "@/server/ap/mailed";
 import { returnedAtOf, returnedBy } from "@/server/requests/resubmit";
 import { versionOf } from "@/server/requests/rows";
-import { formatDateTime, parseDate } from "@/lib/dates";
+import { formatDateTime, formatDay, parseDate } from "@/lib/dates";
 import { formatMoney, parseMoney } from "@/lib/money";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ActionPanel } from "./ActionPanel";
 
 const CATEGORY_PROBLEMS: Record<string, string> = {
   unknown: "That category isn't in the Categories tab any more. Reload the page and choose again.",
@@ -17,11 +19,36 @@ const CATEGORY_PROBLEMS: Record<string, string> = {
   failed: "The category wasn't saved. Please try again in a minute.",
 };
 
-/** One request as AP sees it (Phase 2a): everything on its row, its files and history, and its budget category. */
+/** What the page says after a step, from `?done=`. */
+const DONE: Record<string, string> = {
+  approve: "Approved.",
+  return: "Returned. The requester has an email with your note and a link to fix it; you're copied.",
+  record: "Recorded. It's Check written until it goes out: then use Mark sent.",
+  paid: "Recorded and marked sent, so it's Paid. The requester has an email saying so.",
+  sent: "Marked sent, so it's Paid. The requester has an email saying so.",
+};
+
+/** Why a step was refused, from `?problem=`: the codes `ApActionError` carries. */
+const PROBLEMS: Record<string, string> = {
+  "not-found": "That request wasn't found.",
+  own: "This is your own request, so another AP member must do that.",
+  status: "That can't be done now: the request has moved on since the page loaded. It shows where it stands now.",
+  busy: "Someone else is working on this request right now. Try again in a minute.",
+  note: "Write a note saying what needs to change (up to 1,000 characters).",
+  category: "Set the budget category first.",
+  "check-number": "Enter the number (up to 40 characters).",
+  date: "Enter the date.",
+  future: "That date is in the future.",
+  "before-check": "It can't have gone out before the check's date.",
+  unknown: "That step isn't one the dashboard knows.",
+  failed: "Something went wrong, and nothing was saved. Please try again in a minute.",
+};
+
+/** One request as AP sees it: everything on its row, its files and history, its budget category, and AP's next step. */
 export default async function ApRequestPage(props: PageProps<"/ap/[id]">) {
   const { id } = await props.params;
   const query = await props.searchParams;
-  await requireApSession(`/ap/${id}`);
+  const session = await requireApSession(`/ap/${id}`);
   const { log, files, categories, actions, signatures } = await getAdapters();
   const row = await log.get(id);
   if (!row) notFound();
@@ -43,6 +70,10 @@ export default async function ApRequestPage(props: PageProps<"/ap/[id]">) {
   const pdf = (file: string, v?: number) => `/ap/${encodeURIComponent(row.request_id)}/pdf?file=${file}${v ? `&v=${v}` : ""}`;
   const earlier = earlierPackets(row).length;
   const returnedAt = parseDate(returnedAtOf(row));
+  const done = typeof query.done === "string" ? (DONE[query.done] ?? null) : null;
+  const emailFailed = query.emailed === "0";
+  const problem = typeof query.problem === "string" ? (PROBLEMS[query.problem] ?? null) : null;
+  const billPay = paidByBillPay(row);
 
   return (
     <div className="space-y-6">
@@ -60,6 +91,13 @@ export default async function ApRequestPage(props: PageProps<"/ap/[id]">) {
           {row.payee_name} · {row.requester_email}
         </p>
       </div>
+
+      {done && (
+        <div className={`rounded-md border p-4 text-sm font-medium ${emailFailed ? "border-amber-300 bg-amber-50 text-amber-950" : "border-emerald-300 bg-emerald-50 text-emerald-900"}`}>
+          {emailFailed ? `${done.split(".")[0]}, but the email to the requester didn't go through. Let them know yourself; the row's notes say what went wrong.` : done}
+        </div>
+      )}
+      {problem && <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-950">{problem}</div>}
 
       {mail?.kind === "problem" && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
@@ -125,6 +163,8 @@ export default async function ApRequestPage(props: PageProps<"/ap/[id]">) {
         {categoryProblem && <p className="text-sm font-medium text-amber-900">{categoryProblem}</p>}
       </form>
 
+      <ActionPanel row={row} email={session.email} />
+
       <dl className="card grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
         <Row label="Signed by the requester" value={dateTime(row.submitted_at)} />
         {reached && reached.getTime() !== parseDate(row.submitted_at)?.getTime() ? <Row label="Reached AP" value={formatDateTime(reached)} /> : null}
@@ -146,8 +186,12 @@ export default async function ApRequestPage(props: PageProps<"/ap/[id]">) {
         {signerLine(row, 2) ? <Row label="Check signer 2" value={signerLine(row, 2)!} /> : null}
         {row.budget_account ? <Row label="Budget Account (FO10)" value={row.budget_account} /> : null}
         {row.payment_account ? <Row label="Payment Account (FO10)" value={row.payment_account} /> : null}
-        {row.check_number ? <Row label="Check number" value={row.check_number} /> : null}
-        {row.paid_date ? <Row label="Paid" value={row.paid_date} /> : null}
+        {row.approved_by ? <Row label="Approved" value={`${row.approved_by}${row.approved_at ? `, ${dateTime(row.approved_at)}` : ""}`} /> : null}
+        {row.check_number ? <Row label={billPay ? "Bill pay confirmation" : "Check number"} value={row.check_number} /> : null}
+        {row.check_date ? (
+          <Row label={billPay ? "Bill pay set up" : "Check dated"} value={`${formatDay(row.check_date)}${row.check_written_by ? `, by ${row.check_written_by}` : ""}`} />
+        ) : null}
+        {row.paid_date ? <Row label="Paid (went out)" value={`${formatDay(row.paid_date)}${row.paid_by ? `, marked by ${row.paid_by}` : ""}`} /> : null}
         {row.notes.trim() ? <Row label="Notes" value={row.notes} /> : null}
       </dl>
 
@@ -228,10 +272,25 @@ function checkDelivery(row: RequestRow, beforeBillPay: boolean): string {
   return row.check_delivery === "pickup" ? "Pickup from the PTA" : "Staff mailbox";
 }
 
-/** "treasurer@example.org set the category to Supplies" */
+/** "treasurer@example.org set the category to Supplies", "… recorded check #1043, dated Nov 20, 2026" */
 function describe(record: ActionRecord): string {
-  if (record.action === "category") return record.note ? `${record.by} set the category to ${record.note}` : `${record.by} cleared the category`;
-  return [record.by, record.action, record.note].filter(Boolean).join(" · ");
+  const { by, note } = record;
+  switch (record.action) {
+    case "category":
+      return note ? `${by} set the category to ${note}` : `${by} cleared the category`;
+    case "approve":
+      return `${by} approved it`;
+    case "return":
+      return `${by} sent it back. Note: ${note}`;
+    case "void":
+      return `${by} voided ${note}`;
+    case "check":
+      return `${by} recorded ${note}`;
+    case "sent":
+      return `${by} marked it sent ${note}`;
+    default:
+      return [by, record.action, note].filter(Boolean).join(" · ");
+  }
 }
 
 /** What happened on the VP/Chairman line, or null when the request isn't for an event or is still waiting. */
