@@ -1,6 +1,6 @@
 # Phase 2 — AP Workflow Spec
 
-Oct 15, 2026, updated Nov 19, 2026 · Draft v0.4 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Event Chair Signature — Spec*, which stay the source of truth for decisions already made.
+Oct 15, 2026, updated Nov 21, 2026 · Draft v0.5 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Event Chair Signature — Spec*, which stay the source of truth for decisions already made.
 
 ## Overview
 
@@ -72,7 +72,7 @@ A request is always in exactly one status. *Draft* from the main spec lives only
 
 Every action also appends a row to an **Actions** tab: `request_id`, `action`, `by`, `at`, `note`. That is the audit trail; the Requests row holds only the latest state.
 
-**Budget category** is separate from status. AP can set it at any point before the check is written, and Record check requires it to be set *(default)*.
+**Budget category** is separate from status. AP can set it at any status, Paid included, so requests paid by hand during the pilot can be categorized for the export (built that way in 2a). Record check requires it to be set *(default)*.
 
 ## Resubmission
 
@@ -93,14 +93,14 @@ To refill the form, the app saves the exact request content as JSON in the reque
 **/ap** — the list. Requires role `ap` or `admin`; everyone else gets the normal teacher pages.
 
 - Columns: request ID, submitted, requester, purpose, event, reimbursement claimed, category, status, age, version.
-- Age is days since the request reached AP for Submitted and Approved (the chair's signature, for an event), days since return for Returned, and days since the check was written for Check written. For Awaiting chair it is days since the chair was emailed. It is blank for Paid.
-- Default view: everything not Paid and not Awaiting chair, oldest first. Filters: status, fiscal year, and a search box over name, email and purpose. A toggle shows Paid requests. The status filter shows requests awaiting a chair, so AP can see what's coming and chase a slow chair.
+- Age is days since the request reached AP for Submitted and Approved (after the chair and the check signers, when it had them), days since return for Returned, and days since the check was written for Check written. For Awaiting chair and Awaiting signers it is days since the last email to the chair or the check signers. It is blank for Paid.
+- Default view: everything not Paid, Awaiting chair or Awaiting signers, oldest first. Filters: status, fiscal year, and a search box over name, email, purpose and request ID. A toggle shows Paid requests. The status filter shows requests awaiting a chair or the check signers, so AP can see what's coming and chase a slow one.
 - An **Awaiting signature** filter shows only Check written requests with their check numbers and amounts, oldest first. It is the co-signer's to-do list.
 - Export CSV applies the current filters.
 
 **/ap/[id]** — one request.
 
-- Everything on the row, the AP note history from the Actions tab, and links to the current signed PDF (the co-signed one, for an event) and any previous versions.
+- Everything on the row, the AP note history from the Actions tab, and links to the current signed PDF (the co-signed one, for an event, and the authorized one, for a mailed check) and any previous versions. The current packets are checked against their hashes on the row before they're served. Earlier versions have no recorded hash, so they're served for reference and the page says they aren't checked.
 - The action panel: a category dropdown, and the buttons **Approve**, **Return with a note**, **Record check**, **Mark sent**. Return opens a note field. Record check asks for the check number and date (defaults to today) and has an "already signed by both and sent" box. Mark sent asks only for the date (defaults to today) and reminds whether the check goes to the staff mailbox or is picked up from the PTA.
 - After an action the page reloads from the Sheet. Two AP members acting on the same request at the same moment is last-write-wins; at this volume that is acceptable, and the Actions tab shows both.
 - The buttons are disabled on your own request.
@@ -145,7 +145,9 @@ The treasurer imports it with *Add new suppliers that don't already exist* ticke
 
 ## Budget categories
 
-A **Categories** tab in the Sheet: `name`, `active` (yes/no), `order`. The treasurer edits it each fiscal year; inactive names stay on old requests but disappear from the dropdown. The app writes a starter header row on first use and shows an "Uncategorized" option until the tab has rows. *(default)*
+A **Categories** tab in the Sheet: `name`, `active` (yes/no), `order`. The treasurer edits it each fiscal year; inactive names stay on old requests but disappear from the dropdown. The app writes a starter header row on first use. Until the tab has rows, the dropdown shows only "Uncategorized", which stands for a blank cell and is never saved. *(default)*
+
+The dropdown starts on the category the FO10's Budget Account names, when it names one, marked as a suggestion until saved. Saving writes only `budget_category` and adds a `category` row to the Actions tab.
 
 ## Data changes
 
@@ -164,7 +166,7 @@ Drive: after a return, a request folder gains additional PDF and JSON versions. 
 
 ## Rollout
 
-1. **2a — See.** Role check, the dashboard list and detail pages read-only, the category dropdown, and CSV export. Lets the treasurer start using it immediately.
+1. **2a — See.** Role check, the dashboard list and detail pages read-only, the category dropdown, and CSV export. Lets the treasurer start using it immediately. **Built Nov 21, 2026** (PR #5). AP and admin land on `/ap` after signing in. The **Awaiting signature** filter waits for 2b, which adds *Check written*.
 2. **2b — Act.** Approve, Return with note, Record check, Mark sent, the teacher emails, and the resubmission flow with versions. The resubmission flow is built (Nov 19, with step 2 of the event chair spec).
 3. **2c — Nudge.** The weekly digest.
 
@@ -191,6 +193,18 @@ Each has a default. The build follows it unless changed here.
 | 12 | Who marks a check sent | Whoever puts it in the mailbox or hands it over at pickup. The co-signer may be given the `ap` role to do it right after signing |
 | 13 | Voiding a written check | Return it with a note; the check number stays in the Actions tab and the new check gets a new Record check entry |
 | 11 | VP/Chairman signature line | Answered: for a request for a PTA event, the event's chair signs it in the portal before the request reaches AP (*Event Chair Signature — Spec*). Otherwise it stays blank |
+
+## Changes since v0.4
+
+- 2a is built (Nov 21, PR #5). The build settled what this spec left open:
+  - The category can be set at any status, Paid included.
+  - AP may set the category on their own request; the block on your own request covers 2b's actions only.
+  - Setting a category is recorded in the Actions tab, so 2a creates it.
+  - *Awaiting signers* counts its age from the last email to the check signers, like *Awaiting chair*, and the default view leaves it out.
+  - "Uncategorized" is only how the dropdown shows a blank category while the Categories tab is empty.
+  - Earlier versions' packets are served unchecked, since the row keeps no hash for them.
+- The Sheet is read with dates as the text it shows, so a `paid_date` typed into the Sheet exports as `11/20/2026`, not a serial number.
+- A paper check mailed before bill pay (the October pilot) shows the Sheet's address on the dashboard, marked as unchecked, with no FO10 wording.
 
 ## Changes since v0.3
 
