@@ -86,7 +86,7 @@ When a request is returned:
 
 To refill the form, the app saves the exact request content as JSON in the request's Drive folder at every submission (`FY27-042.json`, `FY27-042-v2.json`; `request_file_id` on the row). Receipts already in Drive are reused by id; nothing is re-uploaded unless the teacher adds a new one.
 
-**Built Nov 19, 2026,** with step 2 of the event chair spec (see its *Fixing a returned request*): steps 2 to 5 above, for any request whose status is Returned. Until 2b's **Return with a note** exists, AP can return a request by setting `status` to `Returned` and writing `returned_note` in the Sheet; the requester sees the note and **Fix and re-sign** on their request page, though nothing emails them. 2b still needs the Return button and its email to the teacher, which should set `returned_at` and `returned_by` as the chair's and check signers' send-backs do.
+**Built Nov 19, 2026,** with step 2 of the event chair spec (see its *Fixing a returned request*): steps 2 to 5 above, for any request whose status is Returned. AP's **Return with a note** joined it on Nov 22 (2b, PR #7): it sets `returned_at` and `returned_by` as the chair's and check signers' send-backs do, and emails the teacher. A `Returned` status typed into the Sheet still works, but emails nobody.
 
 ## AP dashboard
 
@@ -167,7 +167,7 @@ Drive: after a return, a request folder gains additional PDF and JSON versions. 
 ## Rollout
 
 1. **2a — See.** Role check, the dashboard list and detail pages read-only, the category dropdown, and CSV export. Lets the treasurer start using it immediately. **Built Nov 21, 2026** (PR #5). AP and admin land on `/ap` after signing in. The **Awaiting signature** filter waits for 2b, which adds *Check written*.
-2. **2b — Act.** Approve, Return with note, Record check, Mark sent, the teacher emails, and the resubmission flow with versions. The resubmission flow is built (Nov 19, with step 2 of the event chair spec).
+2. **2b — Act.** Approve, Return with note, Record check, Mark sent, the teacher emails, and the resubmission flow with versions. The resubmission flow is built (Nov 19, with step 2 of the event chair spec). **Built Nov 22, 2026** (PR #7). A mailed check's Record check is **Record bill pay** (see the *Mailed Check — Spec*).
 3. **2c — Nudge.** The weekly digest.
 
 Each step is usable on its own. Pilot 2a with the treasurer on live data; nothing in it writes to the Sheet except the category.
@@ -197,6 +197,13 @@ Each has a default. The build follows it unless changed here.
 ## Changes since v0.5
 
 - A mailed check's bill pay payment waits at *Check written* until someone marks it sent, like a paper check, so the Paid email's date is the day it went out (decided Nov 22; see the *Mailed Check — Spec*). The **Awaiting signature** filter lists paper checks only.
+- 2b is built (Nov 22, PR #7). The build settled what this spec left open:
+  - Each AP step takes the row's lock and checks the status again once it holds it, which is stricter than the "last-write-wins" in *AP dashboard*.
+  - A return clears a written check's number and date from the row; the Actions tab keeps them as a `void` row (or the row's notes, if Actions doesn't take it).
+  - "Already signed and sent" on Record check makes the request Paid as of today.
+  - A check dated in the future, or before the request was signed, is refused.
+  - The Return email copies AP; the Paid email goes to the requester alone. A request too old to fix and re-sign (from before the portal kept its JSON) is asked for as a new request instead.
+  - A new version clears AP's columns (`approved_*`, `check_*`, `paid_*`); the budget category stays.
 
 ## Changes since v0.4
 
