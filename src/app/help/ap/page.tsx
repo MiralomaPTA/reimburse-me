@@ -13,8 +13,14 @@ const title = "Paying reimbursements: a guide for the accounts payable team";
 
 export const metadata: Metadata = { title };
 
-/** Whether any mailed checks can reach AP: the check signers and bill pay accounts are set, and mailing isn't switched off. */
-const mailingSetUp = () => config.mailedChecks !== "off" && config.checkSigners.length >= 2 && config.billPayAccounts.length > 0;
+/**
+ * Whether mailed checks can reach AP: the check signers and bill pay accounts
+ * are set. Unlike the requesters' guides (`mailingInGuides`, which wait until
+ * mailing is offered to everyone), this covers the pilot too, and stays on
+ * when MAILED_CHECKS is off, since requests already on their way still reach
+ * AP and still need paying.
+ */
+const mailingSetUp = () => config.checkSigners.length >= 2 && config.billPayAccounts.length > 0;
 
 export default function ApGuidePage() {
   const ap = <MailtoLink email={config.apEmail} />;
@@ -42,21 +48,23 @@ export default function ApGuidePage() {
       <Section title="The list">
         <p>
           It shows what&apos;s with you: every request that isn&apos;t paid yet and isn&apos;t still waiting for its event chair or the check signers. The one
-          that&apos;s waited longest is at the top. Its age counts from when it reached you, when it was sent back, or when its check was written.
+          that&apos;s waited longest is at the top. Its age counts from when it reached you, when it was sent back, or when its check was written. Requests
+          sent back, by you or by a chair or check signer, stay on the list while they wait for the requester.
         </p>
         <Shot src={dashboard} alt="The AP dashboard: filters at the top, then a list of requests, oldest first, each with its amount, status and age" />
         <p>
-          Pick a <strong>Status</strong> or a school year, or search by name, email, what it was for, or request number (like FY27-042). Tick{" "}
-          <strong>Show paid requests too</strong> to include those. <strong>Awaiting signature</strong> lists the checks you&apos;ve written that are waiting for
-          their second signature: the second signer&apos;s to-do list. The link above the list goes straight to it.
+          The list starts on <strong>With AP</strong>. To see something else, pick a <strong>Status</strong> or a <strong>Fiscal year</strong>, or search by
+          name, email, what it was for, or request number (like FY27-042), then tap <strong>Show</strong>. On With AP, tick{" "}
+          <strong>Show paid requests too</strong> to include paid ones. <strong>Awaiting signature</strong>, under Status, lists the checks you&apos;ve written
+          that are waiting for their second signature: the second signer&apos;s to-do list. The link above the list goes straight to it.
         </p>
         <p>
           <strong>Export CSV</strong> downloads whatever the list shows, for the books. It opens cleanly in Excel or Google Sheets.
         </p>
         {mailing && (
           <p>
-            A mailed check shows the address it was signed with. A warning under it means the Sheet says something different: pay only to the address on the
-            signed FO10.
+            A mailed check shows the address it was signed with. A warning under it means the Sheet says something different, or the portal couldn&apos;t check
+            what was signed. Either way, pay only to the address and amount on the signed FO10.
           </p>
         )}
       </Section>
@@ -64,13 +72,14 @@ export default function ApGuidePage() {
       <Section title="One request">
         <p>
           Tap a request to see everything about it: who it&apos;s for, what it was for, how much, the event chair&apos;s and check signers&apos; signatures and
-          notes, and its PDFs. The first button is the one to pay from: the authorized packet for a mailed check, the co-signed one for an event, and otherwise
-          the one the requester signed.
+          notes, and its PDFs. Near the bottom, under <strong>Files</strong>, the first (blue) button is the one to pay from: the authorized packet for a mailed
+          check, the co-signed one for an event, and otherwise the one the requester signed.
         </p>
         <Shot src={request} alt="The top of one request on the dashboard: who it's from, the budget category, and the Next step box with Approve, Record check and Return with a note" />
         <p>
-          The portal checks each PDF against the fingerprint the Sheet recorded when it was signed. If a file doesn&apos;t match, it won&apos;t open it: don&apos;t
-          pay from it, and ask the admin to look. A request signed again after it was sent back also lists its earlier versions, for reference.
+          The portal checks each of those against the fingerprint (its SHA-256) the Sheet recorded when it was signed. If a file doesn&apos;t match, it won&apos;t
+          open it: don&apos;t pay from it, and ask the admin to look. A request signed again after it was sent back also lists its earlier versions, for
+          reference. Those aren&apos;t checked, so never pay from one.
         </p>
         <p>
           <strong>History</strong>, at the bottom, lists everything done on the dashboard, with who did it and when.
@@ -97,15 +106,17 @@ export default function ApGuidePage() {
         <Shot src={recordCheck} alt="The Record check form: the check number, the date on the check, and a box for a check that is already signed by both and sent" wide />
         <p>
           If both signers have already signed it and it&apos;s gone out, tick the box under the date. The request is Paid at once, and the requester gets an
-          email saying where their check is.
+          email saying where their check is. That records it as gone out today. If it went out earlier, leave the box unticked, record the check, then use{" "}
+          <strong>Mark sent</strong> with the right day.
         </p>
       </Section>
 
       <Section title="Mark it sent">
         <p>
-          Once the check has both signatures and has gone in the requester&apos;s staff mailbox, or been picked up, open the request and tap{" "}
-          <strong>Mark sent</strong>. The day starts on today. The request is Paid, and the requester gets an email saying where their check is. Whoever sends
-          the check can do this, so a check signer with the ap role can mark it sent right after signing.
+          Once the check has both signatures and is in the requester&apos;s staff mailbox, or ready for them to pick up, open the request and tap{" "}
+          <strong>Mark sent</strong>. The day starts on today. The request is Paid, and the requester gets an email saying where their check is. For a pickup,
+          the email tells them it&apos;s ready and to reply to arrange a time. Whoever sends the check can do this, so a check signer with the ap role can mark it
+          sent right after signing.
         </p>
         <Shot src={checkWritten} alt="A request whose check is written: the check number and date, the Mark sent box with the day it went out, and Return with a note" wide />
       </Section>
@@ -129,7 +140,8 @@ export default function ApGuidePage() {
       <Section title="Send it back">
         <p>
           If something needs to change, open <strong>Return with a note</strong> and say what. The requester gets your note by email with a link to fix the
-          request and sign it again, and {ap} is copied. The fixed version comes back to you as a new version, with your note, after going through its event chair
+          request and sign it again (or, for a request from before the portal kept a copy to refill, to start a new one; the form tells you which), and {ap}{" "}
+          is copied. The fixed version comes back to you as a new version, with your note, after going through its event chair
           {mailing ? " and the check signers" : ""} again if it had them.
         </p>
         <Shot src={sendBack} alt="Return with a note, open, with a note saying what needs to change" wide />
@@ -151,8 +163,8 @@ export default function ApGuidePage() {
               a: (
                 <>
                   It may still be with its event chair{mailing ? " or the check signers" : ""}: choose{" "}
-                  {mailing ? "Awaiting chair or Awaiting signers" : "Awaiting chair"} under Status, or Everything. Paid ones show when you tick{" "}
-                  <strong>Show paid requests too</strong>.
+                  {mailing ? "Awaiting chair or Awaiting signers" : "Awaiting chair"} under Status, or Everything, then tap <strong>Show</strong>. Paid ones
+                  show when you tick <strong>Show paid requests too</strong> on With AP.
                 </>
               ),
             },
@@ -162,11 +174,11 @@ export default function ApGuidePage() {
             },
             {
               q: "It says the email to the requester didn't go through.",
-              a: "The step itself is done. Let the requester know yourself. The notes column of the request's row in the Sheet says what went wrong.",
+              a: "The step itself is done. Let the requester know yourself. The Notes on the request's page say what went wrong.",
             },
             {
               q: "I recorded the wrong check number.",
-              a: "Fix the check_number cell in the request's row in the Sheet, and say why in its notes. The dashboard reads the Sheet, so it shows the change at once.",
+              a: "Fix the check_number cell in the request's row in the Sheet (for bill pay, it holds the bank's confirmation number), and say why in its notes. The request page shows the new number at once, but its History keeps the one you recorded. If it's already Paid, let the requester know: their email had the old number.",
             },
             {
               q: "A paid request needs fixing.",
@@ -174,7 +186,7 @@ export default function ApGuidePage() {
             },
             {
               q: "Can I change things in the Sheet directly?",
-              a: "Yes; the portal reads it fresh every time. But a status typed into the Sheet emails nobody and leaves no history, so use the dashboard for each step.",
+              a: "To correct something, yes: the portal reads it fresh every time. Say why in the row's notes. Use the dashboard for each step, though: a status typed into the Sheet emails nobody and leaves no history. Never change a request ID, the file ID or SHA-256 cells, or the column headers, and don't change a mailed check's address or amount: the PTA pays from what was signed.",
             },
             {
               q: "Who can use the dashboard?",

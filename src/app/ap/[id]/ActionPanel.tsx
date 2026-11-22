@@ -142,7 +142,7 @@ const NOTHING_TO_DO: Partial<Record<RequestRow["status"], string>> = {
 /** The Record form's "already sent" box. */
 const SENT_NOW: Record<ReturnType<typeof paidHow>, string> = {
   mailbox: "Already signed by both and put in the staff mailbox.",
-  pickup: "Already signed by both and picked up.",
+  pickup: "Already signed by both and ready for pickup.",
   mailed: "Already signed by both and mailed.",
   "bill pay": "The bank has already mailed it.",
 };
@@ -150,7 +150,7 @@ const SENT_NOW: Record<ReturnType<typeof paidHow>, string> = {
 /** The Mark sent form's reminder. */
 const WHERE_IT_GOES: Record<ReturnType<typeof paidHow>, string> = {
   mailbox: "This check goes in the requester's staff mailbox.",
-  pickup: "The requester picks this check up from the PTA.",
+  pickup: "The requester picks this check up from the PTA: mark it sent once it's signed by both and ready.",
   mailed: "This check is mailed to the requester.",
   "bill pay": "The bank mails this payment; mark it sent once it has.",
 };

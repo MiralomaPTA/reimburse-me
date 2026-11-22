@@ -7,9 +7,10 @@
 // through a request as a volunteer and as a teacher on a phone-sized browser,
 // and crops the pages the guides show. The volunteer's request is for the Fall
 // Festival, so it goes to that event's chair, whose signing page is captured
-// for the chairs' guide. Then an AP member works through both requests on the
-// dashboard for the AP guide: the category, Record check, Mark sent and
-// Return with a note. The done and request pages, and the chair's
+// for the chairs' guide. Then an AP member sets the teacher's category,
+// approves it and records its check (capturing the Mark sent box that
+// follows), and opens Return with a note on the volunteer's, for the AP
+// guide. The done and request pages, and the chair's
 // "Signed" message, are captured in both SEND_PACKETS_TO modes so the guides
 // can show whichever is configured.
 //
@@ -63,6 +64,9 @@ const personas = {
     ],
   },
 };
+
+/** An AP member in examples/local-data/users.json, named for no particular role, since the guides say "the PTA". */
+const apMember = "ap.volunteer@example.org";
 
 /** Chairs the Fall Festival in examples/local-data/events.json. */
 const chair = { email: "festival.chair@example.org", name: "Maya Angelou", note: "Decorations for the main stage" };
@@ -235,10 +239,20 @@ async function shot(page, persona, name, { element, fullPage = true } = {}) {
 }
 
 /** Full-page screenshot from the top down to just below `until`, scaled for the guide. */
+async function shotUntil(page, persona, name, until) {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const box = await until.boundingBox();
+  const dpr = await page.evaluate(() => window.devicePixelRatio);
+  const full = await page.screenshot({ fullPage: true });
+  const meta = await sharp(full).metadata();
+  const height = Math.min(meta.height, Math.round((box.y + box.height + 24) * dpr));
+  await sharp(full).extract({ left: 0, top: 0, width: meta.width, height }).resize({ width: WIDTH }).png({ compressionLevel: 9 }).toFile(path.join(OUT, persona, `${name}.png`));
+}
+
 /** An AP member works through the teacher's request (category, Approve, Record check) and opens Return with a note on the volunteer's: the AP guide. Capturing pass only. */
 async function apShots(browser) {
   const ctx = await newContext(browser);
-  const page = await signIn(ctx, "ap", { email: "treasurer@example.org" }, false);
+  const page = await signIn(ctx, "ap", { email: apMember }, false);
   await page.waitForURL(/\/ap$/);
   const nextStep = () => page.locator("div.card", { has: page.locator("h2", { hasText: "Next step" }) }).first();
   const open = async (purpose) => {
@@ -276,16 +290,6 @@ async function apShots(browser) {
   await sleep(300);
   await shot(page, "ap", "return", { element: nextStep() });
   await ctx.close();
-}
-
-async function shotUntil(page, persona, name, until) {
-  await page.evaluate(() => window.scrollTo(0, 0));
-  const box = await until.boundingBox();
-  const dpr = await page.evaluate(() => window.devicePixelRatio);
-  const full = await page.screenshot({ fullPage: true });
-  const meta = await sharp(full).metadata();
-  const height = Math.min(meta.height, Math.round((box.y + box.height + 24) * dpr));
-  await sharp(full).extract({ left: 0, top: 0, width: meta.width, height }).resize({ width: WIDTH }).png({ compressionLevel: 9 }).toFile(path.join(OUT, persona, `${name}.png`));
 }
 
 /** Draws the first page of the preview PDF where the (blank) frame is. */
@@ -349,8 +353,8 @@ async function signIn(ctx, persona, p, capture) {
   await page.waitForSelector("text=Almost there");
   if (capture) await shot(page, persona, "almost-there");
   await page.click("text=Continue to the portal");
-  // Requesters land on a new request, AP on the dashboard.
-  await page.waitForURL((url) => !url.pathname.startsWith("/auth"));
+  // Requesters land on a new request, AP on the dashboard. A failed sign-in goes back to "/", which this doesn't match.
+  await page.waitForURL((url) => /^\/(requests|ap)(\/|$)/.test(url.pathname));
   return page;
 }
 

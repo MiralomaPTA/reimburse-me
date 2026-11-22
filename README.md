@@ -113,7 +113,7 @@ Receipts never pass through the app server: the server opens an upload session (
 
 ## Help pages
 
-`/help` links to the step-by-step guides, reachable from the sign-in page, the header and the footer: `/help/teachers` and `/help/volunteers` for requesters, `/help/chairs` for event chairs, `/help/signers` for check signers, and `/help/ap` for the accounts payable team, which the AP dashboard also links to. They are ordinary pages in `src/app/help/`, so their wording follows the configuration: the AP address, how long sign-in links last, and whether the signed packet goes to AP or is forwarded by the requester (`SEND_PACKETS_TO`).
+`/help` links to the step-by-step guides, reachable from the sign-in page, the header and the footer: `/help/teachers` and `/help/volunteers` for requesters, `/help/chairs` for event chairs, `/help/signers` for check signers, and `/help/ap` for the accounts payable team, which the AP dashboard also links to. They are ordinary pages in `src/app/help/`, so their wording follows the configuration: the AP address, how long sign-in links last, whether the signed packet goes to AP or is forwarded by the requester (`SEND_PACKETS_TO`), and mailed checks. The requesters' guides describe mailing only once `MAILED_CHECKS` is `everyone`; the AP guide does whenever `CHECK_SIGNERS` and `BILL_PAY_ACCOUNTS` are set, since AP pays the pilot's mailed checks too, and any still on their way after mailing is switched off.
 
 The screenshots in `src/images/help/` are taken from the app itself. After a change to the form or to any page they show, regenerate them:
 
@@ -122,7 +122,7 @@ npx playwright install chromium   # once
 npm run help:screenshots
 ```
 
-The script starts `next dev` on port 3100 with the local adapters and a throwaway data folder (`.data/help-screenshots`, seeded from `examples/local-data`), submits a request as the sample volunteer and the sample teacher on a phone-sized headless Chromium, has the event chair sign the volunteer's, and captures the done and request pages in both `SEND_PACKETS_TO` modes so each guide can show the one in use. Then the sample AP member works through both requests on the dashboard for the AP guide. The preview PDF on the "Check and sign" page is rendered with Quick Look on macOS or `pdftoppm` (poppler) elsewhere; without either, that one screenshot shows an empty frame. Commit the new images with the change that made them necessary.
+The script starts `next dev` on port 3100 with the local adapters and a throwaway data folder (`.data/help-screenshots`, seeded from `examples/local-data`), submits a request as the sample volunteer and the sample teacher on a phone-sized headless Chromium, has the event chair sign the volunteer's, and captures the done and request pages in both `SEND_PACKETS_TO` modes so each guide can show the one in use. Then a sample AP member (`ap.volunteer@example.org`) sets the teacher's category, approves it and records its check, and opens *Return with a note* on the volunteer's, for the AP guide. The preview PDF on the "Check and sign" page is rendered with Quick Look on macOS or `pdftoppm` (poppler) elsewhere; without either, that one screenshot shows an empty frame. Commit the new images with the change that made them necessary.
 
 ## What the MVP decides for you
 
