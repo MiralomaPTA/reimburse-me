@@ -1,6 +1,9 @@
 import sharp from "sharp";
 import type {
+  ActionLog,
+  ActionRecord,
   Adapters,
+  CategoryRow,
   EventRow,
   FileStore,
   MailMessage,
@@ -14,6 +17,7 @@ import type {
   UserDirectory,
   UserRecord,
 } from "@/server/adapters/types";
+import { REQUEST_COLUMNS } from "@/server/adapters/types";
 import type { ApprovedSession } from "@/server/auth/session";
 import { maxSequenceIn } from "@/server/requests/submit";
 import { requestIdPrefix } from "@/lib/fiscal-year";
@@ -142,6 +146,11 @@ export const teacher: UserRecord = {
 };
 export const session = (user: UserRecord): ApprovedSession => ({ email: user.email, method: "email-link", signedInAt: "2026-10-16T19:00:00.000Z", user });
 export const prefix = requestIdPrefix(new Date());
+/** A whole row, every column blank unless given: a Submitted FY27-001 signed Nov 1. */
+export function apRow(extra: Partial<RequestRow> = {}): RequestRow {
+  const blank = Object.fromEntries(REQUEST_COLUMNS.map((col) => [col, ""])) as unknown as RequestRow;
+  return { ...blank, request_id: "FY27-001", status: "Submitted", version: 1, line_count: 1, receipt_count: 1, submitted_at: "2026-11-01T17:00:00.000Z", ...extra };
+}
 export const otherRow = (request_id: string): RequestRow => ({ request_id, requester_email: "other@example.org", status: "Submitted", funding: "", reimbursement_claimed: "5.00" }) as RequestRow;
 
 export async function jpeg(): Promise<Uint8Array> {
@@ -169,13 +178,35 @@ export function request(fileIds: string[], funding: string | string[] = "none", 
   };
 }
 
+export class MemoryActions implements ActionLog {
+  records: ActionRecord[] = [];
+  async append(record: ActionRecord) {
+    this.records.push({ ...record });
+  }
+  async listFor(requestId: string) {
+    return this.records.filter((r) => r.request_id === requestId).map((r) => ({ ...r }));
+  }
+}
+
 export function world() {
   const files = new MemoryFiles();
   const log = new MemoryLog();
   const signatures = new MemorySignatures();
+  const actions = new MemoryActions();
   const mailer = new MemoryMailer();
   const eventRows: EventRow[] = [];
-  const adapters: Adapters = { files, log, signatures, mailer, users, stipends: { async list() { return tab; } }, events: { async list() { return eventRows; } } };
-  return { files, log, signatures, mailer, adapters, eventRows };
+  const categoryRows: CategoryRow[] = [];
+  const adapters: Adapters = {
+    files,
+    log,
+    signatures,
+    mailer,
+    users,
+    stipends: { async list() { return tab; } },
+    events: { async list() { return eventRows; } },
+    categories: { async list() { return categoryRows; } },
+    actions,
+  };
+  return { files, log, signatures, actions, mailer, adapters, eventRows, categoryRows };
 }
 

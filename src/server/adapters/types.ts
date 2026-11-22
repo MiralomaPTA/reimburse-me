@@ -449,6 +449,49 @@ export interface SignatureLog {
   listFor(requestId: string): Promise<SignatureRecord[]>;
 }
 
+/**
+ * One row in the Categories tab: a budget category AP can give a request,
+ * edited by the treasurer each fiscal year. An inactive one stays on the
+ * requests that have it but leaves the dropdown.
+ */
+export interface CategoryRow {
+  name: string;
+  /** "no" takes it out of the dropdown; blank or anything else keeps it. */
+  active: string;
+  /** Where it sits in the dropdown, smallest first; blank goes last. */
+  order: string;
+}
+
+export const CATEGORY_COLUMNS: (keyof CategoryRow)[] = ["name", "active", "order"];
+
+export interface CategoryTable {
+  list(): Promise<CategoryRow[]>;
+}
+
+/**
+ * One thing an AP member did to a request, in the Actions tab: the audit
+ * trail. A row is added after the change is written and never changed after;
+ * the Requests row holds only the latest state.
+ */
+export interface ActionRecord {
+  request_id: string;
+  /** "category" for now; Phase 2b adds approve, return, record check and mark sent. */
+  action: string;
+  /** The signed-in AP member's address. */
+  by: string;
+  at: string;
+  /** For "category", the category given, or blank when it was cleared. */
+  note: string;
+}
+
+export const ACTION_COLUMNS: (keyof ActionRecord)[] = ["request_id", "action", "by", "at", "note"];
+
+export interface ActionLog {
+  append(record: ActionRecord): Promise<void>;
+  /** Every record for `requestId`, oldest first. */
+  listFor(requestId: string): Promise<ActionRecord[]>;
+}
+
 export interface Adapters {
   files: FileStore;
   log: RequestLog;
@@ -456,5 +499,7 @@ export interface Adapters {
   users: UserDirectory;
   stipends: StipendTable;
   events: EventTable;
+  categories: CategoryTable;
+  actions: ActionLog;
   mailer: Mailer;
 }

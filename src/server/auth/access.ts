@@ -2,6 +2,7 @@ import type { Mailer, UserDirectory, UserRecord } from "@/server/adapters/types"
 import { createApprovalToken, createMagicToken, verifyMagicToken } from "@/server/auth/tokens";
 import { config } from "@/server/config";
 import { approvalRequestEmail, approvedEmail, signInEmail } from "@/server/email/templates";
+import { isAp } from "@/server/auth/roles";
 import { safeNextPath } from "@/lib/next-path";
 
 /**
@@ -87,7 +88,12 @@ export async function requestSignIn(input: { email: string; linkBase: string; ne
 
 /** Why a clicked sign-in link was refused. */
 export type SignInFailure = "invalid" | "used" | "not-approved";
-export type SignInCompletion = { ok: true; email: string } | { ok: false; reason: SignInFailure };
+export type SignInCompletion = { ok: true; email: string; role: UserRecord["role"] } | { ok: false; reason: SignInFailure };
+
+/** Where sign-in lands: the page the link was for, else the AP dashboard for AP and admin, else a new request. */
+export function afterSignIn(role: UserRecord["role"], next: unknown): string {
+  return safeNextPath(next) ?? (isAp({ role }) ? "/ap" : "/requests/new");
+}
 
 /**
  * Turns a clicked sign-in link into a signed-in address. The row must still
@@ -102,7 +108,7 @@ export async function completeSignIn(token: string, deps: AccessDeps): Promise<S
   const lastSignIn = record.signed_in_at ? Date.parse(record.signed_in_at) : 0;
   if (verified.issuedAt.getTime() < lastSignIn) return { ok: false, reason: "used" };
   await deps.users.update(record.email, { signed_in_at: clock(deps).toISOString() });
-  return { ok: true, email: record.email };
+  return { ok: true, email: record.email, role: record.role };
 }
 
 export type AccessDecision = "approve" | "deny";

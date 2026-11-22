@@ -69,11 +69,23 @@ export class SheetTable<T extends object> {
     return this.migrate((rows[0] ?? []).map(String));
   }
 
-  /** Reads `a1`, or the whole tab. A tab the app gained after setup (like Stipends) is created, empty, on first use. */
+  /**
+   * Reads `a1`, or the whole tab. A tab the app gained after setup (like
+   * Stipends) is created, empty, on first use. Numbers come back unformatted,
+   * but a date typed into the Sheet (a `paid_date` of 11/20/2026) comes back
+   * as the text the Sheet shows, not a serial number like 46346. The app writes
+   * its own dates as text, which this doesn't change. An `upsert` writes a
+   * typed date back as that text.
+   */
   private async readRows(a1?: string): Promise<unknown[][]> {
     const { spreadsheetId } = googleConfig();
     try {
-      const { data } = await sheets().spreadsheets.values.get({ spreadsheetId, range: this.range(a1), valueRenderOption: "UNFORMATTED_VALUE" });
+      const { data } = await sheets().spreadsheets.values.get({
+        spreadsheetId,
+        range: this.range(a1),
+        valueRenderOption: "UNFORMATTED_VALUE",
+        dateTimeRenderOption: "FORMATTED_STRING",
+      });
       return data.values ?? [];
     } catch (error) {
       if (await this.tab()) throw error; // the tab exists, so this is some other failure
