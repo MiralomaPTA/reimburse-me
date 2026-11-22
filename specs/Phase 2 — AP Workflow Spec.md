@@ -1,6 +1,6 @@
 # Phase 2 — AP Workflow Spec
 
-Oct 15, 2026, updated Nov 21, 2026 · Draft v0.5 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Event Chair Signature — Spec*, which stay the source of truth for decisions already made.
+Oct 15, 2026, updated Nov 22, 2026 · Draft v0.6 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.5) and the *Event Chair Signature — Spec*, which stay the source of truth for decisions already made.
 
 ## Overview
 
@@ -53,7 +53,7 @@ A request is always in exactly one status. *Draft* from the main spec lives only
 | Submitted | Signed and sent to AP | The app, on submit or resubmit, when the event chair signs, or, for a mailed check, when the second check signer signs | `submitted_at`, `version`, `pdf_file_id`, `pdf_sha256`; after a chair signs, the `chair_*` columns | Packet to ap@ (co-signed, for an event), copy to the teacher |
 | Approved | AP has reviewed it and will pay | AP | `approved_at`, `approved_by` | None *(default)* |
 | Returned | AP needs a change before paying | AP, note required. The event chair and the check signers can send a request back too, before it reaches AP (see their specs) | `returned_at`, `returned_by`, `returned_note` | Teacher: the note and a link to fix it |
-| Check written | The treasurer has written the check; it is waiting for the second signature | AP, check number and date required | `check_number`, `check_date`, `check_written_by` | None. The teacher's request page shows "Check written, awaiting second signature" |
+| Check written | The treasurer has written the check; it is waiting for the second signature. For a mailed check, AP has set up the bill pay payment and it is waiting for the bank to mail it (see the *Mailed Check — Spec*) | AP, check number (or bill pay confirmation) and date required | `check_number`, `check_date`, `check_written_by` | None. The teacher's request page shows "Check written, awaiting second signature", or "Payment set up" for bill pay |
 | Paid | Both signatures are on the check and it has gone out, to the staff mailbox or handed over at pickup | AP or the co-signer | `paid_date` (the date it went out), `paid_by` | Teacher: check number, date, and where the check went |
 
 **Transitions**
@@ -95,7 +95,7 @@ To refill the form, the app saves the exact request content as JSON in the reque
 - Columns: request ID, submitted, requester, purpose, event, reimbursement claimed, category, status, age, version.
 - Age is days since the request reached AP for Submitted and Approved (after the chair and the check signers, when it had them), days since return for Returned, and days since the check was written for Check written. For Awaiting chair and Awaiting signers it is days since the last email to the chair or the check signers. It is blank for Paid.
 - Default view: everything not Paid, Awaiting chair or Awaiting signers, oldest first. Filters: status, fiscal year, and a search box over name, email, purpose and request ID. A toggle shows Paid requests. The status filter shows requests awaiting a chair or the check signers, so AP can see what's coming and chase a slow one.
-- An **Awaiting signature** filter shows only Check written requests with their check numbers and amounts, oldest first. It is the co-signer's to-do list.
+- An **Awaiting signature** filter shows only paper checks at Check written, with their check numbers and amounts, oldest first. It is the co-signer's to-do list. A bill pay payment at Check written already has both signatures, so it isn't on it.
 - Export CSV applies the current filters.
 
 **/ap/[id]** — one request.
@@ -193,6 +193,10 @@ Each has a default. The build follows it unless changed here.
 | 12 | Who marks a check sent | Whoever puts it in the mailbox or hands it over at pickup. The co-signer may be given the `ap` role to do it right after signing |
 | 13 | Voiding a written check | Return it with a note; the check number stays in the Actions tab and the new check gets a new Record check entry |
 | 11 | VP/Chairman signature line | Answered: for a request for a PTA event, the event's chair signs it in the portal before the request reaches AP (*Event Chair Signature — Spec*). Otherwise it stays blank |
+
+## Changes since v0.5
+
+- A mailed check's bill pay payment waits at *Check written* until someone marks it sent, like a paper check, so the Paid email's date is the day it went out (decided Nov 22; see the *Mailed Check — Spec*). The **Awaiting signature** filter lists paper checks only.
 
 ## Changes since v0.4
 

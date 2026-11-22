@@ -1,6 +1,6 @@
 # Specs
 
-What each document in this folder covers and how far the build has got. Updated Nov 21, 2026.
+What each document in this folder covers and how far the build has got. Updated Nov 22, 2026.
 
 ## Status
 
@@ -8,8 +8,8 @@ What each document in this folder covers and how far the build has got. Updated 
 | --- | --- | --- |
 | [Teacher Reimbursement Portal — Product Spec](<Teacher Reimbursement Portal — Product Spec.md>) | Draft v0.8, Nov 19 | **Phase 1 built.** The overview of the whole portal, and the source of truth for anything the other specs don't decide |
 | [Event Chair Signature — Spec](<Event Chair Signature — Spec.md>) | Draft v0.4, Nov 19 | **Done.** Steps 1 and 2 built (step 1 merged Nov 12, PR #1; step 2 merged Nov 19, PR #3). Step 3, reminders and a time-out, won't be built. No open questions |
-| [Mailed Check — Spec](<Mailed Check — Spec.md>) | Draft v0.8, Nov 19 | **Steps 1 and 2 of 3 built** (step 1 merged Nov 19, PR #2; step 2 merged Nov 19 with the chair's, PR #3). Ready for its pilot, which starts with one board member |
-| [Phase 2 — AP Workflow Spec](<Phase 2 — AP Workflow Spec.md>) | Draft v0.5, Nov 21 | **2a built** (merged Nov 21, PR #5). 2b next; its resubmission flow is already built (PR #3). 2c not started |
+| [Mailed Check — Spec](<Mailed Check — Spec.md>) | Draft v0.9, Nov 22 | **Steps 1 and 2 of 3 built** (step 1 merged Nov 19, PR #2; step 2 merged Nov 19 with the chair's, PR #3). Ready for its pilot, which starts with one board member |
+| [Phase 2 — AP Workflow Spec](<Phase 2 — AP Workflow Spec.md>) | Draft v0.6, Nov 22 | **2a built** (merged Nov 21, PR #5). 2b next; its resubmission flow is already built (PR #3). 2c not started |
 | [Code Review — Oct 2026](<Code Review — Oct 2026.md>) | Oct 16 | **Closed.** Every finding was fixed on Oct 16 except item 23, a note about commit history. Kept for the record |
 
 ## Roadmap

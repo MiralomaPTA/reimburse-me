@@ -1,6 +1,6 @@
 # Mailed Check — Spec
 
-Nov 19, 2026 · Draft v0.8 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
+Nov 22, 2026 · Draft v0.9 · Companion to the *Teacher Reimbursement Portal — Product Spec* (v0.4), the *Phase 2 — AP Workflow Spec* and the *Event Chair Signature — Spec*, which stay the source of truth for what they decide.
 
 ## Overview
 
@@ -365,7 +365,7 @@ As with `ADAPTERS`, a bad value must not slip through quietly. The app refuses t
 - **No chair time-out.** The chair spec dropped its time-out, so a mailed event request waits at the chair until a chair signs or sends it back.
 - **Status model.** Phase 2's status table gains *Awaiting signers* after *Awaiting chair*. "Returned → Submitted" becomes "Returned → Awaiting signers" for a mailed request.
 - **Dashboard.** Requests awaiting the signers haven't reached AP yet, so the default view leaves them out. The status filter can show them. Mailed requests show *Mail* in the list, the address from `request.json`, and a warning if the row differs from it.
-- **Paying a mailed request.** Both signatures are already on the FO10, so Phase 2's *Check written* step, which covers the wait for a second signature on a paper check, doesn't apply. For mailed requests, AP's **Record check** becomes **Record bill pay**. It asks for the date the payment was set up and the confirmation or check number from the bank, and it can mark the request Paid in the same step. It refuses a second payment for the same request. The Paid email says "Mailed to 123 Main St Apt 4 on Nov 20, confirmation 4821". Phase 2 already includes the address only when the check was mailed, and only in the requester's email.
+- **Paying a mailed request.** Both signatures are already on the FO10, so there's no wait for a second signature. For mailed requests, AP's **Record check** becomes **Record bill pay**. It asks for the date the payment was set up and the confirmation or check number from the bank. The request then waits at *Check written*, which the requester sees as *Payment set up*, until someone marks it sent once the bank has mailed it. That way the Paid email's date is the day it went out. A box on Record bill pay marks it Paid in the same step when the bank has already mailed it. A bill pay payment at *Check written* isn't on the co-signer's *Awaiting signature* list, since it has both signatures. Returning one asks AP to confirm they've cancelled it at the bank first. It refuses a second payment for the same request. *(Decided Nov 22.)* The Paid email says "Mailed to 123 Main St Apt 4 on Nov 20, confirmation 4821". Phase 2 already includes the address only when the check was mailed, and only in the requester's email.
 - **Budget category.** Phase 2's category dropdown starts on the FO10's Budget Account when that matches a category.
 - **CSV.** `check_delivery` is already a column. Add `budget_account` and `payment_account`.
 - **Weekly digest.** Adds a section for requests that have been awaiting the signers for more than 7 days.
@@ -438,6 +438,10 @@ Each has a default. The build follows it unless it is changed here.
 | 6 | Budget Account | The stipend first, then the event, otherwise blank. The first signer must fill it in before signing |
 | 7 | Offering mailing to everyone | `MAILED_CHECKS=everyone`, so blank cells follow along and new accounts get mailing without a row edit. The alternative is the column alone, where offering it to everyone means a `yes` in every row and on every new approval |
 | 8 | The guides during the pilot | They leave mailing out, so most readers don't look for a choice they can't see. The alternative is a line saying some accounts can have checks mailed |
+
+## Changes since v0.8
+
+- *Paying a mailed request*: a bill pay payment waits at *Check written* (*Payment set up*, to the requester) until someone marks it sent, rather than skipping that status, so the Paid email's date is the day the bank mailed it. Recording it can still mark it Paid at once. It stays off the *Awaiting signature* list, and returning it needs AP to confirm the payment is cancelled at the bank (decided Nov 22).
 
 ## Changes since v0.7
 
