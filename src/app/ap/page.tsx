@@ -137,6 +137,13 @@ export default async function ApPage(props: PageProps<"/ap">) {
           })}
         </ul>
       )}
+      <p className="text-sm text-neutral-500">
+        New to the dashboard?{" "}
+        <Link href="/help/ap" className="underline">
+          Read the guide
+        </Link>
+        .
+      </p>
     </div>
   );
 }

@@ -163,6 +163,8 @@ export default function TeacherGuidePage() {
             q.computer,
             q.event,
             q.sentBack,
+            q.checkWritten,
+            q.paid,
             q.chairSlow,
             ...(mailingInGuides() ? [q.signersSlow] : []),
             { q: "Who do I ask for help?", a: <>Email {ap} for anything about a payment or a stipend.</> },

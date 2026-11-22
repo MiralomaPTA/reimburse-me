@@ -14,6 +14,20 @@
     "mailed_checks": ""
   },
   {
+    "email": "ap.volunteer@example.org",
+    "role": "ap",
+    "status": "approved",
+    "requested_at": "",
+    "approved_at": "2026-08-15T16:00:00.000Z",
+    "approved_by": "admin",
+    "last_link_at": "",
+    "signed_in_at": "",
+    "note": "Another AP team member. The help screenshots sign in as them so the AP guide's pictures name no role.",
+    "grade": "",
+    "stipend": "",
+    "mailed_checks": ""
+  },
+  {
     "email": "admin@example.org",
     "role": "admin",
     "status": "approved",

@@ -7,7 +7,10 @@
 // through a request as a volunteer and as a teacher on a phone-sized browser,
 // and crops the pages the guides show. The volunteer's request is for the Fall
 // Festival, so it goes to that event's chair, whose signing page is captured
-// for the chairs' guide. The done and request pages, and the chair's
+// for the chairs' guide. Then an AP member sets the teacher's category,
+// approves it and records its check (capturing the Mark sent box that
+// follows), and opens Return with a note on the volunteer's, for the AP
+// guide. The done and request pages, and the chair's
 // "Signed" message, are captured in both SEND_PACKETS_TO modes so the guides
 // can show whichever is configured.
 //
@@ -62,6 +65,9 @@ const personas = {
   },
 };
 
+/** An AP member in examples/local-data/users.json, named for no particular role, since the guides say "the PTA". */
+const apMember = "ap.volunteer@example.org";
+
 /** Chairs the Fall Festival in examples/local-data/events.json. */
 const chair = { email: "festival.chair@example.org", name: "Maya Angelou", note: "Decorations for the main stage" };
 
@@ -93,7 +99,7 @@ const teacherCrop = { "my-requests": -330 };
 async function seedData() {
   await fs.rm(path.join(ROOT, DATA_DIR), { recursive: true, force: true });
   await fs.mkdir(path.join(ROOT, DATA_DIR), { recursive: true });
-  for (const f of ["users.json", "stipends.json", "events.json"]) {
+  for (const f of ["users.json", "stipends.json", "events.json", "categories.json"]) {
     await fs.copyFile(path.join(ROOT, "examples/local-data", f), path.join(ROOT, DATA_DIR, f));
   }
 }
@@ -243,6 +249,49 @@ async function shotUntil(page, persona, name, until) {
   await sharp(full).extract({ left: 0, top: 0, width: meta.width, height }).resize({ width: WIDTH }).png({ compressionLevel: 9 }).toFile(path.join(OUT, persona, `${name}.png`));
 }
 
+/** An AP member works through the teacher's request (category, Approve, Record check) and opens Return with a note on the volunteer's: the AP guide. Capturing pass only. */
+async function apShots(browser) {
+  const ctx = await newContext(browser);
+  const page = await signIn(ctx, "ap", { email: apMember }, false);
+  await page.waitForURL(/\/ap$/);
+  const nextStep = () => page.locator("div.card", { has: page.locator("h2", { hasText: "Next step" }) }).first();
+  const open = async (purpose) => {
+    await page.goto(BASE + "/ap");
+    await page.click(`a:has-text("${purpose}")`);
+    await page.waitForSelector("text=Next step");
+    await sleep(500);
+  };
+
+  await open(personas.teacher.purpose);
+  await shotUntil(page, "ap", "request", nextStep());
+  await page.selectOption("#category", "Classroom supplies");
+  await page.click("form:has(#category) button:has-text('Save')");
+  await page.waitForURL(/saved=category/);
+  await page.click("button:has-text('Approve')");
+  await page.waitForURL(/done=approve/);
+  // Approved with a category, Record check is open by itself.
+  await page.fill("#checkNumber", "1043");
+  await sleep(300);
+  await shot(page, "ap", "record-check", { element: nextStep() });
+  await page.click("button:has-text('Record check')");
+  await page.waitForURL(/done=record/);
+  await sleep(500);
+  await shot(page, "ap", "check-written", { element: nextStep() });
+
+  // The list, with that check waiting for its second signature.
+  await page.goto(BASE + "/ap");
+  await page.waitForSelector("text=awaiting the second signature");
+  await sleep(500);
+  await shotUntil(page, "ap", "dashboard", page.locator("main ul").first());
+
+  await open(personas.volunteer.purpose);
+  await page.click("summary:has-text('Return with a note')");
+  await page.fill("#note", "The Party Town receipt is cut off at the bottom. Please add a clearer photo of it.");
+  await sleep(300);
+  await shot(page, "ap", "return", { element: nextStep() });
+  await ctx.close();
+}
+
 /** Draws the first page of the preview PDF where the (blank) frame is. */
 async function showPreview(page, tmp) {
   const b64 = await page.evaluate(async () => {
@@ -304,7 +353,8 @@ async function signIn(ctx, persona, p, capture) {
   await page.waitForSelector("text=Almost there");
   if (capture) await shot(page, persona, "almost-there");
   await page.click("text=Continue to the portal");
-  await page.waitForURL(/\/requests/);
+  // Requesters land on a new request, AP on the dashboard. A failed sign-in goes back to "/", which this doesn't match.
+  await page.waitForURL((url) => /^\/(requests|ap)(\/|$)/.test(url.pathname));
   return page;
 }
 
@@ -379,13 +429,17 @@ async function pass(browser, mode, capture, tmp) {
       if (persona === "volunteer") await chairShots(browser, mode, capture);
       console.log(`${mode}: ${persona} done`);
     }
+    if (capture) {
+      await apShots(browser);
+      console.log(`${mode}: ap done`);
+    }
   } finally {
     await stopServer(server);
   }
 }
 
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "help-shots-"));
-for (const persona of [...Object.keys(personas), "chair"]) await fs.mkdir(path.join(OUT, persona), { recursive: true });
+for (const persona of [...Object.keys(personas), "chair", "ap"]) await fs.mkdir(path.join(OUT, persona), { recursive: true });
 const browser = await chromium.launch();
 try {
   for (const [name, r] of Object.entries(receipts)) await makeReceipt(browser, path.join(tmp, `receipt-${name}.jpg`), r);

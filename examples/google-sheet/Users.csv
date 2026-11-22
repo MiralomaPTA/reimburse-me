@@ -1,5 +1,6 @@
 email,role,status,requested_at,approved_at,approved_by,last_link_at,signed_in_at,note,grade,stipend,mailed_checks
 treasurer@example.org,ap,approved,,,preloaded,,,AP team. Not asked which stipend: AP members aren't teachers and have no stipend of their own.,,,
+ap.volunteer@example.org,ap,approved,,,preloaded,,,Another AP team member. The help screenshots sign in as them so the AP guide's pictures name no role.,,,
 admin@example.org,admin,approved,,,preloaded,,,PTA tech volunteer who maintains the Users and Stipends tabs.,,,
 grade2.teacher@example.org,teacher,approved,,,preloaded,,,"Chooses classroom stipend, Grade 2 stipend, field trip, or none.",2,,
 grade2.partner@example.org,teacher,approved,,,preloaded,,,Shares the Grade 2 stipend with grade2.teacher; each has their own classroom stipend.,2,,

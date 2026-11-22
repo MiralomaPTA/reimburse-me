@@ -26,6 +26,11 @@ const guides = [
     title: "I'm a PTA check signer",
     blurb: "Got an email asking you to authorize a mailed check? What to check before you sign the FO10, and how to send it back.",
   },
+  {
+    href: "/help/ap",
+    title: "I'm on the accounts payable team",
+    blurb: "The AP dashboard: what's waiting and for how long, the budget category, recording and sending checks, and sending a request back.",
+  },
 ];
 
 export default function HelpPage() {

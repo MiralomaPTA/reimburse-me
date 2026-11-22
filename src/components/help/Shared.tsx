@@ -170,7 +170,29 @@ export function commonQuestions(exampleId: string) {
       q: "I made a mistake after signing.",
       a: (
         <>
-          Email {ap} with your request number (it looks like {exampleId}) and what needs to change.
+          Email {ap} with your request number (it looks like {exampleId}) and what needs to change. If it hasn&apos;t been paid yet, the PTA can send it back
+          to you so you can fix it and sign it again.
+        </>
+      ),
+    },
+    checkWritten: {
+      q: "My request says \"Check written\".",
+      a: (
+        <>
+          The PTA has written your check. Every PTA check needs two signatures, so it&apos;s waiting for the second one. You&apos;ll get an email when it goes
+          out.
+          {mailingInGuides()
+            ? " If your check is being mailed, the request page also says \"Payment set up\": there's no second signature to wait for. The PTA has set up the payment with its bank, and you'll get an email once the bank has mailed it."
+            : ""}
+        </>
+      ),
+    },
+    paid: {
+      q: "How will I know I've been paid?",
+      a: (
+        <>
+          You&apos;ll get an email when your check goes out, saying where it is. <strong>My requests</strong> then shows the request as Paid, and opening it
+          says where the check went.
         </>
       ),
     },
