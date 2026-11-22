@@ -110,7 +110,9 @@ export default async function RequestPage(props: PageProps<"/requests/[id]">) {
       {row.status === "Paid" && (
         <div className="rounded-md border border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-900">
           <div className="font-medium">Paid</div>
-          {row.paid_date && <p className="mt-1">{paidLine({ how: paidHow(row), checkNumber: row.check_number, paidDate: row.paid_date, address: mailTo || undefined })}</p>}
+          {(row.paid_date || row.check_number) && (
+            <p className="mt-1">{paidLine({ how: paidHow(row), checkNumber: row.check_number, paidDate: row.paid_date, address: mailTo || undefined })}</p>
+          )}
         </div>
       )}
 

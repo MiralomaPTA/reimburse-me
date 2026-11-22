@@ -494,7 +494,7 @@ export interface CategoryTable {
  */
 export interface ActionRecord {
   request_id: string;
-  /** "category" for now; Phase 2b adds approve, return, record check and mark sent. */
+  /** "category"; and AP's steps: "approve", "return", "void" (a written check or bill pay payment, voided by a return), "check" (recorded) and "sent". */
   action: string;
   /** The signed-in AP member's address. */
   by: string;

@@ -24,7 +24,7 @@ const DONE: Record<string, string> = {
   approve: "Approved.",
   return: "Returned. The requester has an email with your note and a link to fix it; you're copied.",
   record: "Recorded. It's Check written until it goes out: then use Mark sent.",
-  paid: "Recorded and marked sent, so it's Paid. The requester has an email saying so.",
+  paid: "Recorded and marked sent today, so it's Paid. The requester has an email saying so.",
   sent: "Marked sent, so it's Paid. The requester has an email saying so.",
 };
 
@@ -35,10 +35,12 @@ const PROBLEMS: Record<string, string> = {
   status: "That can't be done now: the request has moved on since the page loaded. It shows where it stands now.",
   busy: "Someone else is working on this request right now. Try again in a minute.",
   note: "Write a note saying what needs to change (up to 1,000 characters).",
+  cancel: "Cancel the bill pay payment at the bank first, then tick the box to say you have.",
   category: "Set the budget category first.",
   "check-number": "Enter the number (up to 40 characters).",
   date: "Enter the date.",
   future: "That date is in the future.",
+  "before-signed": "That's before the request was signed. Check the year.",
   "before-check": "It can't have gone out before the check's date.",
   unknown: "That step isn't one the dashboard knows.",
   failed: "Something went wrong, and nothing was saved. Please try again in a minute.",

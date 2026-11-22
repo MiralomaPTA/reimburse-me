@@ -7,6 +7,7 @@ import { lockTiming } from "@/server/requests/lock";
 import { resubmitRequest } from "@/server/requests/resubmit";
 import type { StoredRequest } from "@/server/requests/stored";
 import { submitRequest } from "@/server/requests/submit";
+import { formatIsoDate } from "@/lib/dates";
 import { apRow, jpeg, ME, request, session, teacher, world } from "./support";
 
 const AP = "treasurer@example.org";
@@ -29,7 +30,7 @@ afterEach(() => {
 /** One request from Pat, with AP's category set: a check for the staff mailbox unless `extra` says otherwise. */
 function setup(extra: Partial<RequestRow> = {}) {
   const w = world();
-  w.log.rows.push(apRow({ requester_email: ME, payee_name: "Pat Teacher", reimbursement_claimed: "45.00", check_delivery: "mailbox", budget_category: "Supplies", ...extra }));
+  w.log.rows.push(apRow({ requester_email: ME, payee_name: "Pat Teacher", reimbursement_claimed: "45.00", check_delivery: "mailbox", budget_category: "Supplies", request_file_id: "json-0", ...extra }));
   const row = () => w.log.rows[0];
   const by = { requestId: "FY27-001", by: AP, now: NOW };
   return { ...w, row, by };
@@ -82,6 +83,16 @@ describe("Approve", () => {
     expect(actions.records).toEqual([]);
   });
 
+  it("goes through once when posted twice at the same moment", async () => {
+    const { by, adapters, row, actions } = setup();
+    const results = await Promise.allSettled([approveRequest(by, adapters), approveRequest(by, adapters)]);
+    expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const refusal = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(["busy", "status"]).toContain((refusal.reason as ApActionError).problem);
+    expect(row()).toMatchObject({ status: "Approved", lock: "" });
+    expect(actions.records).toHaveLength(1);
+  });
+
   it("says busy while someone else holds the request", async () => {
     const { by, adapters } = setup({ lock: `${new Date(Date.now() + 60_000).toISOString()} someone` });
     await expect(approveRequest(by, adapters)).rejects.toEqual(refused("busy"));
@@ -110,7 +121,17 @@ describe("Return with a note", () => {
     expect(mail.text).toContain(note);
     expect(mail.text).toContain(`${LINK_BASE}/requests/FY27-001/fix`);
     expect(mail.text).toContain("comes straight back to the PTA");
+    expect(mail.text).toContain("the PTA's accounts payable team sent your request FY27-001 back");
+    expect(mail.text).not.toContain(AP);
     expect(mail.text).not.toContain("voided");
+  });
+
+  it("asks for a new request when this one is too old to fix and sign again", async () => {
+    const { by, adapters, mailer } = setup({ request_file_id: "" });
+    await returnRequest({ ...by, note, linkBase: LINK_BASE }, adapters);
+    expect(mailer.sent[0].text).toContain("start a new request with the change");
+    expect(mailer.sent[0].text).toContain(`${LINK_BASE}/requests/new`);
+    expect(mailer.sent[0].text).not.toContain("/fix");
   });
 
   it("voids a check already written: the number leaves the row and stays in the history", async () => {
@@ -122,6 +143,24 @@ describe("Return with a note", () => {
       ["return", note],
     ]);
     expect(mailer.sent[0].text).toContain("voided and won't be sent");
+  });
+
+  it("keeps a voided check's number in the row's notes when the Actions tab doesn't take it", async () => {
+    const { by, adapters, row } = setup({ status: "Check written", check_number: "1043", check_date: "2026-11-20" });
+    adapters.actions = { append: async () => Promise.reject(new Error("Sheets refused")), listFor: async () => [] };
+    await returnRequest({ ...by, note, linkBase: LINK_BASE }, adapters);
+    expect(row()).toMatchObject({ status: "Returned", check_number: "" });
+    expect(row().notes).toContain(`Voided check #1043, dated Nov 20, 2026 (by ${AP})`);
+  });
+
+  it("returns a bill pay payment only once AP says it's cancelled at the bank", async () => {
+    const billPay = { status: "Check written", check_number: "4821", check_date: "2026-11-20", check_delivery: "mail", signers_step: "Signed" } as const;
+    const { by, adapters, row, actions, mailer } = setup(billPay);
+    await expect(returnRequest({ ...by, note, linkBase: LINK_BASE }, adapters)).rejects.toEqual(refused("cancel"));
+    expect(row().status).toBe("Check written");
+    await returnRequest({ ...by, note, linkBase: LINK_BASE, cancelledAtBank: true }, adapters);
+    expect(actions.records[0]).toMatchObject({ action: "void", note: "bill pay confirmation 4821, set up Nov 20, 2026, cancelled at the bank" });
+    expect(mailer.sent[0].text).toContain("The payment the PTA set up with its bank has been cancelled.");
   });
 
   it("tells the requester who signs the new version: the chair who signed this one, and the check signers for bill pay", async () => {
@@ -149,6 +188,8 @@ describe("Record check and Mark sent", () => {
     await expect(recordPayment({ ...by, ...check, checkNumber: "  " }, adapters)).rejects.toEqual(refused("check-number"));
     await expect(recordPayment({ ...by, ...check, checkDate: "2026-11-31" }, adapters)).rejects.toEqual(refused("date"));
     await expect(recordPayment({ ...by, ...check, checkDate: "11/20/2026" }, adapters)).rejects.toEqual(refused("date"));
+    // A mistyped year: before the request was signed (Nov 1, 2026).
+    await expect(recordPayment({ ...by, ...check, checkDate: "2025-11-20" }, adapters)).rejects.toEqual(refused("before-signed"));
     await expect(recordPayment({ ...by, ...check, checkDate: "2026-11-22" }, adapters)).rejects.toEqual(refused("future"));
     // At 7 PM in San Francisco it's already Nov 22 in UTC, but still Nov 21 here.
     const evening = new Date("2026-11-22T03:00:00.000Z");
@@ -177,12 +218,16 @@ describe("Record check and Mark sent", () => {
     expect(mail.text).toContain("Your check #1043 for $45.00 went to your staff mailbox on Nov 21, 2026.");
   });
 
-  it("does both at once when the check is already signed and sent", async () => {
+  it("does both at once when the check is already signed and sent, as of today", async () => {
     const { by, adapters, row, actions, mailer } = setup({ check_delivery: "pickup" });
     await recordPayment({ ...by, ...check, sent: true }, adapters);
-    expect(row()).toMatchObject({ status: "Paid", check_number: "1043", check_date: "2026-11-20", paid_date: "2026-11-20", paid_by: AP });
-    expect(actions.records.map((r) => r.action)).toEqual(["check", "sent"]);
-    expect(mailer.sent[0].text).toContain("Your check #1043 for $45.00 is ready for pickup from the PTA, as of Nov 20, 2026. Reply to this email to arrange when to collect it.");
+    // Dated Nov 20, it went out today, Nov 21.
+    expect(row()).toMatchObject({ status: "Paid", check_number: "1043", check_date: "2026-11-20", paid_date: "2026-11-21", paid_by: AP });
+    expect(actions.records.map((r) => [r.action, r.note])).toEqual([
+      ["check", "check #1043, dated Nov 20, 2026"],
+      ["sent", "on Nov 21, 2026"],
+    ]);
+    expect(mailer.sent[0].text).toContain("Your check #1043 for $45.00 is ready for pickup from the PTA, as of Nov 21, 2026. Reply to this email to arrange when to collect it.");
   });
 
   describe("for a check mailed by bill pay", () => {
@@ -206,14 +251,17 @@ describe("Record check and Mark sent", () => {
       const { by, adapters, actions, mailer } = mailed(stored());
       await recordPayment({ ...by, checkNumber: "4821", checkDate: "2026-11-20", sent: true }, adapters);
       expect(actions.records[0].note).toBe("bill pay confirmation 4821, set up Nov 20, 2026");
-      expect(mailer.sent[0].text).toContain("The PTA's bank mailed your check for $10.00 to 123 Main St Apt 4, San Francisco, CA 94127 on Nov 20, 2026, confirmation 4821.");
+      expect(mailer.sent[0].subject).toBe("Paid: your PTA reimbursement request FY27-001 ($10.00)");
+      expect(mailer.sent[0].text).toContain("The PTA's bank mailed your check for $10.00 to 123 Main St Apt 4, San Francisco, CA 94127 on Nov 21, 2026, confirmation 4821.");
       expect(mailer.sent[0].text).not.toContain("Elsewhere");
     });
 
-    it("leaves the address out when the saved request doesn't match the signed packet", async () => {
+    it("leaves the address and amount out when the saved request doesn't match the signed packet, rather than give the Sheet's", async () => {
       const { by, adapters, mailer } = mailed(stored({ requestId: "FY27-002" }));
       await recordPayment({ ...by, checkNumber: "4821", checkDate: "2026-11-20", sent: true }, adapters);
-      expect(mailer.sent[0].text).toContain("The PTA's bank mailed your check for $45.00 on Nov 20, 2026, confirmation 4821.");
+      expect(mailer.sent[0].subject).toBe("Paid: your PTA reimbursement request FY27-001");
+      expect(mailer.sent[0].text).toContain("The PTA's bank mailed your check on Nov 21, 2026, confirmation 4821.");
+      expect(mailer.sent[0].text).not.toContain("$45.00");
     });
   });
 
@@ -233,10 +281,11 @@ describe("a new version starts AP's steps over", () => {
     w.files.add("r1", ME, await jpeg());
     const signed = { signature: { type: "typed" as const, name: "Pat Teacher" }, session: session(teacher), ip: "127.0.0.1", userAgent: "vitest", linkBase: LINK_BASE };
     const { requestId } = await submitRequest({ ...signed, request: request(["r1"]) }, w.adapters);
-    const by = { requestId, by: AP, now: NOW };
+    // Submitted just now, so AP acts just now too: a check can't be dated before the request was signed.
+    const by = { requestId, by: AP };
     await w.log.update(requestId, { budget_category: "Supplies" });
     await approveRequest(by, w.adapters);
-    await recordPayment({ ...by, checkNumber: "1043", checkDate: "2026-11-20", sent: false }, w.adapters);
+    await recordPayment({ ...by, checkNumber: "1043", checkDate: formatIsoDate(new Date()), sent: false }, w.adapters);
     await returnRequest({ ...by, note: "Wrong amount on line 1.", linkBase: LINK_BASE }, w.adapters);
 
     await resubmitRequest({ ...signed, requestId, version: 1, request: { ...request(["r1"]), purpose: "Art supplies, corrected" } }, w.adapters);

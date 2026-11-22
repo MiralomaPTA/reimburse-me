@@ -50,6 +50,9 @@ export function mailedBeforeBillPay(row: RequestRow): boolean {
   return row.check_delivery === "mail" && billPayCells.every((cell) => !String(cell ?? "").trim());
 }
 
+/** Paid through the bank's bill pay: a mailed check from since bill pay began. A check mailed before then was a paper check. */
+export const paidByBillPay = (row: RequestRow) => row.check_delivery === "mail" && !mailedBeforeBillPay(row);
+
 /** The mailed check's address and amount as signed, or why they can't be shown; null for a request that isn't mailed. */
 export async function mailedCheck(row: RequestRow, files: FileStore): Promise<MailedCheck | null> {
   if (row.check_delivery !== "mail") return null;

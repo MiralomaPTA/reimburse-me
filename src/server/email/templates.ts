@@ -602,27 +602,37 @@ export function apReturnedEmail(input: {
   version: number;
   payeeName: string;
   amountCents: number;
-  apEmail: string;
   note: string;
   linkBase: string;
   chairEvent: string;
   mailed: boolean;
-  /** A check was written for this version: it won't be sent. */
+  /** A check was written (or a bill pay payment set up) for this version: it won't be sent. */
   voided: boolean;
+  /** Whether the request can be fixed and re-signed: one from before the portal kept its JSON can't, and the requester starts a new one. */
+  canFix: boolean;
 }): { subject: string; text: string } {
   const signers = [input.chairEvent ? `the ${input.chairEvent} chair` : "", input.mailed ? "two of the PTA's check signers" : ""].filter(Boolean);
   const next = signers.length ? `The new version goes to ${signers.join(" and then ")} to sign again, then back to the PTA.` : "The new version comes straight back to the PTA.";
+  const voided = input.mailed ? "The payment the PTA set up with its bank has been cancelled." : "The check written for it has been voided and won't be sent.";
+  const whatNext = input.canFix
+    ? [
+        `What to do next: open the request and tap "Fix and re-sign". The form opens filled in as you signed it, receipts included. Make the change, check it over and sign again. ${next}`,
+        `Fix it here: ${fixLink(input.linkBase, input.requestId)}`,
+      ]
+    : [
+        `What to do next: start a new request with the change. This one was made before the portal kept a copy it can fill the form in from, so it can't be fixed and signed again.`,
+        `Start one here: ${input.linkBase}/requests/new`,
+      ];
   return {
     subject: `Sent back: your PTA reimbursement request ${idLabel(input.requestId, input.version)} (${formatMoney(input.amountCents)})`,
     text: [
-      `${input.payeeName}, the PTA's accounts payable team (${input.apEmail}) sent your request ${input.requestId} back before paying it.`,
-      ...(input.voided ? ["", "The check written for it has been voided and won't be sent."] : []),
+      `${input.payeeName}, the PTA's accounts payable team sent your request ${input.requestId} back before paying it.`,
+      ...(input.voided ? ["", voided] : []),
       "",
       "Their note:",
       input.note,
       "",
-      `What to do next: open the request and tap "Fix and re-sign". The form opens filled in as you signed it, receipts included. Make the change, check it over and sign again. ${next}`,
-      `Fix it here: ${fixLink(input.linkBase, input.requestId)}`,
+      ...whatNext,
       "",
       `Questions? Reply to this email; it goes to the PTA's accounts payable team (${config.apEmail}), who are copied.`,
     ].join("\n"),
@@ -638,18 +648,20 @@ export type PaidHow = "mailbox" | "pickup" | "bill pay" | "mailed";
  * page both say it. `amount` is left out when blank.
  */
 export function paidLine(input: { how: PaidHow; checkNumber: string; paidDate: string; amount?: string; address?: string }): string {
-  const day = formatDay(input.paidDate);
+  // A Paid status typed into the Sheet may have a check number and no date.
+  const on = String(input.paidDate ?? "").trim() ? ` on ${formatDay(input.paidDate)}` : "";
+  const asOf = on ? `, as of ${formatDay(input.paidDate)}` : "";
   const forAmount = input.amount ? ` for ${input.amount}` : "";
   const check = input.checkNumber ? `Your check #${input.checkNumber}${forAmount}` : `Your check${forAmount}`;
   switch (input.how) {
     case "mailbox":
-      return `${check} went to your staff mailbox on ${day}.`;
+      return `${check} went to your staff mailbox${on}.`;
     case "pickup":
-      return `${check} is ready for pickup from the PTA, as of ${day}.`;
+      return `${check} is ready for pickup from the PTA${asOf}.`;
     case "bill pay":
-      return `The PTA's bank mailed your check${forAmount}${input.address ? ` to ${input.address}` : ""} on ${day}${input.checkNumber ? `, confirmation ${input.checkNumber}` : ""}.`;
+      return `The PTA's bank mailed your check${forAmount}${input.address ? ` to ${input.address}` : ""}${on}${input.checkNumber ? `, confirmation ${input.checkNumber}` : ""}.`;
     case "mailed":
-      return `${check} was mailed to you on ${day}.`;
+      return `${check} was mailed to you${on}.`;
   }
 }
 
@@ -662,7 +674,8 @@ export function paidEmail(input: {
   requestId: string;
   version: number;
   payeeName: string;
-  amountCents: number;
+  /** Null when it can't be given: a bill pay payment whose JSON couldn't be checked. */
+  amountCents: number | null;
   how: PaidHow;
   /** The check number, or bill pay's confirmation. */
   checkNumber: string;
@@ -670,10 +683,10 @@ export function paidEmail(input: {
   paidDate: string;
   address?: string;
 }): { subject: string; text: string } {
-  const amount = formatMoney(input.amountCents);
+  const amount = input.amountCents === null ? undefined : formatMoney(input.amountCents);
   const what = paidLine({ ...input, amount }) + (input.how === "pickup" ? " Reply to this email to arrange when to collect it." : "");
   return {
-    subject: `Paid: your PTA reimbursement request ${idLabel(input.requestId, input.version)} (${amount})`,
+    subject: `Paid: your PTA reimbursement request ${idLabel(input.requestId, input.version)}${amount ? ` (${amount})` : ""}`,
     text: [`${input.payeeName}, your request ${input.requestId} has been paid.`, "", what, "", `Questions? Reply to this email; it goes to the PTA's accounts payable team (${config.apEmail}).`].join("\n"),
   };
 }

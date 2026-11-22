@@ -17,6 +17,8 @@ import {
   UNCATEGORIZED,
 } from "@/server/ap/dashboard";
 import { mailedBeforeBillPay, mailedCheck, mailedChecks, mailedDifferences } from "@/server/ap/mailed";
+import { paidLine } from "@/server/email/templates";
+import { dayStart } from "@/lib/dates";
 import { sha256 } from "@/server/hash";
 import type { StoredRequest } from "@/server/requests/stored";
 import { apRow, MemoryFiles, request, world } from "./support";
@@ -73,6 +75,19 @@ describe("a request's age", () => {
     expect(matches(written, defaults)).toBe(true);
     expect(matches(written, parseFilters({ status: "Check written" }))).toBe(true);
     expect(matches(apRow(), parseFilters({ status: "Check written" }))).toBe(false);
+    // Awaiting signature is the paper checks: a bill pay payment at Check written already has both signatures.
+    const awaiting = parseFilters({ status: "awaiting-signature" });
+    expect(awaiting.status).toBe("awaiting-signature");
+    expect(matches(written, awaiting)).toBe(true);
+    expect(matches(apRow({ status: "Check written", check_delivery: "mail", signers_step: "Signed", request_file_id: "j1" }), awaiting)).toBe(false);
+  });
+
+  it("counts a check's age in Pacific days: one dated today is waiting since today, even after 4 PM", () => {
+    const evening = new Date("2026-11-20T01:00:00.000Z"); // Nov 19, 5 PM in San Francisco
+    expect(ageDays(apRow({ status: "Check written", check_date: "2026-11-19" }), evening)).toBe(0);
+    expect(dayStart("2026-11-19")?.toISOString()).toBe("2026-11-19T08:00:00.000Z");
+    expect(dayStart("2026-07-01")?.toISOString()).toBe("2026-07-01T07:00:00.000Z");
+    expect(dayStart("11/19/2026")).toBeNull();
   });
 
   it("is blank once Paid, and counts a status typed by hand from reaching AP", () => {
@@ -247,6 +262,14 @@ describe("a mailed check on the dashboard", () => {
     expect(differences[1]).toContain("$10.00");
     expect(differences[2]).toContain("version 2");
     expect(mailedDifferences(row({ reimbursement_claimed: "ten" }), stored())[0]).toContain('"ten"');
+  });
+});
+
+describe("where a paid check went, in the requester's words", () => {
+  it("leaves out the day when the Sheet has none", () => {
+    expect(paidLine({ how: "mailbox", checkNumber: "1043", paidDate: "" })).toBe("Your check #1043 went to your staff mailbox.");
+    expect(paidLine({ how: "pickup", checkNumber: "1043", paidDate: "2026-11-21" })).toBe("Your check #1043 is ready for pickup from the PTA, as of Nov 21, 2026.");
+    expect(paidLine({ how: "bill pay", checkNumber: "4821", paidDate: "" })).toBe("The PTA's bank mailed your check, confirmation 4821.");
   });
 });
 

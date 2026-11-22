@@ -55,6 +55,7 @@ import { GET as exportCsv } from "@/app/ap/export/route";
 import { POST as saveCategory } from "@/app/api/ap/[id]/category/route";
 import { POST as act } from "@/app/api/ap/[id]/action/route";
 import { lockTiming } from "@/server/requests/lock";
+import { formatIsoDate } from "@/lib/dates";
 import { apRow } from "./support";
 
 const bytes = (text: string) => new TextEncoder().encode(text);
@@ -200,7 +201,8 @@ describe("AP's steps", () => {
     h.mailFails = true;
     const response = await step({ action: "record", checkNumber: "1043", checkDate: "2026-11-01", sent: "1" });
     expect(location(response)).toBe("/ap/FY27-001?done=paid&emailed=0");
-    expect(h.rows[0]).toMatchObject({ status: "Paid", check_number: "1043", paid_date: "2026-11-01" });
+    // Dated Nov 1, and sent as of today.
+    expect(h.rows[0]).toMatchObject({ status: "Paid", check_number: "1043", check_date: "2026-11-01", paid_date: formatIsoDate(new Date()) });
   });
 
   it("come back with a problem code when refused, and change nothing", async () => {

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getAdapters } from "@/server/adapters";
 import { requireApSession } from "@/server/ap/access";
-import { ageDays, filtersQuery, fiscalYears, formatAge, matches, oldestFirst, parseFilters, STATUSES } from "@/server/ap/dashboard";
+import { ageDays, AWAITING_SIGNATURE, awaitingSignature, filtersQuery, fiscalYears, formatAge, matches, oldestFirst, parseFilters, STATUSES } from "@/server/ap/dashboard";
 import { paidByBillPay } from "@/server/ap/actions";
 import { mailedChecks, type MailedCheck } from "@/server/ap/mailed";
 import type { RequestRow } from "@/server/adapters/types";
@@ -25,8 +25,8 @@ export default async function ApPage(props: PageProps<"/ap">) {
   const now = new Date();
   // A mailed check's address comes from what was signed, never the Sheet, so the unpaid ones on the list are read from Drive.
   const mailed = await mailedChecks(rows, files);
-  // The co-signer's to-do list: checks written but not yet sent.
-  const awaitingSignature = all.filter((row) => row.status === "Check written").length;
+  // The co-signer's to-do list: paper checks written and waiting for their second signature.
+  const toSign = all.filter(awaitingSignature).length;
   const claimedCents = rows.reduce((sum, row) => sum + (parseMoney(String(row.reimbursement_claimed ?? "")) ?? 0), 0);
   const query = filtersQuery(filters);
 
@@ -48,9 +48,10 @@ export default async function ApPage(props: PageProps<"/ap">) {
             <option value="">With AP</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status === "Check written" ? "Check written: awaiting signature" : status}
+                {status}
               </option>
             ))}
+            <option value={AWAITING_SIGNATURE}>Awaiting signature (paper checks written)</option>
             <option value="all">Everything</option>
           </select>
         </div>
@@ -84,11 +85,11 @@ export default async function ApPage(props: PageProps<"/ap">) {
 
       <p className="text-sm text-neutral-600">
         {rows.length === 1 ? "1 request" : `${rows.length} requests`}, {formatMoney(claimedCents)} claimed. Oldest first.
-        {awaitingSignature > 0 && filters.status !== "Check written" && (
+        {toSign > 0 && filters.status !== AWAITING_SIGNATURE && (
           <>
             {" "}
-            <Link href="/ap?status=Check+written" className="font-medium text-sky-800 underline">
-              {awaitingSignature === 1 ? "1 check is" : `${awaitingSignature} checks are`} awaiting the second signature
+            <Link href={`/ap?status=${AWAITING_SIGNATURE}`} className="font-medium text-sky-800 underline">
+              {toSign === 1 ? "1 check is" : `${toSign} checks are`} awaiting the second signature
             </Link>
             .
           </>

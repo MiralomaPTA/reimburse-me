@@ -4,8 +4,8 @@ import { versionOf } from "@/server/requests/rows";
 /**
  * The bookkeeping export: one row per request (its latest version), in UTF-8
  * with a byte-order mark so Excel opens it cleanly. `check_date`,
- * `approved_by` and `paid_by` come with Phase 2b; until then they're blank,
- * so the columns don't move when they arrive.
+ * `approved_by` and `paid_by` are AP's steps (Phase 2b), blank until they
+ * happen.
  */
 export const CSV_COLUMNS = [
   "request_id",

@@ -42,6 +42,19 @@ export function formatDay(value: string | null | undefined): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
+/** When a calendar day "2026-11-20" begins in Pacific time (08:00 UTC, or 07:00 in daylight time), or null when it isn't one. */
+export function dayStart(value: string | null | undefined): Date | null {
+  const day = parseDay(value);
+  if (!day) return null;
+  const [y, m, d] = day.split("-").map(Number);
+  const hour = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", hourCycle: "h23" });
+  for (const utcHour of [7, 8]) {
+    const at = new Date(Date.UTC(y, m - 1, d, utcHour));
+    if (formatIsoDate(at) === day && Number(hour.format(at)) === 0) return at;
+  }
+  return new Date(Date.UTC(y, m - 1, d, 8));
+}
+
 /** 2026-11-15, the date in Pacific time: for file names. */
 export function formatIsoDate(date: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);

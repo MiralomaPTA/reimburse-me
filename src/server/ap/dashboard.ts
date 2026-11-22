@@ -1,7 +1,8 @@
 import type { CategoryRow, RequestRow, RequestStatus } from "@/server/adapters/types";
 import { returnedAtOf, returnSource } from "@/server/requests/resubmit";
-import { parseDate } from "@/lib/dates";
+import { dayStart, parseDate } from "@/lib/dates";
 import { squash } from "@/lib/mailing";
+import { paidByBillPay } from "@/server/ap/mailed";
 
 /**
  * The AP dashboard's view of the request log (Phase 2a): who may see it, how
@@ -50,7 +51,8 @@ export function ageFrom(row: RequestRow): Date | null {
     case "Returned":
       return parseDate(returnedAtOf(row));
     case "Check written":
-      return parseDate(row.check_date) ?? reachedApAt(row);
+      // The check's day as the PTA counts it, from midnight in San Francisco; a date typed into the Sheet as it reads.
+      return dayStart(row.check_date) ?? parseDate(row.check_date) ?? reachedApAt(row);
     case "Awaiting chair":
       return parseDate(row.chair_sent_at) ?? parseDate(row.submitted_at);
     case "Awaiting signers":
@@ -72,11 +74,15 @@ export function formatAge(days: number | null): string {
   return days === 1 ? "1 day" : `${days} days`;
 }
 
+/** The co-signer's to-do list: paper checks written and waiting for their second signature. A bill pay payment at Check written has both signatures already; it's waiting for the bank. */
+export const AWAITING_SIGNATURE = "awaiting-signature";
+export const awaitingSignature = (row: RequestRow) => row.status === "Check written" && !paidByBillPay(row);
+
 /**
  * The list's filters, from the page's query string. `status` is "" for the
- * default view (everything with AP, not Paid unless `paid`), "all", or one
- * status. `fy` is "FY27" or "" for every year. `q` searches the name, email,
- * purpose and request ID.
+ * default view (everything with AP, not Paid unless `paid`), "all",
+ * `AWAITING_SIGNATURE`, or one status. `fy` is "FY27" or "" for every year.
+ * `q` searches the name, email, purpose and request ID.
  */
 export interface DashboardFilters {
   status: string;
@@ -92,7 +98,7 @@ export function parseFilters(query: Query): DashboardFilters {
   const status = one(query.status);
   const fy = one(query.fy).toUpperCase();
   return {
-    status: status === "all" || STATUSES.includes(status as RequestStatus) ? status : "",
+    status: status === "all" || status === AWAITING_SIGNATURE || STATUSES.includes(status as RequestStatus) ? status : "",
     fy: /^FY\d{2}$/.test(fy) ? fy : "",
     q: one(query.q).trim().slice(0, 100),
     paid: one(query.paid) === "1",
@@ -113,6 +119,8 @@ export function matches(row: RequestRow, filters: DashboardFilters): boolean {
   if (filters.status === "") {
     if (BEFORE_AP.includes(row.status)) return false;
     if (row.status === "Paid" && !filters.paid) return false;
+  } else if (filters.status === AWAITING_SIGNATURE) {
+    if (!awaitingSignature(row)) return false;
   } else if (filters.status !== "all" && row.status !== filters.status) return false;
   if (filters.fy && !row.request_id.toUpperCase().startsWith(`${filters.fy}-`)) return false;
   if (filters.q) {

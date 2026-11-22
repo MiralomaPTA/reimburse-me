@@ -35,7 +35,7 @@ export async function POST(request: NextRequest, ctx: RouteContext<"/api/ap/[id]
         break;
       case "return":
         done = "return";
-        result = await returnRequest({ ...input, note: field("note"), linkBase: linkBase(request) }, adapters);
+        result = await returnRequest({ ...input, note: field("note"), cancelledAtBank: field("cancelled") === "1", linkBase: linkBase(request) }, adapters);
         break;
       case "record": {
         const sent = field("sent") === "1";

@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import type { RequestRow } from "@/server/adapters/types";
 import { availableActions, CHECK_NUMBER_MAX, isOwnRequest, NOTE_MAX, paidByBillPay, paidHow } from "@/server/ap/actions";
-import { formatDay, formatIsoDate } from "@/lib/dates";
+import { formatDay, formatIsoDate, parseDate, parseDay } from "@/lib/dates";
+import { OnceForm } from "@/components/OnceForm";
 
 /**
- * AP's steps on one request (Phase 2b): plain forms that post and come back to
- * the page, so they work on a phone without waiting for scripts. Approve is
- * one tap. Record, mark sent and return open a short form each.
+ * AP's steps on one request (Phase 2b): forms that post and come back to the
+ * page, which work on a phone before scripts load, and post once when tapped
+ * twice. Approve is one tap. Record, mark sent and return open a short form
+ * each.
  */
 export function ActionPanel({ row, email }: { row: RequestRow; email: string }) {
   const actions = availableActions(row, email);
@@ -16,6 +18,9 @@ export function ActionPanel({ row, email }: { row: RequestRow; email: string }) 
   const how = paidHow(row);
   const hasCategory = Boolean(String(row.budget_category ?? "").trim());
   const payment = billPay ? `bill pay confirmation ${row.check_number}` : `check #${row.check_number}`;
+  // A check can't be dated before the request was signed.
+  const signed = parseDate(row.submitted_at);
+  const signedDay = signed ? formatIsoDate(signed) : undefined;
 
   if (isOwnRequest(row, email)) {
     return <Panel>This is your own request, so another AP member must approve, return or pay it.</Panel>;
@@ -33,13 +38,12 @@ export function ActionPanel({ row, email }: { row: RequestRow; email: string }) 
       )}
 
       {actions.includes("approve") && (
-        <form action={action} method="post" className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <input type="hidden" name="action" value="approve" />
-          <button type="submit" className="btn-primary">
-            Approve
-          </button>
-          <span className="text-sm text-neutral-600">Optional: you&apos;ve checked it and will pay it. Nobody is emailed.</span>
-        </form>
+        <div className="space-y-1">
+          <OnceForm action={action} label="Approve" busyLabel="Approving…">
+            <input type="hidden" name="action" value="approve" />
+          </OnceForm>
+          <p className="text-sm text-neutral-600">Optional: you&apos;ve checked it and will pay it. Nobody is emailed.</p>
+        </div>
       )}
 
       {actions.includes("record") && (
@@ -48,7 +52,7 @@ export function ActionPanel({ row, email }: { row: RequestRow; email: string }) 
           {!hasCategory ? (
             <p className="mt-2 text-sm font-medium text-amber-900">Set the budget category above first.</p>
           ) : (
-            <form action={action} method="post" className="mt-3 space-y-3">
+            <OnceForm action={action} label={billPay ? "Record bill pay" : "Record check"} busyLabel="Recording…" className="mt-3 space-y-3">
               <input type="hidden" name="action" value="record" />
               {billPay && <p className="text-sm text-neutral-700">Pay only to the address and amount on the signed FO10.</p>}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -62,17 +66,14 @@ export function ActionPanel({ row, email }: { row: RequestRow; email: string }) 
                   <label htmlFor="checkDate" className="label">
                     {billPay ? "Day the payment was set up" : "Date on the check"}
                   </label>
-                  <input id="checkDate" name="checkDate" type="date" required defaultValue={today} max={today} className="field" />
+                  <input id="checkDate" name="checkDate" type="date" required defaultValue={today} min={signedDay} max={today} className="field" />
                 </div>
               </div>
               <label className="flex items-start gap-2 text-sm text-neutral-700">
                 <input type="checkbox" name="sent" value="1" className="mt-1" />
-                <span>{SENT_NOW[how]} That makes it Paid now and emails the requester.</span>
+                <span>{SENT_NOW[how]} That makes it Paid today and emails the requester.</span>
               </label>
-              <button type="submit" className="btn-primary">
-                {billPay ? "Record bill pay" : "Record check"}
-              </button>
-            </form>
+            </OnceForm>
           )}
         </details>
       )}
@@ -80,42 +81,42 @@ export function ActionPanel({ row, email }: { row: RequestRow; email: string }) 
       {actions.includes("sent") && (
         <details className="rounded-md border border-neutral-200 p-3" open>
           <summary className="cursor-pointer font-medium">Mark sent</summary>
-          <form action={action} method="post" className="mt-3 space-y-3">
+          <OnceForm action={action} label="Mark sent" busyLabel="Marking it sent…" className="mt-3 space-y-3">
             <input type="hidden" name="action" value="sent" />
             <p className="text-sm text-neutral-700">{WHERE_IT_GOES[how]} Marking it sent makes it Paid and emails the requester.</p>
             <div className="sm:w-1/2">
               <label htmlFor="paidDate" className="label">
                 Day it went out
               </label>
-              <input id="paidDate" name="paidDate" type="date" required defaultValue={today} max={today} className="field" />
+              <input id="paidDate" name="paidDate" type="date" required defaultValue={today} min={parseDay(row.check_date) ?? undefined} max={today} className="field" />
             </div>
-            <button type="submit" className="btn-primary">
-              Mark sent
-            </button>
-          </form>
+          </OnceForm>
         </details>
       )}
 
       {actions.includes("return") && (
         <details className="rounded-md border border-neutral-200 p-3">
           <summary className="cursor-pointer font-medium">Return with a note</summary>
-          <form action={action} method="post" className="mt-3 space-y-3">
+          <OnceForm action={action} label="Return to the requester" busyLabel="Returning…" buttonClassName="btn-secondary" className="mt-3 space-y-3">
             <input type="hidden" name="action" value="return" />
-            {row.status === "Check written" && (
-              <p className="rounded-md bg-amber-50 p-2 text-sm font-medium text-amber-900">
-                {billPay ? `Cancel the bill pay payment (confirmation ${row.check_number}) at the bank first.` : `This voids check #${row.check_number}: don't send it.`} The
-                number stays in the history.
-              </p>
+            {row.status === "Check written" && !billPay && (
+              <p className="rounded-md bg-amber-50 p-2 text-sm font-medium text-amber-900">This voids check #{row.check_number}: don&apos;t send it. The number stays in the history.</p>
+            )}
+            {row.status === "Check written" && billPay && (
+              <label className="flex items-start gap-2 rounded-md bg-amber-50 p-2 text-sm font-medium text-amber-900">
+                <input type="checkbox" name="cancelled" value="1" required className="mt-1" />
+                <span>I&apos;ve cancelled the bill pay payment (confirmation {row.check_number}) at the bank, so it won&apos;t be mailed.</span>
+              </label>
             )}
             <label htmlFor="note" className="label">
               What needs to change
             </label>
             <textarea id="note" name="note" required maxLength={NOTE_MAX} rows={3} className="field" />
-            <p className="text-sm text-neutral-600">The requester gets this note by email, with a link to fix the request and sign it again. You&apos;re copied.</p>
-            <button type="submit" className="btn-secondary">
-              Return to the requester
-            </button>
-          </form>
+            <p className="text-sm text-neutral-600">
+              The requester gets this note by email,{" "}
+              {String(row.request_file_id ?? "").trim() ? "with a link to fix the request and sign it again" : "and is asked to start a new request, since this one is too old to fix and sign again"}. You&apos;re copied.
+            </p>
+          </OnceForm>
         </details>
       )}
     </div>
