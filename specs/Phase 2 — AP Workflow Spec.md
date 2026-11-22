@@ -54,7 +54,7 @@ A request is always in exactly one status. *Draft* from the main spec lives only
 | Approved | AP has reviewed it and will pay | AP | `approved_at`, `approved_by` | None *(default)* |
 | Returned | AP needs a change before paying | AP, note required. The event chair and the check signers can send a request back too, before it reaches AP (see their specs) | `returned_at`, `returned_by`, `returned_note` | Teacher: the note and a link to fix it |
 | Check written | The treasurer has written the check; it is waiting for the second signature. For a mailed check, AP has set up the bill pay payment and it is waiting for the bank to mail it (see the *Mailed Check — Spec*) | AP, check number (or bill pay confirmation) and date required | `check_number`, `check_date`, `check_written_by` | None. The teacher's request page shows "Check written, awaiting second signature", or "Payment set up" for bill pay |
-| Paid | Both signatures are on the check and it has gone out, to the staff mailbox or handed over at pickup | AP or the co-signer | `paid_date` (the date it went out), `paid_by` | Teacher: check number, date, and where the check went |
+| Paid | Both signatures are on the check and it has gone out: in the staff mailbox, ready for pickup, or mailed | AP or the co-signer | `paid_date` (the date it went out), `paid_by` | Teacher: check number, date, and where the check went |
 
 **Transitions**
 
@@ -190,12 +190,13 @@ Each has a default. The build follows it unless changed here.
 | 8 | Weekly digest | Monday 8 AM Pacific; requests not Paid and older than 7 days; skipped when empty |
 | 9 | Acting on your own request | Blocked for every action; another AP member must do it |
 | 10 | Undoing Paid | Admin edits the Sheet and writes a note; no Reopen button |
-| 12 | Who marks a check sent | Whoever puts it in the mailbox or hands it over at pickup. The co-signer may be given the `ap` role to do it right after signing |
+| 12 | Who marks a check sent | Whoever puts it in the mailbox, or has it ready for pickup: the Paid email tells the requester it's ready and asks them to reply to arrange a time (decided Nov 22). The co-signer may be given the `ap` role to do it right after signing |
 | 13 | Voiding a written check | Return it with a note; the check number stays in the Actions tab and the new check gets a new Record check entry |
 | 11 | VP/Chairman signature line | Answered: for a request for a PTA event, the event's chair signs it in the portal before the request reaches AP (*Event Chair Signature — Spec*). Otherwise it stays blank |
 
 ## Changes since v0.5
 
+- A pickup check is marked sent once it's signed by both and ready, not when it's handed over, so the Paid email ("ready for pickup… reply to arrange when to collect it") is what tells the requester (decided Nov 22).
 - A mailed check's bill pay payment waits at *Check written* until someone marks it sent, like a paper check, so the Paid email's date is the day it went out (decided Nov 22; see the *Mailed Check — Spec*). The **Awaiting signature** filter lists paper checks only.
 - 2b is built (Nov 22, PR #7). The build settled what this spec left open:
   - Each AP step takes the row's lock and checks the status again once it holds it, which is stricter than the "last-write-wins" in *AP dashboard*.
